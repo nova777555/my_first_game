@@ -194,6 +194,16 @@ class SoulCollectorTests(FixtureTestCase):
         s = GameState(buildings={"soul_synth": 2}, broken={"soul_synth": 1})
         self.assertEqual(engine.soul_collector_capacity(s, "soul_synth"), 1)
 
+    def test_capacity_zero_when_all_broken_even_with_upgrade(self):
+        s = GameState(buildings={"soul_synth": 1}, resources={"raw_a": 100, "test_soul": 1})
+        engine.insert_soul(s, "soul_synth", "test_soul")
+        engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_slot")
+        s.broken["soul_synth"] = 1
+        self.assertEqual(engine.soul_collector_capacity(s, "soul_synth"), 0)
+        with mock.patch("random.random", return_value=0.9):  # chance 0.5 fails
+            engine.advance_turn(s)
+        self.assertEqual(s.resources.get("raw_a", 0), 98)  # 100 - 2 (апгрейд); сломанный синтезатор не производит
+
     def test_insert_rejects_unaccepted_soul(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"raw_b": 1})
         result = engine.insert_soul(s, "soul_synth", "raw_b")

@@ -52,8 +52,9 @@ tools/content_validation.py    - validate(dict) -> [errors]; тоже НЕ им�
 
 Топ-уровень: `resources`, `locations`, `manual_actions`, `buildings`, `techs`,
 `mining_info`, `tools`, `energy_recipes`, `ui`, `time`, а также `mobs`, `skills`,
-`soul_recipes` (см. "Охота, навыки, синтезаторы душ" ниже) и `quests`/`loot_cases`
-(см. "Квестбук и лутбоксы" ниже).
+`soul_recipes` (см. "Охота, навыки, синтезаторы душ" ниже), `quests`/`loot_cases`
+(см. "Квестбук и лутбоксы" ниже) и `species`/`genetic_traits`/`mutations`/`genetics`
+(см. "Разведение существ (фермы, генетика)" ниже).
 
 Generic-поля построек (есть у ЛЮБОЙ постройки, не завязаны на конкретный id):
 `description` (обязательна, валидируется строго), `cost`/`produces`/`consumes`/
@@ -90,6 +91,7 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 | Дерево технологий, тиры лабораторий | `engine.py`: `tech_unlocks`, `tech_levels`, `lab_tier_capacity`, `research()`; `web_ui.html: renderTechTree/openTechTreeModal` |
 | Улучшения построек (типизированные + repeatable) | `engine.py`: `_apply_building_upgrades`, `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `purchase_building_upgrade`, `building_upgrade_prerequisite`, `effective_building_stats`; `web_ui.html: openBuildingUpgradesModal`; `content_editor.html: openBuildingUpgradesEditorModal` |
 | Охота: мобы/боссы, схватка, боевой навык | `engine.py`: `MOBS`, `COMBAT_SKILL_ID`, `search_mob_any`, `summon_boss`, `attack_encounter`, `abandon_encounter`, `_weapon_bonuses`; `state.active_encounter`; `web_ui.py: hunting_view`; `web_ui.html: renderActiveEncounterBlock` |
+| Разведение существ: фермы, скрещивание, генетика, синтез | `engine.py`: `GENOTYPE_TRAIT_IDS`, `MUTATIONS_BY_PAIR`, `trait_alleles`, `_cross_genotype`, `breed_creatures`, `spawn_creature`, `analyze_creature`, `synthesize_creature`, `_ensure_farm_instances`, `_process_habitat`; `state.creatures`/`state.farm_instances`/`state.known_alleles`; контент `species`/`genetic_traits`/`mutations`/`genetics`; `web_ui.html: renderFarmSection`, `renderCreatureBankSection`, `openSpeciesBookModal`, `openBreedingModal`, `openGeneticsLabModal` |
 | Навыки (generic-прокачка, любое число линеек) | `engine.py`: `skill_level`, `skill_level_effects`, `add_skill_xp`, `skills_view`; `state.skill_xp`; контент `skills`; `web_ui.html: openSkillsModal` |
 | Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: renderSoulCollector` |
 | Квестбук (вкладка-граф на каждую эру, requires между эрами гейтит без явного ребра) и лутбоксы (кейс = один приз из барабана) | `engine.py`: `is_quest_available`, `_condition_met`, `check_quests`, `_roll_loot_case_prize`, `claim_quest_reward`; `state.completed_quests`/`claimed_quests`; контент `quests` (`era`/`requires`) + `loot_cases`; `web_ui.html: openQuestsModal`/`renderQuestGraph`/`openLootBoxModal`; `content_editor.html: renderQuestGraphView` |
@@ -252,6 +254,85 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
   `produces_chance`), что `gain`/`gain_chance` ручного действия. `accepts` —
   просто список id ресурсов; "разные типы синтезаторов под разные души" —
   не отдельная механика, а просто две постройки с непересекающимися `accepts`.
+
+## Разведение существ (фермы, генетика)
+
+Отдельная подсистема (пасеки/фермы существ, менделевское наследование,
+мутации при скрещивании, генетическая лаборатория) — контент `species`
+(один вид = одна аллель признака `"species"`), `genetic_traits` (остальные 4
+признака: `lifespan`/`output_multiplier`/`active_period`/`environment`, общие
+для всех видов), `mutations` (рецепты скрещивания пар видов) и `genetics`
+(глобальные настройки: `synthesis_cost`, `environment_mutation_chance`).
+
+- **Особь** (`state.creatures[id]`) — генотип из 5 признаков
+  (`engine.GENOTYPE_TRAIT_IDS`), у каждого признака ПАРА аллелей (как в
+  реальной генетике: одна от каждого родителя). Выражается (фенотип) через
+  `creature_phenotype`/`_phenotype_allele` — при разногласии побеждает
+  доминантная аллель, а если обе доминантны или обе рецессивны — первая в
+  паре (детерминированно, порядок в паре сам по себе смысла не несёт кроме
+  этого правила). Дикая особь (пойманная, не выведенная) ГОМОЗИГОТНА по
+  построению на каждый признак (`_roll_wild_genotype`) — скрытых генов у
+  только что пойманной особи нет, разнообразие появляется только через
+  скрещивание/мутацию.
+- **Постройки-фермы** (`buildings.*.breeding_slots > 0`, напр. пасека) имеют
+  ИНДИВИДУАЛЬНЫЕ ЭКЗЕМПЛЯРЫ (`state.farm_instances[instance_id]`), НЕ единый
+  агрегат по типу — в отличие от большинства остальных построек в игре.
+  `state.buildings`/`state.broken` остаются авторитетным источником истины
+  (working_count/ремонт/поломка/достижения/requires_building всё ещё считают
+  по агрегату); `_ensure_farm_instances` идемпотентно ДОБИРАЕТ недостающие
+  экземпляры при каждом обращении (вызывается в начале `farms_view`/
+  `house_creature`/`purchase_farm_instance_upgrade`/`build`/`repair` и один раз
+  в начале `advance_turn`) — это одновременно и создание новой фермы после
+  `build()`, и ленивая миграция старых сохранений, где `state.farm_instances`
+  ещё пуст. У КАЖДОГО экземпляра свои купленные апгрейды
+  (`instance["upgrades"]`, не `state.building_upgrades[building_id]`) и свой
+  слот-лимит (`farm_instance_slot_capacity`) — апгрейд, купленный на одном
+  экземпляре, НЕ действует на другую копию той же постройки.
+- **Заселение** (`house_creature`/`release_creature`) не тратит ход (как
+  `insert_soul`/`toggle_autocraft`) — особь просто числится в
+  `creature["farm_instance_id"]` либо `None` (в "банке").
+  `_process_habitat` в `advance_turn` (ДО крафтов за энергию/автокрафта)
+  прогоняет только ЗАСЕЛЁННЫХ особей: `produces`/`consumes` её вида (как у
+  обычной постройки — нехватка `consumes` не убивает, просто нет продукции в
+  этот ход), домноженные на `output_multiplier` фенотипа и на апгрейд
+  `breeding_output` ИМЕННО этого экземпляра фермы. `active_period` фенотипа
+  работает как у построек — вне своего времени особь простаивает (не растит
+  `turns_alive`, не может умереть в этот ход). При достижении `lifespan`
+  (фенотип) особь умирает и удаляется из `state.creatures` целиком — ЕСЛИ у
+  экземпляра фермы нет апгрейда `breeding_immortality` (без него смертны ВСЕ
+  особи независимо от генотипа).
+- **Скрещивание** (`breed_creatures`/`_cross_genotype`) требует работающий
+  механизм-МЕХАНИЗМ (generic-поле `buildings.*.breeding_station`, НЕ хардкод
+  id — тот же принцип, что `energy_converter`/`genetics_lab`) — сама ферма
+  (пасека) в скрещивании не участвует, только расселяет уже готовых особей.
+  Признаки `lifespan`/`output_multiplier`/`active_period`/`environment` —
+  обычное менделевское расщепление (случайная аллель от каждого родителя
+  независимо, без сцепления между признаками); `environment` дополнительно
+  может ПОЛНОСТЬЮ переиграться заново с вероятностью
+  `genetics.environment_mutation_chance` — отдельная "мутация среды", не
+  связанная с мутацией вида. Признак `species` решается ОТДЕЛЬНО и ВСЕГДА
+  даёт чистокровного потомка (никогда не смесь): по `frozenset({вид_A,
+  вид_B})` (`MUTATIONS_BY_PAIR`) ищутся ОТКРЫТЫЕ (`requires_tech`/
+  `requires_building`) мутации, один общий `random.random()` размечает
+  отрезок `[0, 1)` — каждой мутации кусок `chance * _breeding_mutation_multiplier`,
+  остаток делится ПОПОЛАМ между чистокровными потомками родителя A и родителя
+  Б (а не всегда достаётся одному и тому же). Скрещивание списывает ОБОИХ
+  родителей целиком и ВСЕГДА бесплатно сверх этого; ребёнок добавляется в
+  банк НЕОПОЗНАННЫМ. Тратит ход.
+- **Опознание/синтез**: `analyze_creature` (не тратит ход, требует
+  `genetics_lab`) — ЕДИНСТВЕННЫЙ способ узнать полный генотип особи;
+  автоматического опознания по времени в ферме нет, неопознанная особь может
+  жить и производить "вслепую". `synthesize_creature` штампует гомозиготную
+  особь с ВЫБРАННЫМ игроком геномом мимо RNG за фиксированную
+  `genetics.synthesis_cost` — каждая выбранная аллель должна быть уже в
+  `state.known_alleles` (пополняется `analyze_creature`/при спавне уже
+  опознанной особи), иначе игрок мог бы синтезировать признак, который
+  никогда не видел.
+- Терминология UI: "Пасека" — постройка-ферма (примерный аналог Forestry из
+  Minecraft), "Книга видов" (`species_catalog_view`/`openSpeciesBookModal`) —
+  справочник ВСЕХ видов и рецептов скрещивания для них независимо от того,
+  встречал ли их игрок (в отличие от `known_alleles_view` — только уже
+  встреченные аллели).
 
 ## Квестбук и лутбоксы
 

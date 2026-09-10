@@ -1849,9 +1849,13 @@ def soul_collector_capacity(state: GameState, building_id: str) -> int:
     (buildings.*.soul_collector.slots) * число РАБОТАЮЩИХ копий, плюс АБСОЛЮТНАЯ
     добавка от сильнейшего купленного апгрейда типа soul_collector_slots (тот же
     принцип "сильнейшее побеждает", что у energy_converter_max_energy_per_turn -
-    см. _farm_upgrade_multiplier). 0, если постройка не синтезатор душ вовсе."""
+    см. _farm_upgrade_multiplier). 0, если постройка не синтезатор душ вовсе,
+    или если ВСЕ копии сломаны - бонус от апгрейда гейтится тем же working_count,
+    что и база, иначе сломанная постройка с уже купленным апгрейдом слотов
+    продолжала бы бесконечно производить ресурсы (см. _process_soul_collectors,
+    которая сама поломку не проверяет и полагается на capacity == 0)."""
     config = BUILDINGS.get(building_id, {}).get("soul_collector")
-    if not config:
+    if not config or working_count(state, building_id) <= 0:
         return 0
     base = config.get("slots", 0) * working_count(state, building_id)
     bonus = _farm_upgrade_multiplier(state, building_id, "soul_collector_slots", default=0)
