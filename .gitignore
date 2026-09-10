@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+save.json
+saves/
+dist/
+build/
+out.txt
+out2.txt
+out3.txt

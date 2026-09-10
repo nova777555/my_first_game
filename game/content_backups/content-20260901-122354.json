@@ -1,0 +1,1074 @@
+{
+  "resources": [
+    {
+      "id": "energy",
+      "name": "Энергия",
+      "icon": {
+        "grid": [
+          "..................BAAAAA",
+          "................BBBAAA..",
+          "...............BBADBAAA.",
+          ".............BBBAAAAA...",
+          ".............BACABB.....",
+          "............BBCCAA......",
+          "..........BBBAAAA.......",
+          ".........BBAAABA........",
+          ".........BAAAAA.........",
+          ".........BAAA...........",
+          "........BAAA............",
+          ".......BBDA.............",
+          "......AAAAABAAAAAAA.....",
+          ".......ACAAAAAADBAAAA...",
+          "........AAAAAAABACCAAA..",
+          "............BBBBCCBAA...",
+          "............BBBAAAA.....",
+          "............BBBAAA......",
+          "..........BBBBAAA.......",
+          "........BBBBBBAA........",
+          ".......BBBBBAA..........",
+          "......BBABDAA...........",
+          ".....BBACCAA............",
+          "....BAACCA.............."
+        ],
+        "palette": {
+          "B": "#f0a030",
+          "A": "#f4c430",
+          "D": "#8a5a34",
+          "C": "#e8e6df"
+        }
+      }
+    },
+    {
+      "id": "wood",
+      "name": "Дерево"
+    },
+    {
+      "id": "stone",
+      "name": "Камень"
+    },
+    {
+      "id": "planks",
+      "name": "Доски"
+    },
+    {
+      "id": "tools",
+      "name": "Инструменты"
+    },
+    {
+      "id": "charcoal",
+      "name": "Уголь"
+    },
+    {
+      "id": "ore",
+      "name": "Руда"
+    },
+    {
+      "id": "metal",
+      "name": "Металл"
+    },
+    {
+      "id": "uranium",
+      "name": "Уран"
+    }
+  ],
+  "locations": {
+    "forest": {
+      "name": "Лес",
+      "requires_tech": null,
+      "icon_label": "ЛС"
+    },
+    "shaft": {
+      "name": "Шахта",
+      "requires_tech": null,
+      "icon_label": "ША"
+    },
+    "workbench": {
+      "name": "Верстак",
+      "requires_tech": null,
+      "icon_label": "ВС"
+    }
+  },
+  "manual_actions": {
+    "gather_wood": {
+      "name": "Рубить дерево",
+      "requires_tech": null,
+      "location": "forest",
+      "cost": {},
+      "gain": {
+        "wood": 3
+      }
+    },
+    "gather_stone": {
+      "name": "Добывать камень",
+      "requires_tech": null,
+      "location": "shaft",
+      "cost": {},
+      "gain": {
+        "stone": 2
+      }
+    },
+    "craft_planks": {
+      "name": "Напилить досок вручную",
+      "requires_tech": null,
+      "location": "workbench",
+      "cost": {
+        "wood": 4
+      },
+      "gain": {
+        "planks": 1
+      }
+    },
+    "craft_tools": {
+      "name": "Сделать инструменты вручную",
+      "requires_tech": "toolmaking",
+      "location": "workbench",
+      "cost": {
+        "planks": 3,
+        "stone": 2
+      },
+      "gain": {
+        "tools": 1
+      }
+    },
+    "make_charcoal": {
+      "name": "Жечь уголь вручную",
+      "requires_tech": "charcoal_burning",
+      "location": "workbench",
+      "cost": {
+        "wood": 3
+      },
+      "gain": {
+        "charcoal": 1
+      }
+    },
+    "smelt_metal": {
+      "name": "Плавить металл вручную",
+      "requires_tech": "metallurgy",
+      "location": "workbench",
+      "cost": {
+        "ore": 2,
+        "charcoal": 1
+      },
+      "gain": {
+        "metal": 1
+      }
+    }
+  },
+  "buildings": {
+    "wood_generator": {
+      "name": "Дровяной генератор",
+      "description": "Простейший источник энергии - жжёт дрова, чтобы освободить руки от ручной рубки и запитать первые автоматические постройки.",
+      "requires_tech": null,
+      "cost": {
+        "stone": 8
+      },
+      "produces": {
+        "energy": 2
+      },
+      "consumes": {
+        "wood": 2
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "wood": 2
+      },
+      "icon_label": "ДГ",
+      "unlocks_autocraft": []
+    },
+    "solar_panel": {
+      "name": "Солнечная панель",
+      "description": "Даёт энергию бесплатно (не жжёт никакое сырьё), но только днём - ночью простаивает, поэтому без хранилища энергии смысла мало.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 15,
+        "stone": 5
+      },
+      "produces": {
+        "energy": 2
+      },
+      "consumes": {},
+      "breakdown_chance": 0.01,
+      "repair_cost": {
+        "wood": 3,
+        "stone": 1
+      },
+      "icon_label": "С1",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "battery": {
+      "name": "Аккумулятор",
+      "description": "Ничего не производит и не потребляет - просто позволяет запасу энергии пережить конец хода вместо того, чтобы сгореть без остатка (без единого хранилища энергия не копится вообще).",
+      "requires_tech": null,
+      "cost": {
+        "wood": 12,
+        "stone": 6
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.01,
+      "repair_cost": {
+        "wood": 2,
+        "stone": 1
+      },
+      "icon_label": "АК",
+      "energy_storage": 20,
+      "unlocks_autocraft": []
+    },
+    "lumber_camp": {
+      "name": "Лесозаготовка",
+      "description": "Автоматизирует рубку дерева - даёт дрова каждый ход сама, без ручного действия, ценой энергии.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 10
+      },
+      "produces": {
+        "wood": 2
+      },
+      "consumes": {
+        "energy": 1
+      },
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 3
+      },
+      "icon_label": "ЛЗ",
+      "unlocks_autocraft": []
+    },
+    "quarry": {
+      "name": "Каменоломня",
+      "description": "Автоматизирует добычу камня - даёт камень каждый ход сама, без ручного действия, ценой энергии.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 12
+      },
+      "produces": {
+        "stone": 2
+      },
+      "consumes": {
+        "energy": 1
+      },
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 3
+      },
+      "icon_label": "КМ",
+      "unlocks_autocraft": []
+    },
+    "sawmill": {
+      "name": "Лесопилка",
+      "description": "Автоматически превращает дрова в доски и, пока работает хотя бы одна копия, разрешает автокрафт досок - можно больше не пилить их вручную.",
+      "requires_tech": "woodworking",
+      "cost": {
+        "wood": 25,
+        "stone": 10
+      },
+      "produces": {
+        "planks": 3
+      },
+      "consumes": {
+        "wood": 3,
+        "energy": 2
+      },
+      "breakdown_chance": 0.04,
+      "repair_cost": {
+        "planks": 3,
+        "tools": 1
+      },
+      "icon_label": "ЛП",
+      "unlocks_autocraft": [
+        "planks"
+      ]
+    },
+    "charcoal_pit": {
+      "name": "Угольная яма",
+      "description": "Автоматически жжёт уголь из дерева и, пока работает хотя бы одна копия, разрешает автокрафт угля - основа для выплавки металла и мощных генераторов.",
+      "requires_tech": "charcoal_burning",
+      "cost": {
+        "wood": 15
+      },
+      "produces": {
+        "charcoal": 1
+      },
+      "consumes": {
+        "wood": 1,
+        "energy": 1
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "wood": 3
+      },
+      "icon_label": "УЯ",
+      "unlocks_autocraft": [
+        "charcoal"
+      ]
+    },
+    "workshop": {
+      "name": "Мастерская",
+      "description": "Автоматически делает инструменты и, пока работает хотя бы одна копия, разрешает их автокрафт - инструменты нужны почти для всех построек и ремонтов дальше по дереву.",
+      "requires_tech": "workshop_automation",
+      "cost": {
+        "planks": 20,
+        "stone": 15
+      },
+      "produces": {
+        "tools": 1
+      },
+      "consumes": {
+        "planks": 2,
+        "stone": 1,
+        "energy": 2
+      },
+      "breakdown_chance": 0.05,
+      "repair_cost": {
+        "planks": 2,
+        "tools": 1
+      },
+      "icon_label": "МС",
+      "unlocks_autocraft": [
+        "tools"
+      ]
+    },
+    "recipe_board": {
+      "name": "Стенд с рецептами",
+      "description": "Ничего не производит - пока работает хотя бы одна копия, ингредиенты в списке рецептов на верстаке становятся кликабельными: клик сразу прокручивает и подсвечивает рецепт, из которого делается этот ингредиент. Удобно для ручной сборки цепочек до появления автокрафта.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 10,
+        "stone": 5
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.0,
+      "repair_cost": {},
+      "icon_label": "РК",
+      "unlocks_autocraft": []
+    },
+    "processor": {
+      "name": "Процессор",
+      "description": "Ничего не производит сам - даёт вычислительную мощность, без которой автокрафт вообще не может докрафтить недостающие ресурсы, даже если рецепт открыт и постройка-разблокировщик работает.",
+      "requires_tech": "workshop_automation",
+      "cost": {
+        "planks": 15,
+        "tools": 10
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "ЦП",
+      "compute_power": 5,
+      "unlocks_autocraft": []
+    },
+    "autocraft_accelerator": {
+      "name": "Ускоритель автокрафта",
+      "description": "Увеличивает скорость автокрафта - сколько операций он может выполнить за один ход. Без неё автокрафт всё равно работает, но крупные партии растягиваются на много ходов фоновой задачей вместо мгновенного результата.",
+      "requires_tech": "precision_engineering",
+      "cost": {
+        "metal": 12,
+        "tools": 8
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "УА",
+      "autocraft_speed": 8,
+      "unlocks_autocraft": []
+    },
+    "coal_generator": {
+      "name": "Угольный генератор",
+      "description": "Более мощный источник энергии взамен дровяного - жжёт уголь вместо дров, давая заметно больше энергии с копии.",
+      "requires_tech": "electrification",
+      "cost": {
+        "stone": 20,
+        "tools": 5
+      },
+      "produces": {
+        "energy": 6
+      },
+      "consumes": {
+        "charcoal": 2
+      },
+      "breakdown_chance": 0.05,
+      "repair_cost": {
+        "tools": 2,
+        "stone": 3
+      },
+      "icon_label": "УГ",
+      "unlocks_autocraft": []
+    },
+    "battery_bank": {
+      "name": "Батарейный блок",
+      "description": "Хранилище энергии большей ёмкости, чем аккумулятор - апгрейд для баз, которым уже мало 20 единиц запаса.",
+      "requires_tech": "electrification",
+      "cost": {
+        "stone": 20,
+        "tools": 8
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "tools": 2,
+        "stone": 3
+      },
+      "icon_label": "ББ",
+      "energy_storage": 60,
+      "unlocks_autocraft": []
+    },
+    "mine": {
+      "name": "Шахта",
+      "description": "Автоматически добывает руду каждый ход сама, ценой энергии - в отличие от ручной добычи в локации «Шахта», не зависит от найденных жил и не истощается.",
+      "requires_tech": "mechanized_mining",
+      "cost": {
+        "planks": 15,
+        "tools": 5
+      },
+      "produces": {
+        "ore": 3
+      },
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.04,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "ШХ",
+      "unlocks_autocraft": []
+    },
+    "furnace": {
+      "name": "Печь",
+      "description": "Автоматически плавит металл из руды и угля и, пока работает хотя бы одна копия, разрешает автокрафт металла - ключевое сырьё для построек позднего дерева.",
+      "requires_tech": "industrial_smelting",
+      "cost": {
+        "stone": 30,
+        "tools": 5
+      },
+      "produces": {
+        "metal": 2
+      },
+      "consumes": {
+        "ore": 2,
+        "charcoal": 2,
+        "energy": 3
+      },
+      "breakdown_chance": 0.07,
+      "repair_cost": {
+        "tools": 3,
+        "stone": 3
+      },
+      "icon_label": "ПЧ",
+      "unlocks_autocraft": [
+        "metal"
+      ]
+    },
+    "solar_panel_mk2": {
+      "name": "Солнечная панель Мк2",
+      "description": "Улучшенная солнечная панель - та же бесплатная дневная энергия, но заметно больше с одной копии.",
+      "requires_tech": "advanced_solar",
+      "cost": {
+        "metal": 10,
+        "tools": 5
+      },
+      "produces": {
+        "energy": 5
+      },
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 1,
+        "tools": 1
+      },
+      "icon_label": "С2",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "energy_extractor": {
+      "name": "Синтезатор руды",
+      "description": "Ещё один способ добывать руду - в отличие от «Шахты», не роет землю, а получает руду прямо из энергии, зато требует её заметно больше на единицу.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 15,
+        "tools": 10
+      },
+      "produces": {
+        "ore": 2
+      },
+      "consumes": {
+        "energy": 5
+      },
+      "breakdown_chance": 0.08,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 2
+      },
+      "icon_label": "СР",
+      "unlocks_autocraft": []
+    },
+    "battery_array": {
+      "name": "Промышленный накопитель",
+      "description": "Хранилище энергии промышленного масштаба - на порядок больше ёмкости, чем батарейный блок, для баз с мощными генераторами и энергоёмкими постройками.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 20,
+        "tools": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 2
+      },
+      "icon_label": "ПН",
+      "energy_storage": 200,
+      "unlocks_autocraft": []
+    },
+    "processor_mk2": {
+      "name": "Процессор Мк2",
+      "description": "Более мощная версия процессора - та же роль (без неё автокрафт не прокрутится), но вычислительной мощности с одной копии в 4 раза больше.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 15,
+        "tools": 20
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 4
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 3
+      },
+      "icon_label": "Ц2",
+      "compute_power": 20,
+      "unlocks_autocraft": []
+    },
+    "energy_assembler": {
+      "name": "Энергетический ассемблер",
+      "description": "Копит энергию про запас (а не тратит фиксированную порцию каждый ход) и, набрав достаточно, выдаёт партию металла - удобно для избытка энергии, который иначе просто сгорал бы без хранилищ.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 25,
+        "tools": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 3,
+        "tools": 2
+      },
+      "icon_label": "ЭА",
+      "energy_craft": {
+        "threshold": 100,
+        "produces": {
+          "metal": 5
+        },
+        "max_energy_per_turn": 20
+      },
+      "unlocks_autocraft": []
+    },
+    "uranium_mine": {
+      "name": "Урановый рудник",
+      "description": "Автоматически добывает уран - единственный источник топлива для ядерного реактора.",
+      "requires_tech": "uranium_prospecting",
+      "cost": {
+        "tools": 10,
+        "metal": 5
+      },
+      "produces": {
+        "uranium": 1
+      },
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.04,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "УР",
+      "unlocks_autocraft": []
+    },
+    "nuclear_reactor": {
+      "name": "Ядерный реактор",
+      "description": "Самый мощный источник энергии в игре - жжёт уран вместо угля или дров, давая на порядки больше энергии с одной копии.",
+      "requires_tech": "nuclear_engineering",
+      "cost": {
+        "metal": 40,
+        "tools": 20,
+        "stone": 30
+      },
+      "produces": {
+        "energy": 25
+      },
+      "consumes": {
+        "uranium": 1
+      },
+      "breakdown_chance": 0.06,
+      "repair_cost": {
+        "metal": 5,
+        "tools": 5
+      },
+      "icon_label": "ЯР",
+      "unlocks_autocraft": []
+    },
+    "solar_panel_mk3": {
+      "name": "Солнечная ферма",
+      "description": "Ещё один шаг вверх по солнечным панелям - по-прежнему бесплатная дневная энергия, но заметно больше, чем у Мк2.",
+      "requires_tech": "photonics",
+      "cost": {
+        "metal": 25,
+        "tools": 10
+      },
+      "produces": {
+        "energy": 15
+      },
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 2
+      },
+      "icon_label": "С3",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "solar_panel_mk4": {
+      "name": "Солнечная электростанция",
+      "description": "Вершина солнечной ветки - самая большая дневная выработка энергии среди всех солнечных построек, по-прежнему без расхода сырья.",
+      "requires_tech": "advanced_photonics",
+      "cost": {
+        "metal": 60,
+        "tools": 30
+      },
+      "produces": {
+        "energy": 40
+      },
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 4,
+        "tools": 3
+      },
+      "icon_label": "С4",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "autocraft_dispatcher": {
+      "name": "Диспетчерская автокрафта",
+      "description": "Очень дорогая штучная постройка (можно построить только одну) - даёт +1 к числу одновременно работающих фоновых автокрафт-задач, так что несколько ресурсов в цепочке смогут докрафтываться параллельно, а не по очереди друг за другом.",
+      "requires_tech": "advanced_photonics",
+      "cost": {
+        "metal": 80,
+        "tools": 60,
+        "planks": 50
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 10
+      },
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 8,
+        "tools": 6
+      },
+      "icon_label": "ДА",
+      "autocraft_slots": 1,
+      "max_count": 1,
+      "unlocks_autocraft": []
+    }
+  },
+  "techs": {
+    "woodworking": {
+      "name": "Деревообработка",
+      "description": "Базовая обработка древесины - открывает лесопилку, автоматически распиливающую брёвна на доски.",
+      "requires": [],
+      "cost": {
+        "wood": 20
+      },
+      "effects": []
+    },
+    "charcoal_burning": {
+      "name": "Углежжение",
+      "description": "Выжигание угля из дерева - основа для выплавки металла и первых генераторов энергии.",
+      "requires": [],
+      "cost": {
+        "wood": 15
+      },
+      "effects": []
+    },
+    "toolmaking": {
+      "name": "Инструменты",
+      "description": "Изготовление простых инструментов вручную - открывает дорогу к механизации и более сложным технологиям.",
+      "requires": [
+        "woodworking"
+      ],
+      "cost": {
+        "planks": 10
+      },
+      "effects": []
+    },
+    "electrification": {
+      "name": "Электрификация",
+      "description": "Генераторы промышленного масштаба - открывает угольный генератор и батарейный блок для накопления энергии.",
+      "requires": [
+        "charcoal_burning"
+      ],
+      "cost": {
+        "tools": 5,
+        "stone": 15
+      },
+      "effects": []
+    },
+    "reliable_machines": {
+      "name": "Надёжные механизмы",
+      "description": "Улучшенная сборка механизмов снижает шанс поломки у всех построек.",
+      "requires": [
+        "toolmaking"
+      ],
+      "cost": {
+        "tools": 8,
+        "planks": 10
+      },
+      "effects": [
+        {
+          "building": "*",
+          "breakdown_delta": -0.02
+        }
+      ]
+    },
+    "mining": {
+      "name": "Горное дело",
+      "description": "Разведка и добыча руды - открывает поиск рудных жил и ручную добычу камня в шахте.",
+      "requires": [
+        "toolmaking"
+      ],
+      "cost": {
+        "tools": 3,
+        "planks": 10
+      },
+      "effects": []
+    },
+    "workshop_automation": {
+      "name": "Автоматизация мастерской",
+      "description": "Открывает мастерскую - постройку, автоматически производящую инструменты.",
+      "requires": [
+        "toolmaking"
+      ],
+      "cost": {
+        "tools": 5,
+        "planks": 15
+      },
+      "effects": []
+    },
+    "metallurgy": {
+      "name": "Металлургия",
+      "description": "Выплавка металла из руды - открывает ручную плавку металла и металлическую кирку.",
+      "requires": [
+        "mining",
+        "charcoal_burning"
+      ],
+      "cost": {
+        "ore": 5,
+        "charcoal": 5
+      },
+      "effects": []
+    },
+    "mechanized_mining": {
+      "name": "Механизированная добыча",
+      "description": "Открывает шахту - постройку для автоматической добычи руды без ручного труда.",
+      "requires": [
+        "mining"
+      ],
+      "cost": {
+        "tools": 10,
+        "planks": 20
+      },
+      "effects": []
+    },
+    "industrial_smelting": {
+      "name": "Промышленная плавка",
+      "description": "Открывает печь - автоматическую выплавку металла из руды и угля.",
+      "requires": [
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 5,
+        "stone": 20
+      },
+      "effects": []
+    },
+    "improved_saws": {
+      "name": "Улучшенные пилы",
+      "description": "Более острые металлические пилы увеличивают выход досок с лесопилки.",
+      "requires": [
+        "woodworking",
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 5,
+        "tools": 3
+      },
+      "effects": [
+        {
+          "building": "sawmill",
+          "produces": {
+            "planks": 2
+          }
+        }
+      ]
+    },
+    "mine_conveyor": {
+      "name": "Конвейер шахты",
+      "description": "Механизированный вывоз породы увеличивает добычу руды на шахте.",
+      "requires": [
+        "mechanized_mining",
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 10
+      },
+      "effects": [
+        {
+          "building": "mine",
+          "produces": {
+            "ore": 2
+          }
+        }
+      ]
+    },
+    "precision_engineering": {
+      "name": "Точная инженерия",
+      "description": "Более точная сборка ещё немного снижает шанс поломки у всех построек.",
+      "requires": [
+        "reliable_machines",
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 8,
+        "tools": 5
+      },
+      "effects": [
+        {
+          "building": "*",
+          "breakdown_delta": -0.02
+        }
+      ]
+    },
+    "advanced_solar": {
+      "name": "Улучшенные солнечные панели",
+      "description": "Открывает солнечную панель Мк2 - более мощную и надёжную, чем первая модель.",
+      "requires": [
+        "electrification"
+      ],
+      "cost": {
+        "metal": 10,
+        "tools": 5
+      },
+      "effects": []
+    },
+    "resource_synthesis": {
+      "name": "Синтез ресурсов",
+      "description": "Открывает синтезатор руды и промышленный накопитель энергии большой ёмкости.",
+      "requires": [
+        "metallurgy",
+        "electrification"
+      ],
+      "cost": {
+        "metal": 15,
+        "tools": 10
+      },
+      "effects": []
+    },
+    "uranium_prospecting": {
+      "name": "Разведка урана",
+      "description": "Открывает урановый рудник и добычу урановых жил в шахте.",
+      "requires": [
+        "mechanized_mining"
+      ],
+      "cost": {
+        "tools": 15,
+        "metal": 5
+      },
+      "effects": []
+    },
+    "nuclear_engineering": {
+      "name": "Ядерная инженерия",
+      "description": "Открывает ядерный реактор - мощный источник энергии, работающий на уране.",
+      "requires": [
+        "uranium_prospecting",
+        "industrial_smelting"
+      ],
+      "cost": {
+        "metal": 20,
+        "tools": 15
+      },
+      "effects": []
+    },
+    "photonics": {
+      "name": "Фотоника",
+      "description": "Открывает солнечную ферму - следующее поколение солнечной энергетики.",
+      "requires": [
+        "advanced_solar"
+      ],
+      "cost": {
+        "metal": 20,
+        "tools": 10
+      },
+      "effects": []
+    },
+    "advanced_photonics": {
+      "name": "Продвинутая фотоника",
+      "description": "Открывает солнечную электростанцию - самый мощный из солнечных генераторов.",
+      "requires": [
+        "photonics",
+        "nuclear_engineering"
+      ],
+      "cost": {
+        "metal": 40,
+        "tools": 20
+      },
+      "effects": []
+    }
+  },
+  "mining_info": {
+    "ore": {
+      "requires_tech": "mining",
+      "required_pickaxe_tier": 1,
+      "rarity": 1,
+      "vein_size_range": [
+        30,
+        60
+      ],
+      "base_yield": 4
+    },
+    "uranium": {
+      "requires_tech": "uranium_prospecting",
+      "required_pickaxe_tier": 3,
+      "rarity": 4,
+      "vein_size_range": [
+        3,
+        6
+      ],
+      "base_yield": 2
+    }
+  },
+  "pickaxe_tiers": [
+    {
+      "name": "Деревянная кирка",
+      "cost": null,
+      "requires_tech": null
+    },
+    {
+      "name": "Каменная кирка",
+      "cost": {
+        "wood": 10,
+        "stone": 15
+      },
+      "requires_tech": null
+    },
+    {
+      "name": "Металлическая кирка",
+      "cost": {
+        "tools": 10,
+        "metal": 10
+      },
+      "requires_tech": "metallurgy"
+    },
+    {
+      "name": "Прочная кирка",
+      "cost": {
+        "metal": 30,
+        "tools": 15
+      },
+      "requires_tech": "industrial_smelting"
+    },
+    {
+      "name": "Промышленная кирка",
+      "cost": {
+        "metal": 60,
+        "tools": 30
+      },
+      "requires_tech": "resource_synthesis"
+    }
+  ],
+  "achievements": {
+    "first_building": {
+      "name": "Первый камень в фундамент",
+      "description": "Построй свою первую постройку.",
+      "conditions": [
+        {
+          "type": "total_buildings_at_least",
+          "amount": 1
+        }
+      ]
+    },
+    "first_furnace": {
+      "name": "Плавильщик",
+      "description": "Построй печь.",
+      "conditions": [
+        {
+          "type": "building_count_at_least",
+          "building": "furnace",
+          "amount": 1
+        }
+      ]
+    },
+    "tech_scholar": {
+      "name": "Учёный",
+      "description": "Исследуй 10 технологий.",
+      "conditions": [
+        {
+          "type": "tech_count_at_least",
+          "amount": 10
+        }
+      ]
+    },
+    "completionist": {
+      "name": "Полное просвещение",
+      "description": "Исследуй все технологии.",
+      "conditions": [
+        {
+          "type": "all_techs_researched"
+        }
+      ]
+    },
+    "master_miner": {
+      "name": "Мастер-старатель",
+      "description": "Прокачай кирку до максимального тира.",
+      "conditions": [
+        {
+          "type": "pickaxe_tier_at_least",
+          "amount": 5
+        }
+      ]
+    },
+    "century": {
+      "name": "Век производства",
+      "description": "Доживи до 100-го хода.",
+      "conditions": [
+        {
+          "type": "turn_at_least",
+          "amount": 100
+        }
+      ]
+    }
+  },
+  "time": {
+    "hours_per_turn": 3,
+    "day_start_hour": 6,
+    "day_end_hour": 21
+  }
+}

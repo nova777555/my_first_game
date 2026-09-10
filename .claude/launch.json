@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "content-editor",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/content_editor.py"],
+      "port": 8765
+    },
+    {
+      "name": "web-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/web_ui.py"],
+      "port": 8790
+    }
+  ]
+}

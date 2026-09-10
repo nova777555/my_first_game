@@ -1,0 +1,2272 @@
+{
+  "resources": [
+    {
+      "id": "energy",
+      "name": "Энергия",
+      "icon": {
+        "grid": [
+          "..................BAAAAA",
+          "................BBBAAA..",
+          "...............BBADBAAA.",
+          ".............BBBAAAAA...",
+          ".............BACABB.....",
+          "............BBCCAA......",
+          "..........BBBAAAA.......",
+          ".........BBAAABA........",
+          ".........BAAAAA.........",
+          ".........BAAA...........",
+          "........BAAA............",
+          ".......BBDA.............",
+          "......AAAAABAAAAAAA.....",
+          ".......ACAAAAAADBAAAA...",
+          "........AAAAAAABACCAAA..",
+          "............BBBBCCBAA...",
+          "............BBBAAAA.....",
+          "............BBBAAA......",
+          "..........BBBBAAA.......",
+          "........BBBBBBAA........",
+          ".......BBBBBAA..........",
+          "......BBABDAA...........",
+          ".....BBACCAA............",
+          "....BAACCA.............."
+        ],
+        "palette": {
+          "B": "#f0a030",
+          "A": "#f4c430",
+          "D": "#8a5a34",
+          "C": "#e8e6df"
+        }
+      },
+      "fractional": true
+    },
+    {
+      "id": "wood",
+      "name": "Дерево",
+      "storage": {
+        "base_capacity": 2000,
+        "tiers": [
+          {
+            "capacity_add": 3000,
+            "cost": {
+              "wood": 200,
+              "stone": 100
+            },
+            "requires_tech": null
+          },
+          {
+            "capacity_add": 8000,
+            "cost": {
+              "wood": 600,
+              "stone": 300
+            },
+            "requires_tech": "woodworking"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stone",
+      "name": "Камень"
+    },
+    {
+      "id": "planks",
+      "name": "Доски"
+    },
+    {
+      "id": "tools",
+      "name": "Инструменты"
+    },
+    {
+      "id": "charcoal",
+      "name": "Уголь"
+    },
+    {
+      "id": "ore",
+      "name": "Руда"
+    },
+    {
+      "id": "metal",
+      "name": "Металл"
+    },
+    {
+      "id": "uranium",
+      "name": "Уран"
+    },
+    {
+      "id": "bee",
+      "name": "Пчела"
+    },
+    {
+      "id": "honey",
+      "name": "Мёд"
+    },
+    {
+      "id": "royal_jelly",
+      "name": "Маточное молочко"
+    },
+    {
+      "id": "royal_bee",
+      "name": "Царская пчела"
+    },
+    {
+      "id": "bone",
+      "name": "Кость"
+    },
+    {
+      "id": "wolf_pelt",
+      "name": "Волчья шкура"
+    },
+    {
+      "id": "wolf_soul",
+      "name": "Душа волка"
+    },
+    {
+      "id": "boss_fang",
+      "name": "Клык Стража леса"
+    },
+    {
+      "id": "forest_guardian_soul",
+      "name": "Душа Стража леса"
+    },
+    {
+      "id": "boss_totem",
+      "name": "Тотем призыва"
+    }
+  ],
+  "locations": {
+    "forest": {
+      "name": "Лес",
+      "requires_tech": null,
+      "icon_label": "ЛС"
+    },
+    "hunting_grounds": {
+      "name": "Охотничьи угодья",
+      "requires_tech": "toolmaking",
+      "icon_label": "ОХ",
+      "parent_location": "forest"
+    },
+    "shaft": {
+      "name": "Шахта",
+      "requires_tech": null,
+      "icon_label": "ША"
+    },
+    "workbench": {
+      "name": "Верстак",
+      "requires_tech": null,
+      "icon_label": "ВС"
+    },
+    "mechanisms": {
+      "name": "Механизмы",
+      "requires_tech": "resource_synthesis",
+      "icon_label": "МХ"
+    },
+    "converter": {
+      "name": "Преобразователь",
+      "requires_tech": "resource_synthesis",
+      "icon_label": "ПР",
+      "parent_location": "mechanisms"
+    }
+  },
+  "manual_actions": {
+    "gather_wood": {
+      "name": "Рубить дерево",
+      "requires_tech": null,
+      "location": "forest",
+      "cost": {},
+      "gain": {
+        "wood": 3
+      }
+    },
+    "gather_stone": {
+      "name": "Добывать камень",
+      "requires_tech": null,
+      "location": "shaft",
+      "cost": {},
+      "gain": {
+        "stone": 2
+      }
+    },
+    "craft_planks": {
+      "name": "Напилить досок вручную",
+      "requires_tech": null,
+      "location": "workbench",
+      "cost": {
+        "wood": 4
+      },
+      "gain": {
+        "planks": 1
+      }
+    },
+    "craft_tools": {
+      "name": "Сделать инструменты вручную",
+      "requires_tech": "toolmaking",
+      "location": "workbench",
+      "cost": {
+        "planks": 3,
+        "stone": 2
+      },
+      "gain": {
+        "tools": 1
+      }
+    },
+    "make_charcoal": {
+      "name": "Жечь уголь вручную",
+      "requires_tech": "charcoal_burning",
+      "location": "workbench",
+      "cost": {
+        "wood": 3
+      },
+      "gain": {
+        "charcoal": 1
+      }
+    },
+    "smelt_metal": {
+      "name": "Плавить металл вручную",
+      "requires_tech": "metallurgy",
+      "location": "workbench",
+      "cost": {
+        "ore": 2,
+        "charcoal": 1
+      },
+      "gain": {
+        "metal": 1
+      }
+    },
+    "forge_rivet": {
+      "name": "Расклепать заклёпку",
+      "requires_tech": null,
+      "location": "workbench",
+      "requires_building": "precision_workshop",
+      "cost": {
+        "metal": 1
+      },
+      "gain": {
+        "tools": 1
+      }
+    },
+    "smelt_enriched_metal": {
+      "name": "Выплавить обогащённый металл",
+      "requires_tech": null,
+      "location": "workbench",
+      "requires_building": "precision_workshop",
+      "cost": {
+        "uranium": 1,
+        "ore": 4
+      },
+      "gain": {
+        "metal": 6
+      }
+    },
+    "catch_wild_swarm": {
+      "name": "Поймать дикий рой",
+      "requires_tech": null,
+      "location": "forest",
+      "cost": {},
+      "gain": {},
+      "spawn_species": "bee"
+    },
+    "craft_boss_totem": {
+      "name": "Смастерить тотем призыва",
+      "requires_tech": "toolmaking",
+      "location": "workbench",
+      "cost": {
+        "wood": 100,
+        "stone": 60,
+        "tools": 20
+      },
+      "gain": {
+        "boss_totem": 1
+      }
+    },
+    "craft_guardian_soul": {
+      "name": "Заключить душу Стража",
+      "requires_tech": "toolmaking",
+      "location": "hunting_grounds",
+      "cost": {
+        "boss_fang": 5
+      },
+      "gain": {
+        "forest_guardian_soul": 1
+      }
+    }
+  },
+  "buildings": {
+    "wood_generator": {
+      "name": "Дровяной генератор",
+      "description": "Простейший источник энергии - жжёт дрова, чтобы освободить руки от ручной рубки и запитать первые автоматические постройки.",
+      "requires_tech": null,
+      "cost": {
+        "stone": 8
+      },
+      "produces": {
+        "energy": 2
+      },
+      "consumes": {
+        "wood": 2
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "wood": 2
+      },
+      "icon_label": "ДГ",
+      "unlocks_autocraft": []
+    },
+    "solar_panel": {
+      "name": "Солнечная панель",
+      "description": "Даёт энергию бесплатно (не жжёт никакое сырьё), но только днём - ночью простаивает, поэтому без хранилища энергии смысла мало.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 15,
+        "stone": 5
+      },
+      "produces": {
+        "energy": 2
+      },
+      "consumes": {},
+      "breakdown_chance": 0.01,
+      "repair_cost": {
+        "wood": 3,
+        "stone": 1
+      },
+      "icon_label": "С1",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "battery": {
+      "name": "Аккумулятор",
+      "description": "Ничего не производит и не потребляет - просто позволяет запасу энергии пережить конец хода вместо того, чтобы сгореть без остатка (без единого хранилища энергия не копится вообще).",
+      "requires_tech": null,
+      "cost": {
+        "wood": 12,
+        "stone": 6
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.01,
+      "repair_cost": {
+        "wood": 2,
+        "stone": 1
+      },
+      "icon_label": "АК",
+      "energy_storage": 20,
+      "unlocks_autocraft": []
+    },
+    "lumber_camp": {
+      "name": "Лесозаготовка",
+      "description": "Автоматизирует рубку дерева - даёт дрова каждый ход сама, без ручного действия, ценой энергии.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 10
+      },
+      "produces": {
+        "wood": 2
+      },
+      "consumes": {
+        "energy": 1
+      },
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 3
+      },
+      "icon_label": "ЛЗ",
+      "unlocks_autocraft": []
+    },
+    "quarry": {
+      "name": "Каменоломня",
+      "description": "Автоматизирует добычу камня - даёт камень каждый ход сама, без ручного действия, ценой энергии.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 12
+      },
+      "produces": {
+        "stone": 2
+      },
+      "consumes": {
+        "energy": 1
+      },
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 3
+      },
+      "icon_label": "КМ",
+      "unlocks_autocraft": []
+    },
+    "sawmill": {
+      "name": "Лесопилка",
+      "description": "Автоматически превращает дрова в доски и, пока работает хотя бы одна копия, разрешает автокрафт досок - можно больше не пилить их вручную.",
+      "requires_tech": "woodworking",
+      "cost": {
+        "wood": 25,
+        "stone": 10
+      },
+      "produces": {
+        "planks": 3
+      },
+      "consumes": {
+        "wood": 3,
+        "energy": 2
+      },
+      "breakdown_chance": 0.04,
+      "repair_cost": {
+        "planks": 3,
+        "tools": 1
+      },
+      "icon_label": "ЛП",
+      "unlocks_autocraft": [
+        "planks"
+      ],
+      "upgrades": [
+        {
+          "id": "sawmill_scale_2",
+          "name": "Расширение лесопилки II",
+          "description": "Удваивает весь рецепт разом: вместо 3 дерева и 2 энергии за 3 доски - 6 дерева и 4 энергии за 6 досок.",
+          "type": "scale",
+          "value": 2,
+          "requires_tech": "improved_saws",
+          "cost": {
+            "planks": 30,
+            "tools": 10
+          }
+        },
+        {
+          "id": "sawmill_scale_3",
+          "name": "Расширение лесопилки III",
+          "description": "Утраивает весь рецепт относительно БАЗОВОГО (не относительно уже купленного \"Расширения II\") - вместо 3 дерева и 2 энергии за 3 доски - 9 дерева и 6 энергии за 9 досок. Если уже куплено \"Расширение II\", действует только это, более сильное улучшение - они не складываются и не перемножаются.",
+          "type": "scale",
+          "value": 3,
+          "requires_tech": "improved_saws",
+          "cost": {
+            "planks": 60,
+            "tools": 20
+          }
+        },
+        {
+          "id": "sawmill_scale_4",
+          "name": "Расширение лесопилки IV",
+          "description": "Учетверяет весь рецепт относительно БАЗОВОГО - вместо 3 дерева и 2 энергии за 3 доски - 12 дерева и 8 энергии за 12 досок.",
+          "type": "scale",
+          "value": 4,
+          "requires_tech": "improved_saws",
+          "cost": {
+            "planks": 100,
+            "tools": 35
+          }
+        }
+      ]
+    },
+    "charcoal_pit": {
+      "name": "Угольная яма",
+      "description": "Автоматически жжёт уголь из дерева и, пока работает хотя бы одна копия, разрешает автокрафт угля - основа для выплавки металла и мощных генераторов.",
+      "requires_tech": "charcoal_burning",
+      "cost": {
+        "wood": 15
+      },
+      "produces": {
+        "charcoal": 1
+      },
+      "consumes": {
+        "wood": 1,
+        "energy": 1
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "wood": 3
+      },
+      "icon_label": "УЯ",
+      "unlocks_autocraft": [
+        "charcoal"
+      ]
+    },
+    "workshop": {
+      "name": "Мастерская",
+      "description": "Автоматически делает инструменты и, пока работает хотя бы одна копия, разрешает их автокрафт - инструменты нужны почти для всех построек и ремонтов дальше по дереву.",
+      "requires_tech": "workshop_automation",
+      "cost": {
+        "planks": 20,
+        "stone": 15
+      },
+      "produces": {
+        "tools": 1
+      },
+      "consumes": {
+        "planks": 2,
+        "stone": 1,
+        "energy": 2
+      },
+      "breakdown_chance": 0.05,
+      "repair_cost": {
+        "planks": 2,
+        "tools": 1
+      },
+      "icon_label": "МС",
+      "unlocks_autocraft": [
+        "tools"
+      ]
+    },
+    "recipe_board": {
+      "name": "Стенд с рецептами",
+      "description": "Ничего не производит - пока работает хотя бы одна копия, ингредиенты в списке рецептов на верстаке становятся кликабельными: клик сразу прокручивает и подсвечивает рецепт, из которого делается этот ингредиент. Удобно для ручной сборки цепочек до появления автокрафта.",
+      "requires_tech": null,
+      "cost": {
+        "wood": 10,
+        "stone": 5
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "РК",
+      "unlocks_autocraft": []
+    },
+    "processor": {
+      "name": "Процессор",
+      "description": "Ничего не производит сам - даёт вычислительную мощность, без которой автокрафт вообще не может докрафтить недостающие ресурсы, даже если рецепт открыт и постройка-разблокировщик работает.",
+      "requires_tech": "workshop_automation",
+      "cost": {
+        "planks": 15,
+        "tools": 10
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "ЦП",
+      "compute_power": 5,
+      "unlocks_autocraft": []
+    },
+    "autocraft_accelerator": {
+      "name": "Ускоритель автокрафта",
+      "description": "Увеличивает скорость автокрафта - сколько операций он может выполнить за один ход. Без неё автокрафт всё равно работает, но крупные партии растягиваются на много ходов фоновой задачей вместо мгновенного результата.",
+      "requires_tech": "precision_engineering",
+      "cost": {
+        "metal": 12,
+        "tools": 8
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "УА",
+      "autocraft_speed": 8,
+      "unlocks_autocraft": []
+    },
+    "precision_workshop": {
+      "name": "Прецизионная мастерская",
+      "description": "Сама по себе ничего не производит - открывает на Верстаке точную ручную обработку металла (расклёпывать заклёпки на инструменты, выплавлять обогащённый металл из руды и урана). Улучшение «Точная выверка» задаёт МАКСИМАЛЬНЫЙ масштаб партии за один клик - конкретный размер каждой партии всё равно выбирает сам игрок ползунком, так что дешёвые заклёпки можно штамповать на максимум, а редкий уран на обогащённый металл - тратить по одному, не разменивая сразу весь запас.",
+      "requires_tech": "precision_engineering",
+      "cost": {
+        "metal": 15,
+        "tools": 10,
+        "planks": 20
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "ПМ",
+      "unlocks_autocraft": [],
+      "upgrades": [
+        {
+          "id": "precision_workshop_scale_2",
+          "name": "Точная выверка II",
+          "description": "Поднимает максимум партии за клик у действий на этой мастерской (расклепать заклёпку, выплавить обогащённый металл) вдвое - конкретный масштаб каждого клика по-прежнему выбирается ползунком, от 1 до нового максимума.",
+          "type": "scale",
+          "value": 2,
+          "requires_tech": "industrial_smelting",
+          "cost": {
+            "metal": 20,
+            "tools": 10
+          }
+        },
+        {
+          "id": "precision_workshop_scale_3",
+          "name": "Точная выверка III",
+          "description": "Поднимает максимум партии за клик втрое относительно базового (не перемножается с «Точной выверкой II», если куплены обе - действует только эта, более сильная).",
+          "type": "scale",
+          "value": 3,
+          "requires_tech": "industrial_smelting",
+          "cost": {
+            "metal": 40,
+            "tools": 20
+          }
+        },
+        {
+          "id": "precision_workshop_scale_4",
+          "name": "Точная выверка IV",
+          "description": "Поднимает максимум партии за клик вчетверо относительно базового.",
+          "type": "scale",
+          "value": 4,
+          "requires_tech": "industrial_smelting",
+          "cost": {
+            "metal": 70,
+            "tools": 35
+          }
+        }
+      ]
+    },
+    "coal_generator": {
+      "name": "Угольный генератор",
+      "description": "Более мощный источник энергии взамен дровяного - жжёт уголь вместо дров, давая заметно больше энергии с копии.",
+      "requires_tech": "electrification",
+      "cost": {
+        "stone": 20,
+        "tools": 5
+      },
+      "produces": {
+        "energy": 6
+      },
+      "consumes": {
+        "charcoal": 2
+      },
+      "breakdown_chance": 0.05,
+      "repair_cost": {
+        "tools": 2,
+        "stone": 3
+      },
+      "icon_label": "УГ",
+      "unlocks_autocraft": [],
+      "upgrades": [
+        {
+          "id": "coal_generator_boost",
+          "name": "Форсированное сжигание",
+          "description": "Увеличивает выработку энергии угольного генератора в полтора раза без дополнительного расхода угля.",
+          "type": "generation_efficiency",
+          "value": 1.5,
+          "requires_tech": null,
+          "cost": {
+            "tools": 15,
+            "stone": 10
+          }
+        }
+      ]
+    },
+    "battery_bank": {
+      "name": "Батарейный блок",
+      "description": "Хранилище энергии большей ёмкости, чем аккумулятор - апгрейд для баз, которым уже мало 20 единиц запаса.",
+      "requires_tech": "electrification",
+      "cost": {
+        "stone": 20,
+        "tools": 8
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "tools": 2,
+        "stone": 3
+      },
+      "icon_label": "ББ",
+      "energy_storage": 60,
+      "unlocks_autocraft": []
+    },
+    "mine": {
+      "name": "Шахта",
+      "description": "Автоматически добывает руду каждый ход сама, ценой энергии - в отличие от ручной добычи в локации «Шахта», не зависит от найденных жил и не истощается.",
+      "requires_tech": "mechanized_mining",
+      "cost": {
+        "planks": 15,
+        "tools": 5
+      },
+      "produces": {
+        "ore": 3
+      },
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.04,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "ШХ",
+      "unlocks_autocraft": []
+    },
+    "furnace": {
+      "name": "Печь",
+      "description": "Автоматически плавит металл из руды и угля и, пока работает хотя бы одна копия, разрешает автокрафт металла - ключевое сырьё для построек позднего дерева.",
+      "requires_tech": "industrial_smelting",
+      "cost": {
+        "stone": 30,
+        "tools": 5
+      },
+      "produces": {
+        "metal": 2
+      },
+      "consumes": {
+        "ore": 2,
+        "charcoal": 2,
+        "energy": 3
+      },
+      "breakdown_chance": 0.07,
+      "repair_cost": {
+        "tools": 3,
+        "stone": 3
+      },
+      "icon_label": "ПЧ",
+      "unlocks_autocraft": [
+        "metal"
+      ],
+      "upgrades": [
+        {
+          "id": "furnace_energy_efficiency",
+          "name": "Теплоизоляция печи",
+          "description": "Снижает расход энергии печи вдвое - выплавка металла становится вдвое дешевле по энергии.",
+          "type": "energy_efficiency",
+          "value": 0.5,
+          "requires_tech": "precision_engineering",
+          "cost": {
+            "metal": 15,
+            "tools": 10
+          }
+        }
+      ]
+    },
+    "solar_panel_mk2": {
+      "name": "Солнечная панель Мк2",
+      "description": "Улучшенная солнечная панель - та же бесплатная дневная энергия, но заметно больше с одной копии.",
+      "requires_tech": "advanced_solar",
+      "cost": {
+        "metal": 10,
+        "tools": 5
+      },
+      "produces": {
+        "energy": 5
+      },
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 1,
+        "tools": 1
+      },
+      "icon_label": "С2",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "energy_extractor": {
+      "name": "Синтезатор руды",
+      "description": "Ещё один способ добывать руду - в отличие от «Шахты», не роет землю, а получает руду прямо из энергии, зато требует её заметно больше на единицу.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 15,
+        "tools": 10
+      },
+      "produces": {
+        "ore": 2
+      },
+      "consumes": {
+        "energy": 5
+      },
+      "breakdown_chance": 0.08,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 2
+      },
+      "icon_label": "СР",
+      "unlocks_autocraft": []
+    },
+    "battery_array": {
+      "name": "Промышленный накопитель",
+      "description": "Хранилище энергии промышленного масштаба - на порядок больше ёмкости, чем батарейный блок, для баз с мощными генераторами и энергоёмкими постройками.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 20,
+        "tools": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 2
+      },
+      "icon_label": "ПН",
+      "energy_storage": 200,
+      "unlocks_autocraft": []
+    },
+    "processor_mk2": {
+      "name": "Процессор Мк2",
+      "description": "Более мощная версия процессора - та же роль (без неё автокрафт не прокрутится), но вычислительной мощности с одной копии в 4 раза больше.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 15,
+        "tools": 20
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 4
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 3
+      },
+      "icon_label": "Ц2",
+      "compute_power": 20,
+      "unlocks_autocraft": []
+    },
+    "energy_converter": {
+      "name": "Энергетический преобразователь",
+      "description": "Копит энергию про запас (а не тратит фиксированную порцию каждый ход) и превращает её в предмет по рецепту, который игрок выбирает вручную в локации «Преобразователь» (вложена в «Механизмы») - или который сам запустит автокрафт, если результат кому-то нужен. Строится только один раз и ведёт единственный рецепт за раз, зато его пропускную способность (энергии за ход) можно наращивать улучшениями прямо на этой постройке.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 25,
+        "tools": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 3,
+        "tools": 2
+      },
+      "icon_label": "ЭП",
+      "energy_converter": {
+        "max_energy_per_turn": 20
+      },
+      "unlocks_autocraft": [],
+      "max_count": 1,
+      "upgrades": [
+        {
+          "id": "energy_converter_capacity_1",
+          "name": "Расширенный накопитель I",
+          "description": "+15 энергии/ход к пропускной способности преобразователя (итого 35).",
+          "type": "energy_converter_capacity",
+          "value": 15,
+          "requires_tech": null,
+          "cost": {
+            "metal": 40,
+            "tools": 20
+          }
+        },
+        {
+          "id": "energy_converter_capacity_2",
+          "name": "Расширенный накопитель II",
+          "description": "+35 энергии/ход к пропускной способности преобразователя (итого 55).",
+          "type": "energy_converter_capacity",
+          "value": 35,
+          "requires_tech": null,
+          "cost": {
+            "metal": 90,
+            "tools": 45
+          }
+        },
+        {
+          "id": "energy_converter_capacity_3",
+          "name": "Расширенный накопитель III",
+          "description": "+60 энергии/ход к пропускной способности преобразователя (итого 80).",
+          "type": "energy_converter_capacity",
+          "value": 60,
+          "requires_tech": null,
+          "cost": {
+            "metal": 160,
+            "tools": 80
+          }
+        }
+      ]
+    },
+    "uranium_mine": {
+      "name": "Урановый рудник",
+      "description": "Автоматически добывает уран - единственный источник топлива для ядерного реактора.",
+      "requires_tech": "uranium_prospecting",
+      "cost": {
+        "tools": 10,
+        "metal": 5
+      },
+      "produces": {
+        "uranium": 1
+      },
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.04,
+      "repair_cost": {
+        "tools": 2
+      },
+      "icon_label": "УР",
+      "unlocks_autocraft": []
+    },
+    "nuclear_reactor": {
+      "name": "Ядерный реактор",
+      "description": "Самый мощный источник энергии в игре - жжёт уран вместо угля или дров, давая на порядки больше энергии с одной копии.",
+      "requires_tech": "nuclear_engineering",
+      "cost": {
+        "metal": 40,
+        "tools": 20,
+        "stone": 30
+      },
+      "produces": {
+        "energy": 25
+      },
+      "consumes": {
+        "uranium": 1
+      },
+      "breakdown_chance": 0.06,
+      "repair_cost": {
+        "metal": 5,
+        "tools": 5
+      },
+      "icon_label": "ЯР",
+      "unlocks_autocraft": []
+    },
+    "solar_panel_mk3": {
+      "name": "Солнечная ферма",
+      "description": "Ещё один шаг вверх по солнечным панелям - по-прежнему бесплатная дневная энергия, но заметно больше, чем у Мк2.",
+      "requires_tech": "photonics",
+      "cost": {
+        "metal": 25,
+        "tools": 10
+      },
+      "produces": {
+        "energy": 15
+      },
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 2,
+        "tools": 2
+      },
+      "icon_label": "С3",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "solar_panel_mk4": {
+      "name": "Солнечная электростанция",
+      "description": "Вершина солнечной ветки - самая большая дневная выработка энергии среди всех солнечных построек, по-прежнему без расхода сырья.",
+      "requires_tech": "advanced_photonics",
+      "cost": {
+        "metal": 60,
+        "tools": 30
+      },
+      "produces": {
+        "energy": 40
+      },
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 4,
+        "tools": 3
+      },
+      "icon_label": "С4",
+      "active_period": "day",
+      "unlocks_autocraft": []
+    },
+    "autocraft_dispatcher": {
+      "name": "Диспетчерская автокрафта",
+      "description": "Очень дорогая штучная постройка (можно построить только одну) - даёт +1 к числу одновременно работающих фоновых автокрафт-задач, так что несколько ресурсов в цепочке смогут докрафтываться параллельно, а не по очереди друг за другом.",
+      "requires_tech": "advanced_photonics",
+      "cost": {
+        "metal": 80,
+        "tools": 60,
+        "planks": 50
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 10
+      },
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 8,
+        "tools": 6
+      },
+      "icon_label": "ДА",
+      "autocraft_slots": 1,
+      "max_count": 1,
+      "unlocks_autocraft": []
+    },
+    "lab_tier2": {
+      "name": "Лаборатория II тира",
+      "description": "Открывает возможность исследовать технологии II тира - без неё они остаются недоступны для изучения, даже если все остальные условия уже выполнены.",
+      "requires_tech": "electrification",
+      "cost": {
+        "planks": 20,
+        "tools": 10,
+        "stone": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "Л2",
+      "lab_tier": 2,
+      "max_count": 1,
+      "unlocks_autocraft": []
+    },
+    "lab_tier3": {
+      "name": "Лаборатория III тира",
+      "description": "Открывает возможность исследовать технологии III тира - без неё они остаются недоступны для изучения, даже если все остальные условия уже выполнены.",
+      "requires_tech": "workshop_automation",
+      "cost": {
+        "metal": 20,
+        "tools": 15,
+        "planks": 20
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "Л3",
+      "lab_tier": 3,
+      "max_count": 1,
+      "unlocks_autocraft": []
+    },
+    "apiary": {
+      "name": "Пасека",
+      "description": "Обычная ферма для разведения - даёт слоты, куда можно поселить особей, чтобы они каждый ход сами приносили ресурсы по своему фенотипу. Сама постройка ничего не производит и не потребляет - весь эффект в слотах (breeding_slots). Открывает модалку «Фермы» в шапке игры.",
+      "requires_tech": "woodworking",
+      "cost": {
+        "wood": 40,
+        "stone": 20
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 4
+      },
+      "icon_label": "ПС",
+      "breeding_slots": 2,
+      "upgrades": [
+        {
+          "id": "apiary_extra_slot",
+          "name": "Дополнительный улей",
+          "description": "+1 слот для поселения пчёл в этой пасеке. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "type": "breeding_slots_bonus",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "wood": 20,
+            "honey": 10
+          },
+          "repeatable": true,
+          "cost_growth": 1.6
+        }
+      ]
+    },
+    "breeding_station": {
+      "name": "Станция скрещивания",
+      "description": "Открывает саму возможность скрещивать особей (кнопка «Скрестить» в модалке «Фермы») - без неё особей можно только ловить в диком виде, расселять по фермам и синтезировать по уже изученным аллелям. Фермы (Пасека/Электрическая пасека) для самого скрещивания не нужны - это отдельный механизм, не привязанный к конкретному питомнику.",
+      "requires_tech": "woodworking",
+      "cost": {
+        "wood": 35,
+        "stone": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 4
+      },
+      "icon_label": "СС",
+      "breeding_station": true,
+      "upgrades": [
+        {
+          "id": "breeding_station_mutation",
+          "name": "Генетический стимулятор",
+          "description": "+50% к шансу мутации при скрещивании.",
+          "type": "breeding_mutation_chance",
+          "value": 1.5,
+          "requires_tech": null,
+          "cost": {
+            "honey": 50
+          }
+        }
+      ]
+    },
+    "electric_apiary": {
+      "name": "Электрическая пасека",
+      "description": "Ферма на энергии - больше слотов, чем у обычной пасеки, и свои апгрейды (продукция, бессмертие поселённых особей, энергоэффективность).",
+      "requires_tech": "reliable_machines",
+      "cost": {
+        "wood": 30,
+        "metal": 20,
+        "tools": 5
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 2
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 3
+      },
+      "icon_label": "ЭП",
+      "breeding_slots": 3,
+      "upgrades": [
+        {
+          "id": "electric_apiary_output",
+          "name": "Улучшенное кормление",
+          "description": "+50% к продукции ВСЕХ особей, поселённых в этой ферме.",
+          "type": "breeding_output",
+          "value": 1.5,
+          "requires_tech": null,
+          "cost": {
+            "honey": 30
+          }
+        },
+        {
+          "id": "electric_apiary_immortality",
+          "name": "Криоконсервация",
+          "description": "Особи, поселённые в этой ферме, больше не умирают от старости.",
+          "type": "breeding_immortality",
+          "value": 1,
+          "requires_tech": "precision_engineering",
+          "cost": {
+            "metal": 40,
+            "tools": 10
+          }
+        },
+        {
+          "id": "electric_apiary_energy",
+          "name": "Энергоэффективность",
+          "description": "-30% расход энергии.",
+          "type": "energy_efficiency",
+          "value": 0.7,
+          "requires_tech": null,
+          "cost": {
+            "metal": 15
+          }
+        },
+        {
+          "id": "electric_apiary_extra_slot",
+          "name": "Дополнительный улей",
+          "description": "+1 слот для поселения пчёл в этой ферме. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "type": "breeding_slots_bonus",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "metal": 10,
+            "honey": 20
+          },
+          "repeatable": true,
+          "cost_growth": 1.6
+        }
+      ]
+    },
+    "industrial_apiary": {
+      "name": "Промышленная пасека",
+      "description": "Самая вместительная ферма - больше слотов, чем у электрической пасеки, и, помимо продукции/бессмертия/энергоэффективности, умеет эмулировать одну из 6 сред обитания (апгрейды типа environment_emulation, покупаются на КАЖДЫЙ экземпляр отдельно и взаимоисключающе): пчела с совпадающим геном среды получает шанс на дополнительную бонусную продукцию.",
+      "requires_tech": "precision_engineering",
+      "cost": {
+        "wood": 40,
+        "metal": 40,
+        "tools": 15
+      },
+      "produces": {},
+      "consumes": {
+        "energy": 3
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 5
+      },
+      "icon_label": "ПП",
+      "breeding_slots": 4,
+      "upgrades": [
+        {
+          "id": "industrial_apiary_output",
+          "name": "Улучшенное кормление",
+          "description": "+75% к продукции ВСЕХ особей, поселённых в ЭТОМ экземпляре пасеки.",
+          "type": "breeding_output",
+          "value": 1.75,
+          "requires_tech": null,
+          "cost": {
+            "honey": 60
+          }
+        },
+        {
+          "id": "industrial_apiary_immortality",
+          "name": "Криоконсервация",
+          "description": "Особи, поселённые в ЭТОМ экземпляре пасеки, больше не умирают от старости.",
+          "type": "breeding_immortality",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "metal": 60,
+            "tools": 15
+          }
+        },
+        {
+          "id": "industrial_apiary_energy",
+          "name": "Энергоэффективность",
+          "description": "-40% расход энергии.",
+          "type": "energy_efficiency",
+          "value": 0.6,
+          "requires_tech": null,
+          "cost": {
+            "metal": 25
+          }
+        },
+        {
+          "id": "industrial_apiary_extra_slot",
+          "name": "Дополнительный улей",
+          "description": "+1 слот для поселения пчёл в ЭТОМ экземпляре пасеки. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "type": "breeding_slots_bonus",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "metal": 15,
+            "honey": 30
+          },
+          "repeatable": true,
+          "cost_growth": 1.6
+        },
+        {
+          "id": "industrial_apiary_env_forest",
+          "name": "Эмуляция леса",
+          "description": "Эмулирует среду «Лес» в ЭТОМ экземпляре пасеки - пчёлы с этим геном получают шанс на бонусную древесину. Заменяет ранее купленную эмуляцию среды, если она была.",
+          "type": "environment_emulation",
+          "value": "forest",
+          "requires_tech": null,
+          "cost": {
+            "wood": 40
+          }
+        },
+        {
+          "id": "industrial_apiary_env_fields",
+          "name": "Эмуляция полей",
+          "description": "Эмулирует среду «Поля» в ЭТОМ экземпляре пасеки - пчёлы с этим геном получают шанс на бонусный мёд. Заменяет ранее купленную эмуляцию среды, если она была.",
+          "type": "environment_emulation",
+          "value": "fields",
+          "requires_tech": null,
+          "cost": {
+            "wood": 20,
+            "stone": 20
+          }
+        },
+        {
+          "id": "industrial_apiary_env_caves",
+          "name": "Эмуляция пещер",
+          "description": "Эмулирует среду «Пещеры» в ЭТОМ экземпляре пасеки - пчёлы с этим геном получают шанс на бонусную руду. Заменяет ранее купленную эмуляцию среды, если она была.",
+          "type": "environment_emulation",
+          "value": "caves",
+          "requires_tech": null,
+          "cost": {
+            "stone": 40,
+            "metal": 10
+          }
+        },
+        {
+          "id": "industrial_apiary_env_desert",
+          "name": "Эмуляция пустыни",
+          "description": "Эмулирует среду «Пустыня» в ЭТОМ экземпляре пасеки - пчёлы с этим геном получают шанс на бонусный камень. Заменяет ранее купленную эмуляцию среды, если она была.",
+          "type": "environment_emulation",
+          "value": "desert",
+          "requires_tech": null,
+          "cost": {
+            "stone": 50
+          }
+        },
+        {
+          "id": "industrial_apiary_env_water",
+          "name": "Эмуляция воды",
+          "description": "Эмулирует среду «Вода» в ЭТОМ экземпляре пасеки - пчёлы с этим геном получают шанс на бонусную энергию. Заменяет ранее купленную эмуляцию среды, если она была.",
+          "type": "environment_emulation",
+          "value": "water",
+          "requires_tech": null,
+          "cost": {
+            "metal": 30,
+            "tools": 10
+          }
+        },
+        {
+          "id": "industrial_apiary_env_space",
+          "name": "Эмуляция космоса",
+          "description": "Эмулирует среду «Космос» в ЭТОМ экземпляре пасеки - пчёлы с этим геном получают шанс на бонусный уран. Заменяет ранее купленную эмуляцию среды, если она была.",
+          "type": "environment_emulation",
+          "value": "space",
+          "requires_tech": null,
+          "cost": {
+            "metal": 80,
+            "tools": 40
+          }
+        }
+      ]
+    },
+    "genetics_lab": {
+      "name": "Генетическая лаборатория",
+      "description": "Пока работает хотя бы одна копия - доступны мгновенное опознание генома особи (вместо ожидания автоопознания) и синтез особи по уже изученным аллелям (генетический шаблон, минуя RNG).",
+      "requires_tech": "precision_engineering",
+      "cost": {
+        "metal": 60,
+        "tools": 20
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 6
+      },
+      "icon_label": "ГЛ",
+      "genetics_lab": true
+    },
+    "soul_synthesizer": {
+      "name": "Синтезатор душ",
+      "description": "Специальный механизм - вставь душу обычного существа (например, волка) в его слот, и он будет каждый ход сам производить ресурсы, пока душа стоит внутри. Душа не расходуется - только занимает слот.",
+      "requires_tech": "toolmaking",
+      "cost": {
+        "wood": 60,
+        "stone": 40
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 5
+      },
+      "icon_label": "СД",
+      "soul_collector": {
+        "slots": 1,
+        "accepts": [
+          "wolf_soul"
+        ]
+      },
+      "upgrades": [
+        {
+          "id": "soul_synthesizer_slot",
+          "name": "Дополнительный слот",
+          "description": "+1 слот для душ в этом синтезаторе. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "type": "soul_collector_slots",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "wood": 30,
+            "stone": 20
+          },
+          "repeatable": true,
+          "cost_growth": 1.6
+        },
+        {
+          "id": "soul_synthesizer_efficiency",
+          "name": "Резонансный контур",
+          "description": "+50% к продукции всех душ в этом синтезаторе.",
+          "type": "soul_generation_efficiency",
+          "value": 1.5,
+          "requires_tech": null,
+          "cost": {
+            "metal": 20
+          }
+        }
+      ]
+    },
+    "guardian_altar": {
+      "name": "Алтарь Стража",
+      "description": "Синтезатор для боссовых душ - вставь душу Стража леса, и алтарь будет каждый ход производить ценные ресурсы, пока она стоит внутри.",
+      "requires_tech": "toolmaking",
+      "cost": {
+        "stone": 80,
+        "metal": 20
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "stone": 8
+      },
+      "icon_label": "АС",
+      "soul_collector": {
+        "slots": 1,
+        "accepts": [
+          "forest_guardian_soul"
+        ]
+      },
+      "upgrades": [
+        {
+          "id": "guardian_altar_slot",
+          "name": "Дополнительный слот",
+          "description": "+1 слот для душ в этом алтаре. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "type": "soul_collector_slots",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "stone": 40,
+            "metal": 15
+          },
+          "repeatable": true,
+          "cost_growth": 1.7
+        }
+      ]
+    }
+  },
+  "techs": {
+    "woodworking": {
+      "name": "Деревообработка",
+      "tier": 1,
+      "description": "Базовая обработка древесины - открывает лесопилку, автоматически распиливающую брёвна на доски.",
+      "requires": [],
+      "cost": {
+        "wood": 20
+      },
+      "effects": []
+    },
+    "charcoal_burning": {
+      "name": "Углежжение",
+      "tier": 1,
+      "description": "Выжигание угля из дерева - основа для выплавки металла и первых генераторов энергии.",
+      "requires": [],
+      "cost": {
+        "wood": 15
+      },
+      "effects": []
+    },
+    "toolmaking": {
+      "name": "Инструменты",
+      "tier": 1,
+      "description": "Изготовление простых инструментов вручную - открывает дорогу к механизации и более сложным технологиям.",
+      "requires": [
+        "woodworking"
+      ],
+      "cost": {
+        "planks": 10
+      },
+      "effects": []
+    },
+    "electrification": {
+      "name": "Электрификация",
+      "tier": 1,
+      "description": "Генераторы промышленного масштаба - открывает угольный генератор и батарейный блок для накопления энергии.",
+      "requires": [
+        "charcoal_burning"
+      ],
+      "cost": {
+        "tools": 5,
+        "stone": 15
+      },
+      "effects": []
+    },
+    "reliable_machines": {
+      "name": "Надёжные механизмы",
+      "tier": 2,
+      "description": "Улучшенная сборка механизмов снижает шанс поломки у всех построек.",
+      "requires": [
+        "toolmaking"
+      ],
+      "cost": {
+        "tools": 8,
+        "planks": 10
+      },
+      "effects": [
+        {
+          "building": "*",
+          "breakdown_delta": -0.02,
+          "produces": {},
+          "consumes": {}
+        }
+      ]
+    },
+    "mining": {
+      "name": "Горное дело",
+      "tier": 2,
+      "description": "Разведка и добыча руды - открывает поиск рудных жил и ручную добычу камня в шахте.",
+      "requires": [
+        "toolmaking"
+      ],
+      "cost": {
+        "tools": 3,
+        "planks": 10
+      },
+      "effects": []
+    },
+    "workshop_automation": {
+      "name": "Автоматизация мастерской",
+      "tier": 2,
+      "description": "Открывает мастерскую - постройку, автоматически производящую инструменты.",
+      "requires": [
+        "toolmaking"
+      ],
+      "cost": {
+        "tools": 5,
+        "planks": 15
+      },
+      "effects": []
+    },
+    "metallurgy": {
+      "name": "Металлургия",
+      "tier": 2,
+      "description": "Выплавка металла из руды - открывает ручную плавку металла и металлическую кирку.",
+      "requires": [
+        "mining",
+        "charcoal_burning"
+      ],
+      "cost": {
+        "ore": 5,
+        "charcoal": 5
+      },
+      "effects": []
+    },
+    "mechanized_mining": {
+      "name": "Механизированная добыча",
+      "tier": 2,
+      "description": "Открывает шахту - постройку для автоматической добычи руды без ручного труда.",
+      "requires": [
+        "mining"
+      ],
+      "cost": {
+        "tools": 10,
+        "planks": 20
+      },
+      "effects": []
+    },
+    "industrial_smelting": {
+      "name": "Промышленная плавка",
+      "tier": 3,
+      "description": "Открывает печь - автоматическую выплавку металла из руды и угля.",
+      "requires": [
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 5,
+        "stone": 20
+      },
+      "effects": []
+    },
+    "improved_saws": {
+      "name": "Улучшенные пилы",
+      "tier": 3,
+      "description": "Более острые металлические пилы увеличивают выход досок с лесопилки.",
+      "requires": [
+        "woodworking",
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 5,
+        "tools": 3
+      },
+      "effects": [
+        {
+          "building": "sawmill",
+          "produces": {
+            "planks": 2
+          },
+          "consumes": {},
+          "breakdown_delta": 0
+        }
+      ]
+    },
+    "mine_conveyor": {
+      "name": "Конвейер шахты",
+      "tier": 3,
+      "description": "Механизированный вывоз породы увеличивает добычу руды на шахте.",
+      "requires": [
+        "mechanized_mining",
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 10
+      },
+      "effects": [
+        {
+          "building": "mine",
+          "produces": {
+            "ore": 2
+          },
+          "consumes": {},
+          "breakdown_delta": 0
+        }
+      ]
+    },
+    "precision_engineering": {
+      "name": "Точная инженерия",
+      "tier": 3,
+      "description": "Более точная сборка ещё немного снижает шанс поломки у всех построек.",
+      "requires": [
+        "reliable_machines",
+        "metallurgy"
+      ],
+      "cost": {
+        "metal": 8,
+        "tools": 5
+      },
+      "effects": [
+        {
+          "building": "*",
+          "breakdown_delta": -0.02,
+          "produces": {},
+          "consumes": {}
+        }
+      ]
+    },
+    "advanced_solar": {
+      "name": "Улучшенные солнечные панели",
+      "tier": 2,
+      "description": "Открывает солнечную панель Мк2 - более мощную и надёжную, чем первая модель.",
+      "requires": [
+        "electrification"
+      ],
+      "cost": {
+        "metal": 10,
+        "tools": 5
+      },
+      "effects": []
+    },
+    "resource_synthesis": {
+      "name": "Синтез ресурсов",
+      "tier": 3,
+      "description": "Открывает синтезатор руды и промышленный накопитель энергии большой ёмкости.",
+      "requires": [
+        "metallurgy",
+        "electrification"
+      ],
+      "cost": {
+        "metal": 15,
+        "tools": 10
+      },
+      "effects": []
+    },
+    "uranium_prospecting": {
+      "name": "Разведка урана",
+      "tier": 3,
+      "description": "Открывает урановый рудник и добычу урановых жил в шахте.",
+      "requires": [
+        "mechanized_mining"
+      ],
+      "cost": {
+        "tools": 15,
+        "metal": 5
+      },
+      "effects": []
+    },
+    "nuclear_engineering": {
+      "name": "Ядерная инженерия",
+      "tier": 3,
+      "description": "Открывает ядерный реактор - мощный источник энергии, работающий на уране.",
+      "requires": [
+        "uranium_prospecting",
+        "industrial_smelting"
+      ],
+      "cost": {
+        "metal": 20,
+        "tools": 15
+      },
+      "effects": []
+    },
+    "photonics": {
+      "name": "Фотоника",
+      "tier": 2,
+      "description": "Открывает солнечную ферму - следующее поколение солнечной энергетики.",
+      "requires": [
+        "advanced_solar"
+      ],
+      "cost": {
+        "metal": 20,
+        "tools": 10
+      },
+      "effects": []
+    },
+    "advanced_photonics": {
+      "name": "Продвинутая фотоника",
+      "tier": 3,
+      "description": "Открывает солнечную электростанцию - самый мощный из солнечных генераторов.",
+      "requires": [
+        "photonics",
+        "nuclear_engineering"
+      ],
+      "cost": {
+        "metal": 40,
+        "tools": 20
+      },
+      "effects": []
+    }
+  },
+  "mining_info": {
+    "ore": {
+      "requires_tech": "mining",
+      "rarity": 1,
+      "vein_size_range": [
+        30,
+        60
+      ],
+      "base_yield": 4,
+      "required_tool": "pickaxe",
+      "required_tier": 1,
+      "quality_tiers": [
+        {
+          "name": "Бедная",
+          "weight": 5,
+          "yield_multiplier": 0.5,
+          "min_tool_tier": 1
+        },
+        {
+          "name": "Обычная",
+          "weight": 5,
+          "yield_multiplier": 1,
+          "min_tool_tier": 1
+        },
+        {
+          "name": "Богатая",
+          "weight": 2,
+          "yield_multiplier": 2,
+          "min_tool_tier": 2
+        },
+        {
+          "name": "Отличная",
+          "weight": 1,
+          "yield_multiplier": 3,
+          "min_tool_tier": 3
+        },
+        {
+          "name": "Чистая",
+          "weight": 0.3,
+          "yield_multiplier": 5,
+          "min_tool_tier": 5
+        }
+      ]
+    },
+    "uranium": {
+      "requires_tech": "uranium_prospecting",
+      "rarity": 4,
+      "vein_size_range": [
+        3,
+        6
+      ],
+      "base_yield": 2,
+      "required_tool": "pickaxe",
+      "required_tier": 3
+    }
+  },
+  "mobs": {
+    "wolf": {
+      "name": "Волк",
+      "description": "Лесной хищник - обычная добыча в охотничьих угодьях. С небольшим шансом при убийстве роняет душу, которую можно поселить в синтезатор душ.",
+      "location": "hunting_grounds",
+      "requires_tech": null,
+      "is_boss": false,
+      "rarity": 1,
+      "hp": 15,
+      "xp_reward": 5,
+      "loot": {
+        "wolf_pelt": 1
+      },
+      "soul_id": "wolf_soul",
+      "soul_chance": 0.05
+    },
+    "forest_guardian": {
+      "name": "Страж леса",
+      "description": "Могучий босс охотничьих угодий - призывается тотемом. Роняет клыки, из которых можно выковать легендарный меч или заключить душу Стража для алтаря.",
+      "location": "hunting_grounds",
+      "requires_tech": null,
+      "is_boss": true,
+      "hp": 200,
+      "xp_reward": 100,
+      "loot": {
+        "boss_fang": 5,
+        "wolf_pelt": 3
+      },
+      "summon_cost": {
+        "boss_totem": 1
+      }
+    }
+  },
+  "soul_recipes": {
+    "wolf_soul": {
+      "produces": {
+        "bone": 2,
+        "tools": 1
+      },
+      "produces_chance": {
+        "tools": 0.1
+      }
+    },
+    "forest_guardian_soul": {
+      "produces": {
+        "bone": 5,
+        "metal": 2
+      },
+      "produces_chance": {
+        "metal": 0.25
+      }
+    }
+  },
+  "loot_cases": {
+    "starter_case": {
+      "name": "Стартовый набор",
+      "description": "Простой ящик для тех, кто только обустраивается - гарантированно дерево и камень, с шансом на инструменты сверху.",
+      "produces": {
+        "wood": 30,
+        "stone": 15,
+        "tools": 2
+      },
+      "produces_chance": {
+        "tools": 0.5
+      }
+    },
+    "engineer_case": {
+      "name": "Инженерный ящик",
+      "description": "Награда за успехи в исследованиях - металл и инструменты, с шансом на дополнительный металл.",
+      "produces": {
+        "metal": 20,
+        "tools": 5
+      },
+      "produces_chance": {
+        "metal": 0.7
+      }
+    },
+    "veteran_case": {
+      "name": "Ящик ветерана",
+      "description": "Награда за долгую игру - солидный запас металла, с небольшим шансом на уран.",
+      "produces": {
+        "metal": 40,
+        "uranium": 1
+      },
+      "produces_chance": {
+        "uranium": 0.3
+      }
+    }
+  },
+  "quests": {
+    "quest_settle_in": {
+      "name": "Обжились",
+      "description": "Построй хотя бы 2 постройки любого типа - самое начало обустройства.",
+      "tier": 1,
+      "conditions": [
+        {
+          "type": "total_buildings_at_least",
+          "amount": 2
+        }
+      ],
+      "reward_case": "starter_case"
+    },
+    "quest_age_of_science": {
+      "name": "Век науки",
+      "description": "Исследуй хотя бы 6 технологий.",
+      "tier": 2,
+      "conditions": [
+        {
+          "type": "tech_count_at_least",
+          "amount": 6
+        }
+      ],
+      "reward_case": "engineer_case"
+    },
+    "quest_veteran": {
+      "name": "Ветеран",
+      "description": "Доживи до 60-го хода.",
+      "tier": 3,
+      "conditions": [
+        {
+          "type": "turn_at_least",
+          "amount": 60
+        }
+      ],
+      "reward_case": "veteran_case"
+    }
+  },
+  "achievements": {
+    "first_building": {
+      "name": "Первый камень в фундамент",
+      "description": "Построй свою первую постройку.",
+      "conditions": [
+        {
+          "type": "total_buildings_at_least",
+          "amount": 1
+        }
+      ]
+    },
+    "first_furnace": {
+      "name": "Плавильщик",
+      "description": "Построй печь.",
+      "conditions": [
+        {
+          "type": "building_count_at_least",
+          "building": "furnace",
+          "amount": 1
+        }
+      ]
+    },
+    "tech_scholar": {
+      "name": "Учёный",
+      "description": "Исследуй 10 технологий.",
+      "conditions": [
+        {
+          "type": "tech_count_at_least",
+          "amount": 10
+        }
+      ]
+    },
+    "completionist": {
+      "name": "Полное просвещение",
+      "description": "Исследуй все технологии.",
+      "conditions": [
+        {
+          "type": "all_techs_researched"
+        }
+      ]
+    },
+    "master_miner": {
+      "name": "Мастер-старатель",
+      "description": "Прокачай кирку до максимального тира.",
+      "conditions": [
+        {
+          "type": "tool_tier_at_least",
+          "amount": 5,
+          "tool": "pickaxe"
+        }
+      ]
+    },
+    "century": {
+      "name": "Век производства",
+      "description": "Доживи до 100-го хода.",
+      "conditions": [
+        {
+          "type": "turn_at_least",
+          "amount": 100
+        }
+      ]
+    }
+  },
+  "time": {
+    "hours_per_turn": 3,
+    "day_start_hour": 6,
+    "day_end_hour": 21
+  },
+  "ui": {
+    "default_action_delay_ms": 400
+  },
+  "energy_recipes": {
+    "metal_from_energy": {
+      "name": "Расплавка металла",
+      "description": "Превращает накопленную энергию в металл - удобно для избытка энергии, который иначе просто сгорал бы без хранилищ.",
+      "requires_tech": null,
+      "threshold": 100,
+      "produces": {
+        "metal": 5
+      }
+    },
+    "wood_from_energy": {
+      "name": "Синтез древесины",
+      "description": "Дешёвый рецепт крафта за энергию - невысокий порог, партия готовится за один-два хода даже на одном преобразователе.",
+      "requires_tech": null,
+      "threshold": 20,
+      "produces": {
+        "wood": 5
+      }
+    },
+    "uranium_from_energy": {
+      "name": "Синтез урана",
+      "description": "Дорогой рецепт крафта за энергию - порог намеренно завышен (больше 5000), чтобы проверить долгое накопление и параллельную работу нескольких преобразователей.",
+      "requires_tech": null,
+      "threshold": 6000,
+      "produces": {
+        "uranium": 1
+      }
+    }
+  },
+  "tools": {
+    "pickaxe": {
+      "name": "Кирка",
+      "tiers": [
+        {
+          "name": "Деревянная кирка",
+          "cost": null,
+          "requires_tech": null
+        },
+        {
+          "name": "Каменная кирка",
+          "cost": {
+            "wood": 10,
+            "stone": 15
+          },
+          "requires_tech": null
+        },
+        {
+          "name": "Металлическая кирка",
+          "cost": {
+            "tools": 10,
+            "metal": 10
+          },
+          "requires_tech": "metallurgy"
+        },
+        {
+          "name": "Прочная кирка",
+          "cost": {
+            "metal": 30,
+            "tools": 15
+          },
+          "requires_tech": "industrial_smelting"
+        },
+        {
+          "name": "Промышленная кирка",
+          "cost": {
+            "metal": 60,
+            "tools": 30
+          },
+          "requires_tech": "resource_synthesis"
+        }
+      ]
+    },
+    "sword": {
+      "name": "Меч",
+      "weapon": true,
+      "tiers": [
+        {
+          "name": "Кулаки",
+          "cost": null,
+          "requires_tech": null
+        },
+        {
+          "name": "Деревянный меч",
+          "cost": {
+            "wood": 15,
+            "stone": 5
+          },
+          "requires_tech": null,
+          "damage_multiplier": 2
+        },
+        {
+          "name": "Металлический меч",
+          "cost": {
+            "metal": 20,
+            "tools": 10
+          },
+          "requires_tech": "metallurgy",
+          "damage_multiplier": 4
+        }
+      ]
+    },
+    "guardian_slayer": {
+      "name": "Клинок Стража",
+      "weapon": true,
+      "tiers": [
+        {
+          "name": "Не выковано",
+          "cost": null,
+          "requires_tech": null
+        },
+        {
+          "name": "Клинок Стража",
+          "cost": {
+            "boss_fang": 3,
+            "metal": 30
+          },
+          "requires_tech": null,
+          "instant_kill_max_hp": 250,
+          "loot_multiplier": 1.5,
+          "soul_chance_multiplier": 2
+        }
+      ]
+    }
+  },
+  "skills": {
+    "combat": {
+      "name": "Боевой навык",
+      "description": "Растёт от ударов по мобам и боссам в охотничьих угодьях - повышает урон атаки.",
+      "levels": [
+        {
+          "xp_required": 0,
+          "effects": {
+            "damage": 2
+          }
+        },
+        {
+          "xp_required": 30,
+          "effects": {
+            "damage": 4
+          }
+        },
+        {
+          "xp_required": 100,
+          "effects": {
+            "damage": 8
+          }
+        },
+        {
+          "xp_required": 300,
+          "effects": {
+            "damage": 16
+          }
+        }
+      ]
+    }
+  },
+  "species": {
+    "bee": {
+      "description": "Обычная лесная пчела - даёт немного мёда, пока живёт в ферме.",
+      "produces": {
+        "honey": 2
+      },
+      "consumes": {},
+      "dominant": true,
+      "weight": 5
+    },
+    "royal_bee": {
+      "description": "Редкая порода пчёл, появляющаяся при скрещивании - производит заметно больше мёда и маточное молочко.",
+      "produces": {
+        "honey": 5,
+        "royal_jelly": 1
+      },
+      "consumes": {},
+      "dominant": false,
+      "weight": 0
+    }
+  },
+  "genetic_traits": {
+    "lifespan": {
+      "name": "Срок жизни",
+      "alleles": [
+        {
+          "id": "short",
+          "name": "Короткая",
+          "value": 6,
+          "dominant": false,
+          "weight": 2
+        },
+        {
+          "id": "normal",
+          "name": "Обычная",
+          "value": 12,
+          "dominant": true,
+          "weight": 5
+        },
+        {
+          "id": "long",
+          "name": "Долгая",
+          "value": 24,
+          "dominant": false,
+          "weight": 1
+        }
+      ]
+    },
+    "output_multiplier": {
+      "name": "Продуктивность",
+      "alleles": [
+        {
+          "id": "slow",
+          "name": "Медленная",
+          "value": 0.5,
+          "dominant": false,
+          "weight": 2
+        },
+        {
+          "id": "normal",
+          "name": "Обычная",
+          "value": 1,
+          "dominant": true,
+          "weight": 5
+        },
+        {
+          "id": "fast",
+          "name": "Быстрая",
+          "value": 2,
+          "dominant": false,
+          "weight": 1.5
+        },
+        {
+          "id": "fastest",
+          "name": "Стахановская",
+          "value": 3,
+          "dominant": false,
+          "weight": 0.3
+        }
+      ]
+    },
+    "active_period": {
+      "name": "Активность",
+      "alleles": [
+        {
+          "id": "day",
+          "name": "Днём",
+          "dominant": true,
+          "weight": 5
+        },
+        {
+          "id": "night",
+          "name": "Ночью",
+          "dominant": false,
+          "weight": 2
+        },
+        {
+          "id": "always",
+          "name": "Всегда",
+          "dominant": false,
+          "weight": 1
+        }
+      ]
+    },
+    "environment": {
+      "name": "Среда обитания",
+      "alleles": [
+        {
+          "id": "forest",
+          "name": "Лес",
+          "dominant": true,
+          "weight": 5,
+          "bonus_resource": "wood",
+          "bonus_amount": 1,
+          "bonus_chance": 0.3
+        },
+        {
+          "id": "fields",
+          "name": "Поля",
+          "dominant": false,
+          "weight": 5,
+          "bonus_resource": "honey",
+          "bonus_amount": 1,
+          "bonus_chance": 0.3
+        },
+        {
+          "id": "caves",
+          "name": "Пещеры",
+          "dominant": false,
+          "weight": 3,
+          "bonus_resource": "ore",
+          "bonus_amount": 1,
+          "bonus_chance": 0.25
+        },
+        {
+          "id": "desert",
+          "name": "Пустыня",
+          "dominant": false,
+          "weight": 3,
+          "bonus_resource": "stone",
+          "bonus_amount": 1,
+          "bonus_chance": 0.25
+        },
+        {
+          "id": "water",
+          "name": "Вода",
+          "dominant": false,
+          "weight": 2,
+          "bonus_resource": "energy",
+          "bonus_amount": 1,
+          "bonus_chance": 0.2
+        },
+        {
+          "id": "space",
+          "name": "Космос",
+          "dominant": false,
+          "weight": 1,
+          "bonus_resource": "uranium",
+          "bonus_amount": 1,
+          "bonus_chance": 0.15
+        }
+      ]
+    }
+  },
+  "mutations": [
+    {
+      "parent_a": "bee",
+      "parent_b": "bee",
+      "requires_tech": null,
+      "requires_building": null,
+      "chance": 0.1,
+      "outcomes": [
+        {
+          "species_id": "royal_bee",
+          "weight": 1
+        }
+      ]
+    }
+  ],
+  "genetics": {
+    "synthesis_cost": {
+      "honey": 50
+    },
+    "environment_mutation_chance": 0.01
+  }
+}
