@@ -606,169 +606,260 @@ def _pick_converter_building_with_free_slot(
     return None
 
 
-def _ensure_available(
-    resources: dict[str, int], jobs: dict[str, dict], slots: dict[str, int], energy_jobs: list[dict],
-    resource_id: str, amount: int, techs: set[str], visiting: frozenset[str], state: GameState,
-    recipe: dict[str, str],
-) -> AutocraftFailure | None:
-    """Гарантирует resources[resource_id] >= amount. При нехватке рекурсивно докрафчивает
-    из рецепта этого ресурса, если он открыт - как автокрафт в Applied Energistics:
-    не хватает промежуточного ресурса, значит система сама сделает его из более простого
-    сырья. Работает на копиях resources/jobs, чтобы неудачная попытка ничего не портила.
+class _AutocraftGraph:
+    """Структура дерева рецептов, нужных для запроса cost - СЧИТАЕТСЯ ОДИН РАЗ на
+    каждый resource_id (не на каждое его появление в дереве, см. _discover_autocraft_graph),
+    поэтому не боится "ромбов" (несколько потребителей делят один и тот же ресурс ниже
+    по цепочке, см. модуль ensure_and_pay)."""
 
-    Если нужное число прокруток (fires) не влезает в autocraft_speed_capacity ЗА ОДИН ход,
-    рецепт не выполняется мгновенно - вместо этого заводится (или продлевается) фоновая
-    задача в jobs (на что уходит один слот из autocraft_slot_capacity), а наверх уходит
-    AutocraftFailure(resource_id, "in_progress") - это не поражение, а "запущено, доделается
-    само" (см. _pay_or_defer). Настоящие причины отказа (нет рецепта/не разблокировано/не
-    хватает технологии, мощности процессора или свободных слотов) возвращаются как обычно.
+    __slots__ = ("ingredient_first", "preorder", "kind_of", "action_of", "stats_of")
 
-    Пока в игре нет НИ ОДНОЙ работающей постройки с compute_power (compute_capacity
-    == 0), автокрафт как система игроку ещё не открылся - независимо от рецепта,
-    разблокировки или технологии ЛЮБая нехватка ресурса должна выглядеть как обычная
-    нехватка при ручном крафте ("no_processor"), а не намекать на процессоры/память,
-    которых игрок ещё не видел. Как только появится первый работающий процессор
-    (compute_capacity > 0), эта проверка перестаёт перехватывать - дальше решают
-    обычные, более конкретные причины ниже.
+    def __init__(self):
+        self.ingredient_first: list[str] = []  # топологический порядок: сырьё раньше того, кто его ест
+        self.preorder: dict[str, int] = {}  # порядок ПЕРВОГО обнаружения (родитель раньше своих ингредиентов) -
+        # нужен только для того, чтобы при НЕСКОЛЬКИХ одновременных настоящих ошибках выбрать
+        # ту же самую, что показал бы старый рекурсивный код (см. ensure_and_pay)
+        self.kind_of: dict[str, str] = {}  # "action" | "energy" | "none" (сырьё/цикл/энергорецепт без обычного)
+        self.action_of: dict[str, str] = {}  # только для kind="action"
+        self.stats_of: dict[str, tuple[dict[str, int], dict[str, int]]] = {}  # только для kind="action"
 
-    Игрок может дополнительно выключить автокрафт вручную галочкой в UI
-    (state.autocraft_enabled=False, см. toggle_autocraft) - даже если процессоры
-    есть и всё разблокировано, действия тогда делаются строго руками
-    ("autocraft_disabled"), той же голой формулировкой, что и "no_processor".
 
-    Если у ресурса нет обычного рецепта (RESOURCE_RECIPE), но есть рецепт крафта за
-    энергию, производящий именно его (ENERGY_RECIPE_FOR_RESOURCE) - это НЕ "нет
-    рецепта". Автокрафт ведёт себя как игрок в локации "Механизмы": если рецепт уже
-    запущен в каком-то преобразователе - просто ждёт (это НЕ ошибка, "in_progress");
-    если свободного преобразователя нет - тоже ждёт (кто-то из занятых рано или
-    поздно освободится); а если свободный ЕСТЬ - запускает рецепт САМ, занимая этот
-    слот, и тоже возвращает "in_progress" (партия появится через несколько ходов,
-    не мгновенно). Отдельная фоновая задача в jobs/слот автокрафта тут не при чём -
-    у крафта за энергию свой персональный "слот" (свободный преобразователь), делить
-    с обычными автокрафт-задачами ему нечего (см. _process_energy_jobs).
+def _discover_autocraft_graph(state: GameState, resource_ids, recipe: dict[str, str]) -> _AutocraftGraph:
+    """Обходит дерево рецептов ОТ resource_ids ВНИЗ до сырья, заходя в КАЖДЫЙ resource_id
+    ровно один раз (не один раз на каждого потребителя) - структура рецепта (какое
+    действие, из чего) от количества не зависит, поэтому её достаточно узнать один раз,
+    даже если один и тот же ресурс нужен пяти разным веткам разом. Цикл в рецептах
+    (resource_id зависит сам от себя через цепочку) определяется классическим DFS
+    3-цветным обходом (серый = сейчас на пути обхода, чёрный = уже разобран целиком) -
+    НЕ тем же самым, что "уже разобран где-то в дереве": ромб (общий ресурс у двух
+    РАЗНЫХ веток) - это нормально и не цикл, серым он бывает только пока раскрывается
+    его СОБСТВЕННОЕ поддерево, а не пока на него просто ссылаются."""
+    graph = _AutocraftGraph()
+    color: dict[str, int] = {}  # 0/нет записи = не тронут, 1 = серый (на пути), 2 = чёрный (готов)
 
-    recipe - resource_recipe(state), посчитанный ОДИН раз вызывающим
-    (ensure_and_pay) и прокинутый через всю рекурсию, а не пересчитанный на
-    каждом уровне - он не меняется в рамках одного вызова (state.action_priority
-    не мутирует по ходу разбора), а сам пересчёт линеен по MANUAL_ACTIONS и на
-    глубокой/ветвистой цепочке заметно на профиле."""
-    if resources.get(resource_id, 0) >= amount:
-        return None
-    if not state.autocraft_enabled:
-        return AutocraftFailure(resource_id, "autocraft_disabled")
-    if compute_capacity(state) <= 0:
-        return AutocraftFailure(resource_id, "no_processor")
-    if resource_id in visiting:
-        return AutocraftFailure(resource_id, "no_recipe")  # цикл в рецептах - как будто рецепта нет
-    action_id = recipe.get(resource_id)
-    if action_id is None:
-        recipe_id = ENERGY_RECIPE_FOR_RESOURCE.get(resource_id)
-        if recipe_id is None:
-            return AutocraftFailure(resource_id, "no_recipe")  # это сырьё без рецепта - взять неоткуда
-        recipe = ENERGY_RECIPES[recipe_id]
-        # machine (см. content.json energy_recipes.*.machine) - необязательная
-        # привязка рецепта к КОНКРЕТНОМУ типу постройки с energy_converter (например,
-        # рецепт "Генератора материи" нельзя запустить в "Преобразователе") - None
-        # означает "любой тип с energy_converter подходит", как было раньше единым
-        # энергетическим преобразователем.
-        machine = recipe.get("machine")
-        if energy_converter_capacity(state, machine) <= 0:
-            return AutocraftFailure(resource_id, "not_unlocked")  # ни одного подходящего преобразователя не построено
-        if recipe.get("requires_tech") and recipe["requires_tech"] not in techs:
-            return AutocraftFailure(resource_id, "tech_locked")
-        already_running = any(
-            j["recipe_id"] == recipe_id and (machine is None or j.get("building_id") == machine)
-            for j in energy_jobs
-        )
-        if not already_running:
-            building_id = _pick_converter_building_with_free_slot(state, energy_jobs, machine)
-            if building_id is not None:
-                # Рецепт крафта за энергию может нести материальную цену (consumes,
-                # см. content.json) в дополнение к порогу энергии - генератор материи
-                # "материал тира N + энергия -> материал тира N+1". Автокрафт этот
-                # материал САМ не докрафчивает (осознанное упрощение первой версии,
-                # см. CLAUDE.md) - требует, чтобы он уже был в наличии целиком,
-                # иначе просто не запускает рецепт в эту попытку.
-                consumes = recipe.get("consumes", {})
-                if not all(resources.get(r, 0) >= amt for r, amt in consumes.items()):
-                    return AutocraftFailure(resource_id, "missing_energy_recipe_material")
-                for r, amt in consumes.items():
-                    resources[r] -= amt
-                energy_jobs.append({"recipe_id": recipe_id, "progress": 0, "building_id": building_id})
-        return AutocraftFailure(resource_id, "in_progress")
-    if not is_autocraft_unlocked(resource_id, state):
-        return AutocraftFailure(resource_id, "not_unlocked")
-    action = MANUAL_ACTIONS[action_id]
-    if action["requires_tech"] and action["requires_tech"] not in techs:
-        return AutocraftFailure(resource_id, "tech_locked")
+    def visit(resource_id: str) -> None:
+        if color.get(resource_id, 0) == 2:
+            return
+        if color.get(resource_id, 0) == 1:
+            graph.kind_of[resource_id] = "none"  # цикл - как будто рецепта нет (см. старую семантику)
+            return
+        graph.preorder[resource_id] = len(graph.preorder)
+        color[resource_id] = 1
+        action_id = recipe.get(resource_id)
+        if action_id is None:
+            graph.kind_of[resource_id] = "energy" if resource_id in ENERGY_RECIPE_FOR_RESOURCE else "none"
+        else:
+            graph.kind_of[resource_id] = "action"
+            graph.action_of[resource_id] = action_id
+            effective_cost, effective_gain = effective_manual_action_stats(action_id, state)
+            graph.stats_of[resource_id] = (effective_cost, effective_gain)
+            for ing_id in effective_cost:
+                visit(ing_id)
+        color[resource_id] = 2
+        graph.ingredient_first.append(resource_id)
 
-    # Эффективные cost/gain (а не сырые action["cost"]/action["gain"]) - действие
-    # может зависеть от постройки-"механизма" (requires_building), чьи улучшения
-    # домножают именно их (см. effective_manual_action_stats). Автокрафт обязан
-    # считать ТЕ ЖЕ числа, что реально применит do_manual_action, иначе бухгалтерия
-    # разъедется (например, посчитает fires по непроапгреженному gain_per_fire).
-    effective_cost, effective_gain = effective_manual_action_stats(action_id, state)
-    gain_per_fire = effective_gain[resource_id]
-    shortfall = amount - resources.get(resource_id, 0)
-    fires = -(-shortfall // gain_per_fire)  # округление вверх
+    for resource_id in resource_ids:
+        visit(resource_id)
+    return graph
 
-    # Мощность процессора - это количество потребляемых рецептом предметов за
-    # одну прокрутку (например, металл из угля+руды стоит 2 единицы мощности:
-    # 1 уголь + 1 руда), а не сама прокрутка - сложный рецепт "дороже" простого.
-    # Это ЖЁСТКИЙ потолок на размер запроса (не на скорость) - если суммарной мощности
-    # не хватает даже теоретически, ждать бессмысленно, фоновая задача тут не поможет.
-    compute_per_fire = sum(effective_cost.values())
-    if fires * compute_per_fire > compute_capacity(state):
-        return AutocraftFailure(resource_id, "insufficient_compute")
 
-    # Пока по ресурсу уже идёт фоновая задача, ВЕСЬ его дальнейший выпуск идёт ТОЛЬКО
-    # через неё - ни при каких обстоятельствах не докрафчиваем "хвост" отдельным мгновенным
-    # путём в обход задачи. Иначе задача (которая ничего не знает о перехвате) доделала бы
-    # свой полный fires_total поверх уже покрытого мгновенно куска - и в сумме вышло бы
-    # больше, чем реально требовалось. Если её остатка (плюс то, что уже в наличии) не
-    # хватит на amount, просто продлеваем задачу - настоящий результат появится сам,
-    # когда накопленное в resources[resource_id] в итоге дорастёт до amount (см. первую
-    # проверку функции), и НИ разу не раньше через параллельный путь.
-    existing = jobs.get(resource_id)
-    if existing is not None:
-        remaining = existing["fires_total"] - existing["fires_done"]
-        projected = resources.get(resource_id, 0) + remaining * gain_per_fire
-        if projected < amount:
-            existing["fires_total"] += -(-(amount - projected) // gain_per_fire)
-        return AutocraftFailure(resource_id, "in_progress")
+def _aggregate_autocraft_demand(
+    state: GameState, cost: dict[str, int], graph: _AutocraftGraph, jobs: dict[str, dict],
+) -> tuple[dict[str, AutocraftFailure], dict[str, float], dict[str, float], dict[str, float], dict[str, str]]:
+    """Считает СУММАРНЫЙ спрос на каждый resource_id (от исходного cost плюс от ВСЕХ
+    рецептов дерева, которым он нужен как ингредиент), и одновременно решает всё, что
+    решаемо БЕЗ знания статуса ингредиентов - открыт ли рецепт/технология/хватает ли
+    мощности процессора, не идёт ли по нему уже фоновая задача. Идёт по
+    graph.ingredient_first В ОБРАТНОМ порядке (потребитель раньше своего сырья) - к
+    тому моменту, как дошли до resource_id, весь спрос НА НЕГО от всех потребителей уже
+    посчитан, поэтому fires считается сразу верно и ОДИН раз, без пересчёта задним числом.
 
-    next_visiting = visiting | {resource_id}
-    needs_job = fires > autocraft_speed_capacity(state)  # не влезает в скорость одного хода
+    Критично, что "годится ли resource_id для автокрафта вообще" (не_открыт/технология/
+    цикл/нет рецепта) проверяется ЗДЕСЬ, ПЕРЕД тем как на его ингредиенты будет пущен
+    спрос - а не после, как можно было бы подумать глядя на порядок обхода. Если бы
+    проверка ждала своей очереди по ingredient_first (сырьё раньше), сначала пришлось бы
+    разбираться с сырьём НЕ_ОТКРЫТОГО родителя - и игрок увидел бы "не хватает сырья",
+    хотя настоящая причина - "этот рецепт ещё не открыт", как и было у старого
+    рекурсивного кода (там проверка стояла ДО рекурсии в ингредиенты).
 
-    for ing_id, ing_amount in effective_cost.items():
-        failure = _ensure_available(
-            resources, jobs, slots, energy_jobs, ing_id, ing_amount * fires, techs, next_visiting, state, recipe,
-        )
-        if failure is None:
+    Найденные ошибки НЕ прерывают проход немедленно - копятся в failures (resource_id ->
+    AutocraftFailure), а resource_id просто становится тупиком (спрос на его ингредиенты
+    не идёт дальше, как будто у него kind="none"). Так проход остаётся за ОДИН раз по
+    графу (см. модуль) - другой вариант, вернуться немедленно при первой же находке, дал
+    бы более простой код, но привязал бы "какая именно ошибка попадёт игроку" к порядку
+    ОБХОДА (потребитель раньше своего сырья), а не к порядку исходного cost и порядку
+    ингредиентов В РЕЦЕПТЕ - именно так вела себя старая рекурсия (см. ensure_and_pay,
+    где из failures выбирается ошибка с наименьшим graph.preorder - порядком ПЕРВОГО
+    обнаружения, который как раз и совпадает со старым рекурсивным порядком).
+
+    resolved_of[resource_id] - что Phase 3 (_commit_autocraft_plan) должна с ним
+    сделать: "ok" (запаса хватает, ничего не менять), "existing_job" (уже фоновая
+    задача, при необходимости продлена ЗДЕСЬ же), "energy_pending" (гейты пройдены,
+    сама попытка запуска/проверки материала - в Phase 3, т.к. конкурирует за
+    свободные преобразователи с другими resource_id по порядку обработки),
+    "action_pending" (гейты и fires посчитаны, финальное "мгновенно или фоновая
+    задача" зависит ещё и от готовности ингредиентов - решается в Phase 3)."""
+    total_needed: dict[str, float] = dict(cost)
+    fires_map: dict[str, float] = {}
+    gain_per_fire_map: dict[str, float] = {}
+    resolved_of: dict[str, str] = {}
+    failures: dict[str, AutocraftFailure] = {}
+    for resource_id in reversed(graph.ingredient_first):
+        needed = total_needed.get(resource_id, 0)
+        have = state.resources.get(resource_id, 0)
+        if needed <= have:
+            resolved_of[resource_id] = "ok"
             continue
-        if failure.reason == "in_progress":
-            needs_job = True  # ингредиент сам ушёл в фоновую задачу - и этот рецепт откладывается
+        if not state.autocraft_enabled:
+            failures[resource_id] = AutocraftFailure(resource_id, "autocraft_disabled")
             continue
-        return failure  # настоящая ошибка где-то в цепочке - прерываем всё, ничего не коммитим
+        if compute_capacity(state) <= 0:
+            failures[resource_id] = AutocraftFailure(resource_id, "no_processor")
+            continue
 
-    if needs_job:
-        if slots["used"] >= autocraft_slot_capacity(state):
-            return AutocraftFailure(resource_id, "no_free_slots")
-        jobs[resource_id] = {"action_id": action_id, "fires_total": fires, "fires_done": 0}
-        slots["used"] += 1
-        return AutocraftFailure(resource_id, "in_progress")
+        kind = graph.kind_of[resource_id]
+        if kind == "none":
+            failures[resource_id] = AutocraftFailure(resource_id, "no_recipe")  # сырьё без рецепта (или цикл)
+            continue
 
-    for ing_id, ing_amount in effective_cost.items():
-        resources[ing_id] -= ing_amount * fires
-    for out_id, out_amount in effective_gain.items():
-        _add_resource(resources, out_id, out_amount * fires)
-    return None
+        if kind == "energy":
+            recipe_id = ENERGY_RECIPE_FOR_RESOURCE[resource_id]
+            energy_recipe = ENERGY_RECIPES[recipe_id]
+            machine = energy_recipe.get("machine")
+            if energy_converter_capacity(state, machine) <= 0:
+                failures[resource_id] = AutocraftFailure(resource_id, "not_unlocked")
+                continue
+            if energy_recipe.get("requires_tech") and energy_recipe["requires_tech"] not in state.techs:
+                failures[resource_id] = AutocraftFailure(resource_id, "tech_locked")
+                continue
+            resolved_of[resource_id] = "energy_pending"  # не имеет своих ингредиентов - спрос дальше не идёт
+            continue
+
+        # kind == "action"
+        if not is_autocraft_unlocked(resource_id, state):
+            failures[resource_id] = AutocraftFailure(resource_id, "not_unlocked")
+            continue
+        action_id = graph.action_of[resource_id]
+        action = MANUAL_ACTIONS[action_id]
+        if action["requires_tech"] and action["requires_tech"] not in state.techs:
+            failures[resource_id] = AutocraftFailure(resource_id, "tech_locked")
+            continue
+        effective_cost, effective_gain = graph.stats_of[resource_id]
+        gain_per_fire = effective_gain[resource_id]
+        fires = -(-(needed - have) // gain_per_fire)  # округление вверх
+
+        # Мощность процессора - количество потребляемых рецептом предметов за ОДНУ
+        # прокрутку (сложный рецепт "дороже" простого) - жёсткий потолок на размер
+        # запроса (не на скорость): если суммарной мощности не хватает даже
+        # теоретически, ждать бессмысленно, фоновая задача тут не поможет.
+        compute_per_fire = sum(effective_cost.values())
+        if fires * compute_per_fire > compute_capacity(state):
+            failures[resource_id] = AutocraftFailure(resource_id, "insufficient_compute")
+            continue
+
+        # Пока по ресурсу уже идёт фоновая задача, ВЕСЬ его дальнейший выпуск идёт
+        # ТОЛЬКО через неё - продлеваем при нехватке, но не докрафчиваем "хвост" отдельным
+        # мгновенным путём в обход задачи, и НЕ пускаем спрос дальше на её ингредиенты
+        # (она сама заберёт их из наличия по ходу выполнения, см. _process_autocraft_jobs).
+        existing = jobs.get(resource_id)
+        if existing is not None:
+            remaining = existing["fires_total"] - existing["fires_done"]
+            projected = have + remaining * gain_per_fire
+            if projected < needed:
+                existing["fires_total"] += -(-(needed - projected) // gain_per_fire)
+            resolved_of[resource_id] = "existing_job"
+            continue
+
+        fires_map[resource_id] = fires
+        gain_per_fire_map[resource_id] = gain_per_fire
+        resolved_of[resource_id] = "action_pending"
+        for ing_id, ing_amount in effective_cost.items():
+            total_needed[ing_id] = total_needed.get(ing_id, 0) + ing_amount * fires
+    return failures, total_needed, fires_map, gain_per_fire_map, resolved_of
+
+
+def _commit_autocraft_plan(
+    state: GameState, graph: _AutocraftGraph, resolved_of: dict[str, str], fires_map: dict[str, float],
+    gain_per_fire_map: dict[str, float], resources: dict[str, int], jobs: dict[str, dict], slots: dict[str, int],
+    energy_jobs: list[dict],
+) -> tuple[AutocraftFailure | None, dict[str, str]]:
+    """Второй проход по графу, ПО graph.ingredient_first КАК ЕСТЬ (сырьё раньше того,
+    кто его ест) - все гейты (не_открыт/технология/мощность/цикл) уже решены заранее в
+    _aggregate_autocraft_demand, здесь только то, что ЗАВИСИТ от статуса ингредиентов
+    или порядка обработки:
+    - "energy_pending": попытка запуска рецепта конкурирует за свободные преобразователи
+      с другими energy_pending resource_id - порядок обработки решает, кому какой достанется;
+    - "action_pending": если хоть один ингредиент застрял в фоновой задаче (child_blocked),
+      этот рецепт тоже откладывается целиком - его прокрутка не может случиться раньше,
+      чем подвезут сырьё. К этому моменту КАЖДЫЙ ингредиент уже обработан
+      (ingredient_first), поэтому статус известен точно;
+    - тот же порядок (сырьё раньше) даёт фоновым задачам ПОПАДАТЬ в jobs (dict, порядок
+      вставки = порядок обработки в _process_autocraft_jobs) в правильной
+      последовательности - глубокие (сырьевые) задачи первыми, чтобы успеть подвезти
+      сырьё вышестоящим задачам В ТОТ ЖЕ ход (см. CLAUDE.md, _process_autocraft_jobs).
+    Возвращает первую настоящую (не "in_progress") ошибку, если она где-то встретилась -
+    вызывающий должен ничего не коммитить в state в этом случае (resources/jobs/energy_jobs
+    здесь - рабочие копии). status_of - как resolved_of, но "energy_pending"/"action_pending"
+    уже разрешены в "ok"/"in_progress"."""
+    status_of: dict[str, str] = {}
+    for resource_id in graph.ingredient_first:
+        resolution = resolved_of.get(resource_id, "ok")
+        if resolution in ("ok", "existing_job"):
+            status_of[resource_id] = "ok" if resolution == "ok" else "in_progress"
+            continue
+
+        if resolution == "energy_pending":
+            recipe_id = ENERGY_RECIPE_FOR_RESOURCE[resource_id]
+            energy_recipe = ENERGY_RECIPES[recipe_id]
+            machine = energy_recipe.get("machine")
+            already_running = any(
+                j["recipe_id"] == recipe_id and (machine is None or j.get("building_id") == machine)
+                for j in energy_jobs
+            )
+            if not already_running:
+                building_id = _pick_converter_building_with_free_slot(state, energy_jobs, machine)
+                if building_id is not None:
+                    # Рецепт крафта за энергию может нести материальную цену (consumes) в
+                    # дополнение к порогу энергии - автокрафт её САМ не докрафчивает
+                    # (осознанное упрощение, см. CLAUDE.md), требует, чтобы уже была в наличии.
+                    consumes = energy_recipe.get("consumes", {})
+                    if not all(resources.get(r, 0) >= amt for r, amt in consumes.items()):
+                        return AutocraftFailure(resource_id, "missing_energy_recipe_material"), status_of
+                    for r, amt in consumes.items():
+                        resources[r] -= amt
+                    energy_jobs.append({"recipe_id": recipe_id, "progress": 0, "building_id": building_id})
+            status_of[resource_id] = "in_progress"  # партия за энергию всегда растянута на ходы, никогда мгновенно
+            continue
+
+        # resolution == "action_pending"
+        action_id = graph.action_of[resource_id]
+        effective_cost, _ = graph.stats_of[resource_id]
+        fires = fires_map[resource_id]
+        gain_per_fire = gain_per_fire_map[resource_id]
+
+        child_blocked = any(status_of.get(ing_id) == "in_progress" for ing_id in effective_cost)
+        needs_job = child_blocked or fires > autocraft_speed_capacity(state)
+
+        if needs_job:
+            if slots["used"] >= autocraft_slot_capacity(state):
+                return AutocraftFailure(resource_id, "no_free_slots"), status_of
+            jobs[resource_id] = {"action_id": action_id, "fires_total": fires, "fires_done": 0}
+            slots["used"] += 1
+            status_of[resource_id] = "in_progress"
+            continue
+
+        for ing_id, ing_amount in effective_cost.items():
+            resources[ing_id] -= ing_amount * fires
+        _add_resource(resources, resource_id, fires * gain_per_fire)
+        status_of[resource_id] = "ok"
+
+    return None, status_of
 
 
 def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure | None:
     """Списывает cost с state.resources. При нехватке чего-либо сперва пытается
-    автоматически докрафтить недостающее из более простого сырья (рекурсивно), если для
-    ресурса открыт автокрафт и хватает мощности процессора. Три исхода:
+    автоматически докрафтить недостающее из более простого сырья (рекурсивно по дереву
+    рецептов), если для ресурса открыт автокрафт и хватает мощности процессора. Три исхода:
     - всё нашлось (мгновенно, в пределах скорости автокрафта за этот ход) -> cost
       списывается, возвращается None;
     - часть цепочки не влезает в скорость за один ход -> заводятся/продлеваются фоновые
@@ -777,25 +868,57 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
       AutocraftFailure(..., "in_progress") - вызывающий должен поставить действие в
       очередь (см. _pay_or_defer), а не считать его провалившимся;
     - настоящая ошибка -> ничего не меняется (ни resources, ни autocraft_jobs, ни
-      energy_jobs), возвращается причина."""
+      energy_jobs), возвращается причина.
+
+    Реализация - два прохода по дереву рецептов ВСЕХ resource_id из cost СРАЗУ (а не по
+    отдельному дереву на каждый), а не наивная рекурсия "нужно - произвёл - тут же
+    потратил": _discover_autocraft_graph строит структуру (что из чего) один раз на
+    resource_id, _aggregate_autocraft_demand суммирует спрос на каждый ресурс от ВСЕХ
+    потребителей разом, _commit_autocraft_plan одним проходом заводит фоновые задачи/
+    мгновенно производит. Это принципиально важно для "ромбов" в дереве рецептов
+    (несколько рецептов делят один и тот же ресурс ниже по цепочке, скажем, "шестерня"
+    и "пластина" из одного "слитка") - наивная рекурсия production-and-consume-immediately
+    заставляла бы каждую ветку заново выводить с нуля весь путь до общего ресурса, потому
+    что к её очереди он уже был потрачен предыдущей веткой (тот же слиток был сделан и
+    тут же расходован на шестерню, для пластины его как бы и не было) - на самоподобном
+    дереве из N уровней "ромбов" это давало ЧИСТУЮ ЭКСПОНЕНТУ по числу вызовов (подтверждено
+    профилированием, 2026-09-10 - см. CLAUDE.md). Агрегация спроса ДО производства убирает
+    экспоненту полностью: каждый resource_id разбирается ровно один раз, сложность
+    пропорциональна размеру самого дерева рецептов (вершины + рёбра), а не числу путей до
+    общего ресурса. Побочный эффект (не баг, аккуратно сохранён specifically) - раньше
+    compute_power/autocraft_speed проверялись НЕЗАВИСИМО на fires каждой отдельной ветки,
+    так что несколько веток, СОВМЕСТНО делящих ресурс, могли в СУММЕ превысить лимит
+    процессора/скорости за один и тот же вызов, хотя каждая по отдельности укладывалась -
+    теперь проверка идёт на УЖЕ АГРЕГИРОВАННЫЙ fires, как и задумано лимитом."""
     working_resources = dict(state.resources)
     working_jobs = {rid: dict(job) for rid, job in state.autocraft_jobs.items()}
     working_energy_jobs = [dict(job) for job in state.energy_jobs]
     slots = {"used": len(working_jobs)}
-    queued: AutocraftFailure | None = None
     recipe = resource_recipe(state)
 
-    for resource_id, amount in cost.items():
-        failure = _ensure_available(
-            working_resources, working_jobs, slots, working_energy_jobs, resource_id, amount, state.techs, frozenset(), state,
-            recipe,
-        )
-        if failure is None:
-            continue
-        if failure.reason != "in_progress":
-            return failure  # настоящая ошибка - state.resources/autocraft_jobs/energy_jobs не трогаем
-        if queued is None:
-            queued = failure
+    graph = _discover_autocraft_graph(state, cost.keys(), recipe)
+    failures, total_needed, fires_map, gain_per_fire_map, resolved_of = _aggregate_autocraft_demand(
+        state, cost, graph, working_jobs,
+    )
+    if failures:
+        # При нескольких одновременных настоящих ошибках сразу - та, что попала бы игроку
+        # от старого рекурсивного кода: он спускался по cost в порядке ключей и по
+        # ингредиентам в порядке рецепта, останавливаясь на ПЕРВОЙ найденной - то же самое
+        # даёт наименьший graph.preorder (порядок первого обнаружения при обходе).
+        best_id = min(failures, key=lambda rid: graph.preorder[rid])
+        return failures[best_id]  # настоящая ошибка - state.resources/autocraft_jobs/energy_jobs не трогаем
+    hard_failure, status_of = _commit_autocraft_plan(
+        state, graph, resolved_of, fires_map, gain_per_fire_map,
+        working_resources, working_jobs, slots, working_energy_jobs,
+    )
+    if hard_failure is not None:
+        return hard_failure  # настоящая ошибка - state.resources/autocraft_jobs/energy_jobs не трогаем
+
+    queued: AutocraftFailure | None = None
+    for resource_id in cost:
+        if status_of.get(resource_id) == "in_progress":
+            queued = AutocraftFailure(resource_id, "in_progress")
+            break
 
     if queued is not None:
         state.resources = working_resources

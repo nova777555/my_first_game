@@ -233,6 +233,119 @@ class AutocraftTests(FixtureTestCase):
         self.assertEqual(blocked_failure, engine.AutocraftFailure("mid", "insufficient_compute"))
 
 
+class AutocraftReconvergentGraphTests(unittest.TestCase):
+    """_discover_autocraft_graph/_aggregate_autocraft_demand/_commit_autocraft_plan -
+    регрессия на "ромбы" (несколько рецептов делят один и тот же ресурс ниже по
+    цепочке) и на цикл в рецептах. Использует СВОЙ маленький контент (не
+    tests/fixtures.py) - обычная фикстура не годится, нужна конкретная форма графа."""
+
+    def setUp(self):
+        from game import engine
+        self.engine = engine
+        self._originals = {}
+
+    def _patch(self, **names):
+        for name, value in names.items():
+            self._originals.setdefault(name, getattr(self.engine, name))
+            setattr(self.engine, name, value)
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        for name, value in self._originals.items():
+            setattr(self.engine, name, value)
+        self._originals = {}
+
+    def _diamond_content(self, depth: int):
+        # Самоподобная "решётка из ромбов": raw (неограниченное сырьё) -> a1/b1, каждый
+        # следующий уровень a{k}/b{k} требует ПО ОДНОМУ a{k-1} И b{k-1} - раньше такая
+        # структура давала ЧИСТУЮ ЭКСПОНЕНТУ вызовов _ensure_available по глубине (см.
+        # CLAUDE.md, "Известные ограничения" на момент до фикса 2026-09-10).
+        resources = {"raw": "raw"}
+        manual_actions = {}
+        prev_a = prev_b = "raw"
+        for k in range(1, depth + 1):
+            a, b = f"a{k}", f"b{k}"
+            resources[a] = a
+            resources[b] = b
+            manual_actions[f"make_{a}"] = {
+                "id": f"make_{a}", "name": a, "location": None, "requires_tech": None,
+                "cost": {prev_a: 1, prev_b: 1}, "gain": {a: 1}, "priority": 0,
+            }
+            manual_actions[f"make_{b}"] = {
+                "id": f"make_{b}", "name": b, "location": None, "requires_tech": None,
+                "cost": {prev_a: 1, prev_b: 1}, "gain": {b: 1}, "priority": 0,
+            }
+            prev_a, prev_b = a, b
+        buildings = {
+            "processor": {
+                "id": "processor", "name": "CPU", "requires_tech": None, "cost": {},
+                "produces": {}, "consumes": {}, "breakdown_chance": 0.0,
+                "compute_power": 10 ** 9, "autocraft_speed": 10 ** 9, "autocraft_slots": 10 ** 6,
+                "unlocks_autocraft": list(resources.keys()),
+            },
+        }
+        self._patch(
+            RESOURCE_NAMES=dict(resources), RESOURCE_FRACTIONAL={k: False for k in resources},
+            MANUAL_ACTIONS=manual_actions, BUILDINGS=buildings,
+        )
+
+    def test_diamond_lattice_resolves_in_linear_time_not_exponential(self):
+        depth = 22  # у старого алгоритма это заведомо не влезло бы в разумное время (2^22 вызовов)
+        self._diamond_content(depth)
+        s = GameState(buildings={"processor": 1}, resources={"raw": 10 ** 9})
+        import time
+        start = time.perf_counter()
+        failure = self.engine.ensure_and_pay(s, {f"a{depth}": 1})
+        elapsed = time.perf_counter() - start
+        self.assertIsNone(failure)
+        self.assertEqual(s.resources.get(f"a{depth}", 0), 0)  # скрафтили и сразу списали как cost - см. ensure_and_pay
+        self.assertLess(elapsed, 1.0)  # раньше глубина 14 уже занимала ~1.1 секунды
+
+    def test_diamond_lattice_aggregates_shared_ancestor_demand_exactly(self):
+        # a3 и b3 по построению симметричны и делят ВСЮ цепочку предков ниже уровня 3 -
+        # a1/b1 нужны ОБОИМ (a2 и b2), значит общий спрос на них удваивается по-честному
+        # (раздельное СЫРЬЁ на каждую единицу - агрегация избавляет от повторной РАБОТЫ
+        # по выводу цепочки, а не от повторного РАСХОДА сырья, см. test выше на линейное
+        # время). Запрос {a3, b3} по симметрии должен стоить РОВНО в 2 раза больше raw,
+        # чем один {a3} - ни больше (двойной счёт), ни меньше (недосчитанный спрос).
+        self._diamond_content(3)
+        s_a = GameState(buildings={"processor": 1}, resources={"raw": 10 ** 6})
+        self.assertIsNone(self.engine.ensure_and_pay(s_a, {"a3": 1}))
+        cost_a_alone = 10 ** 6 - s_a.resources["raw"]
+        self.assertGreater(cost_a_alone, 0)
+
+        s_both = GameState(buildings={"processor": 1}, resources={"raw": 10 ** 6})
+        self.assertIsNone(self.engine.ensure_and_pay(s_both, {"a3": 1, "b3": 1}))
+        cost_both = 10 ** 6 - s_both.resources["raw"]
+
+        self.assertEqual(cost_both, 2 * cost_a_alone)
+
+    def test_recipe_cycle_is_treated_as_missing_recipe_not_infinite_recursion(self):
+        # x -> y (стоит y) -> x (стоит x) - цикл. Должно вернуться "no_recipe" быстро,
+        # а не уйти в бесконечную рекурсию/RecursionError.
+        self._patch(
+            RESOURCE_NAMES={"x": "x", "y": "y"}, RESOURCE_FRACTIONAL={"x": False, "y": False},
+            MANUAL_ACTIONS={
+                "make_x": {"id": "make_x", "name": "x", "location": None, "requires_tech": None,
+                           "cost": {"y": 1}, "gain": {"x": 1}, "priority": 0},
+                "make_y": {"id": "make_y", "name": "y", "location": None, "requires_tech": None,
+                           "cost": {"x": 1}, "gain": {"y": 1}, "priority": 0},
+            },
+            BUILDINGS={
+                "processor": {
+                    "id": "processor", "name": "CPU", "requires_tech": None, "cost": {},
+                    "produces": {}, "consumes": {}, "breakdown_chance": 0.0,
+                    "compute_power": 1000, "autocraft_speed": 1000, "autocraft_slots": 100,
+                    "unlocks_autocraft": ["x", "y"],
+                },
+            },
+        )
+        s = GameState(buildings={"processor": 1}, resources={})
+        failure = self.engine.ensure_and_pay(s, {"x": 1})
+        self.assertEqual(failure, self.engine.AutocraftFailure("x", "no_recipe"))
+        self.assertEqual(s.resources, {})
+
+
 class AutocraftPreviewTests(FixtureTestCase):
     """engine.autocraft_preview - окно подтверждения перед запуском действия:
     "сколько и чего реально будет потрачено" (включая промежуточные ресурсы),
