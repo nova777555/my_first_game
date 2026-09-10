@@ -609,6 +609,7 @@ def _pick_converter_building_with_free_slot(
 def _ensure_available(
     resources: dict[str, int], jobs: dict[str, dict], slots: dict[str, int], energy_jobs: list[dict],
     resource_id: str, amount: int, techs: set[str], visiting: frozenset[str], state: GameState,
+    recipe: dict[str, str],
 ) -> AutocraftFailure | None:
     """Гарантирует resources[resource_id] >= amount. При нехватке рекурсивно докрафчивает
     из рецепта этого ресурса, если он открыт - как автокрафт в Applied Energistics:
@@ -644,7 +645,13 @@ def _ensure_available(
     слот, и тоже возвращает "in_progress" (партия появится через несколько ходов,
     не мгновенно). Отдельная фоновая задача в jobs/слот автокрафта тут не при чём -
     у крафта за энергию свой персональный "слот" (свободный преобразователь), делить
-    с обычными автокрафт-задачами ему нечего (см. _process_energy_jobs)."""
+    с обычными автокрафт-задачами ему нечего (см. _process_energy_jobs).
+
+    recipe - resource_recipe(state), посчитанный ОДИН раз вызывающим
+    (ensure_and_pay) и прокинутый через всю рекурсию, а не пересчитанный на
+    каждом уровне - он не меняется в рамках одного вызова (state.action_priority
+    не мутирует по ходу разбора), а сам пересчёт линеен по MANUAL_ACTIONS и на
+    глубокой/ветвистой цепочке заметно на профиле."""
     if resources.get(resource_id, 0) >= amount:
         return None
     if not state.autocraft_enabled:
@@ -653,7 +660,7 @@ def _ensure_available(
         return AutocraftFailure(resource_id, "no_processor")
     if resource_id in visiting:
         return AutocraftFailure(resource_id, "no_recipe")  # цикл в рецептах - как будто рецепта нет
-    action_id = resource_recipe(state).get(resource_id)
+    action_id = recipe.get(resource_id)
     if action_id is None:
         recipe_id = ENERGY_RECIPE_FOR_RESOURCE.get(resource_id)
         if recipe_id is None:
@@ -734,7 +741,9 @@ def _ensure_available(
     needs_job = fires > autocraft_speed_capacity(state)  # не влезает в скорость одного хода
 
     for ing_id, ing_amount in effective_cost.items():
-        failure = _ensure_available(resources, jobs, slots, energy_jobs, ing_id, ing_amount * fires, techs, next_visiting, state)
+        failure = _ensure_available(
+            resources, jobs, slots, energy_jobs, ing_id, ing_amount * fires, techs, next_visiting, state, recipe,
+        )
         if failure is None:
             continue
         if failure.reason == "in_progress":
@@ -774,10 +783,12 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
     working_energy_jobs = [dict(job) for job in state.energy_jobs]
     slots = {"used": len(working_jobs)}
     queued: AutocraftFailure | None = None
+    recipe = resource_recipe(state)
 
     for resource_id, amount in cost.items():
         failure = _ensure_available(
             working_resources, working_jobs, slots, working_energy_jobs, resource_id, amount, state.techs, frozenset(), state,
+            recipe,
         )
         if failure is None:
             continue
@@ -816,7 +827,7 @@ def _direct_shortfall(state: GameState, cost: dict[str, int]) -> dict[str, int |
 
 def _accumulate_raw_shortfall(
     state: GameState, resource_id: str, amount: int | float, visiting: frozenset[str],
-    working: dict[str, int | float], missing: dict[str, int | float],
+    working: dict[str, int | float], missing: dict[str, int | float], recipe: dict[str, str],
 ) -> None:
     have = working.get(resource_id, 0)
     if have >= amount:
@@ -824,7 +835,7 @@ def _accumulate_raw_shortfall(
         return
     deficit = amount - have
     working[resource_id] = 0
-    action_id = None if resource_id in visiting else resource_recipe(state).get(resource_id)
+    action_id = None if resource_id in visiting else recipe.get(resource_id)
     if action_id is None:
         # Лист дерева рецептов (настоящее сырьё, цикл рецептов или ресурс, который
         # добывается только крафтом за энергию) - дальше раскладывать некуда,
@@ -839,7 +850,7 @@ def _accumulate_raw_shortfall(
     fires = -(-deficit // gain_per_fire)  # округление вверх, как в _ensure_available
     next_visiting = visiting | {resource_id}
     for ing_id, ing_amount in effective_cost.items():
-        _accumulate_raw_shortfall(state, ing_id, ing_amount * fires, next_visiting, working, missing)
+        _accumulate_raw_shortfall(state, ing_id, ing_amount * fires, next_visiting, working, missing, recipe)
     # Что этот рецепт произведёт сверх покрытого deficit, оседает в working как
     # излишек - следующая ветка того же cost может утилизировать его, не требуя
     # для себя лишнего сырья по новой (та же идея, что "продолжает работать на
@@ -860,8 +871,9 @@ def _raw_shortfall(state: GameState, cost: dict[str, int]) -> dict[str, int | fl
     эта функция только про "сколько и чего", не про "почему"."""
     working: dict[str, int | float] = dict(state.resources)
     missing: dict[str, int | float] = {}
+    recipe = resource_recipe(state)
     for resource_id, amount in cost.items():
-        _accumulate_raw_shortfall(state, resource_id, amount, frozenset(), working, missing)
+        _accumulate_raw_shortfall(state, resource_id, amount, frozenset(), working, missing, recipe)
     return missing
 
 
@@ -896,7 +908,7 @@ def autocraft_eta_turns(state: GameState, fires: int | float) -> int | None:
 
 def _preview_node(
     state: GameState, resource_id: str, amount: int | float, visiting: frozenset[str],
-    working: dict[str, int | float],
+    working: dict[str, int | float], recipe: dict[str, str],
 ) -> dict:
     """Один узел дерева предпросмотра автокрафта (см. autocraft_preview) - сколько
     нужно resource_id, сколько из этого возьмётся из уже имеющегося запаса
@@ -916,7 +928,7 @@ def _preview_node(
     deficit = amount - taken
     if deficit <= 0 or resource_id in visiting:
         return node
-    action_id = resource_recipe(state).get(resource_id)
+    action_id = recipe.get(resource_id)
     if action_id is None:
         return node  # сырьё (или ресурс только из крафта за энергию) - дальше раскладывать некуда
     effective_cost, effective_gain = effective_manual_action_stats(action_id, state)
@@ -929,7 +941,7 @@ def _preview_node(
     node["turns"] = autocraft_eta_turns(state, fires)
     next_visiting = visiting | {resource_id}
     for ing_id, ing_amount in effective_cost.items():
-        node["children"].append(_preview_node(state, ing_id, ing_amount * fires, next_visiting, working))
+        node["children"].append(_preview_node(state, ing_id, ing_amount * fires, next_visiting, working, recipe))
     return node
 
 
@@ -962,7 +974,8 @@ def autocraft_preview(state: GameState, cost: dict[str, int]) -> dict | None:
     if all(state.resources.get(r, 0) >= amount for r, amount in cost.items()):
         return None
     working = dict(state.resources)
-    nodes = [_preview_node(state, resource_id, amount, frozenset(), working) for resource_id, amount in cost.items()]
+    recipe = resource_recipe(state)
+    nodes = [_preview_node(state, resource_id, amount, frozenset(), working, recipe) for resource_id, amount in cost.items()]
     return {"nodes": nodes}
 
 
