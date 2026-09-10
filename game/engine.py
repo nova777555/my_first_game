@@ -3451,6 +3451,12 @@ def advance_turn(state: GameState) -> ProductionReport:
 
     _ensure_farm_instances(state)
     daytime = is_daytime(state)
+    # Считаем effective_building_stats РОВНО ОДИН раз на тип постройки за ход и
+    # переиспользуем в process() - без кэша она бы считалась дважды (тут же ниже,
+    # при разбиении на energy_consumers/others, и внутри process()), что при
+    # большом числе построек заметно на профиле (см. CLAUDE.md, "Известные
+    # ограничения").
+    stats_cache: dict[str, tuple[dict[str, int], dict[str, int]]] = {}
 
     def process(building_id: str, working: int) -> None:
         if not is_building_active_now(building_id, daytime):
@@ -3467,7 +3473,7 @@ def advance_turn(state: GameState) -> ProductionReport:
             report.ran[building_id] = (0, working)
             return
 
-        produces, consumes = effective_building_stats(building_id, state.techs, state.building_upgrades)
+        produces, consumes = stats_cache[building_id]
         runnable = active
         for r, amount in consumes.items():
             if amount <= 0:
@@ -3519,8 +3525,8 @@ def advance_turn(state: GameState) -> ProductionReport:
         working = count - state.broken.get(building_id, 0)
         if working <= 0:
             continue
-        _, consumes = effective_building_stats(building_id, state.techs, state.building_upgrades)
-        if consumes.get(ENERGY_RESOURCE_ID, 0) > 0:
+        stats_cache[building_id] = effective_building_stats(building_id, state.techs, state.building_upgrades)
+        if stats_cache[building_id][1].get(ENERGY_RESOURCE_ID, 0) > 0:
             energy_consumers.append((building_id, working))
         else:
             others.append((building_id, working))
