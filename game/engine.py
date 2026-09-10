@@ -1174,6 +1174,7 @@ def _round_amounts(amounts: dict[str, float]) -> dict[str, int | float]:
 
 def effective_building_stats(
     building_id: str, techs: set[str], building_upgrades: dict[str, list[str]] | None = None,
+    matching_effects: list[dict] | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     """Базовые produces/consumes постройки + бонусы от изученных апгрейд-технологий
     (аддитивные эффекты, см. _matching_effects) + множители от купленных улучшений
@@ -1191,11 +1192,19 @@ def effective_building_stats(
     сдвигается/домножается тех-эффектами/апгрейдами как целое, САМ БРОСОК
     (_roll_range_amounts) делает вызывающий (advance_turn) непосредственно перед
     начислением, не эта функция - иначе повторные вызовы (например, из UI-превью)
-    давали бы каждый раз новое случайное число вместо стабильного диапазона."""
+    давали бы каждый раз новое случайное число вместо стабильного диапазона.
+
+    matching_effects - _matching_effects(building_id, techs), если вызывающий
+    (advance_turn) уже посчитал его сам ради effective_breakdown_chance
+    (обеим функциям нужен один и тот же O(число техов) обход) - None (по
+    умолчанию) считает внутри, как раньше, ничего не меняя для остальных
+    вызывающих (web_ui.py, тесты)."""
     base = BUILDINGS[building_id]
     produces = dict(base["produces"])
     consumes = dict(base["consumes"])
-    for effect in _matching_effects(building_id, techs):
+    if matching_effects is None:
+        matching_effects = _matching_effects(building_id, techs)
+    for effect in matching_effects:
         for r, amount in effect.get("produces", {}).items():
             produces[r] = _add_amount(produces.get(r, 0), amount)
         for r, amount in effect.get("consumes", {}).items():
@@ -1274,9 +1283,15 @@ def mechanism_scale_cap(building_id: str, state: GameState) -> int:
     return math.floor(cap)
 
 
-def effective_breakdown_chance(building_id: str, techs: set[str]) -> float:
+def effective_breakdown_chance(
+    building_id: str, techs: set[str], matching_effects: list[dict] | None = None,
+) -> float:
+    """matching_effects - см. effective_building_stats: тот же переиспользуемый
+    результат _matching_effects, если вызывающий уже посчитал его сам."""
     chance = BUILDINGS[building_id].get("breakdown_chance", 0.0)
-    for effect in _matching_effects(building_id, techs):
+    if matching_effects is None:
+        matching_effects = _matching_effects(building_id, techs)
+    for effect in matching_effects:
         chance += effect.get("breakdown_delta", 0.0)
     return max(0.0, min(1.0, chance))
 
@@ -3468,8 +3483,12 @@ def advance_turn(state: GameState) -> ProductionReport:
     # переиспользуем в process() - без кэша она бы считалась дважды (тут же ниже,
     # при разбиении на energy_consumers/others, и внутри process()), что при
     # большом числе построек заметно на профиле (см. CLAUDE.md, "Известные
-    # ограничения").
+    # ограничения"). effects_cache - тот же принцип для _matching_effects
+    # (O(число техов) на постройку): без него effective_building_stats и
+    # effective_breakdown_chance пересчитывали бы его КАЖДАЯ СВОЯ, хотя это
+    # один и тот же обход TECHS для одного building_id/state.techs.
     stats_cache: dict[str, tuple[dict[str, int], dict[str, int]]] = {}
+    effects_cache: dict[str, list[dict]] = {}
 
     def process(building_id: str, working: int) -> None:
         if not is_building_active_now(building_id, daytime):
@@ -3505,7 +3524,7 @@ def advance_turn(state: GameState) -> ProductionReport:
         if runnable > 0 or idle > 0:
             report.ran[building_id] = (runnable, idle)
 
-        chance = effective_breakdown_chance(building_id, state.techs)
+        chance = effective_breakdown_chance(building_id, state.techs, effects_cache[building_id])
         if chance <= 0:
             return
         if _is_farm_building(building_id):
@@ -3538,7 +3557,10 @@ def advance_turn(state: GameState) -> ProductionReport:
         working = count - state.broken.get(building_id, 0)
         if working <= 0:
             continue
-        stats_cache[building_id] = effective_building_stats(building_id, state.techs, state.building_upgrades)
+        effects_cache[building_id] = _matching_effects(building_id, state.techs)
+        stats_cache[building_id] = effective_building_stats(
+            building_id, state.techs, state.building_upgrades, effects_cache[building_id],
+        )
         if stats_cache[building_id][1].get(ENERGY_RESOURCE_ID, 0) > 0:
             energy_consumers.append((building_id, working))
         else:
