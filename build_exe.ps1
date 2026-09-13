@@ -4,8 +4,9 @@
 # Запуск (из корня репозитория):
 #   powershell -ExecutionPolicy Bypass -File build_exe.ps1
 #
-# Один раз перед первой сборкой нужен PyInstaller (только у тебя, не у друга):
-#   pip install pyinstaller
+# Один раз перед первой сборкой нужны PyInstaller и зависимости игры (только
+# у тебя, не у друга - в exe всё уже упаковано):
+#   pip install pyinstaller -r requirements.txt
 
 $ErrorActionPreference = "Stop"
 

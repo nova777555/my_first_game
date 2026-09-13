@@ -160,6 +160,10 @@ def validate(data: dict) -> list[str]:
         return [f"В данных отсутствует обязательный раздел: {e}"]
 
     ui_settings = data.get("ui", {})
+    # Необязательный раздел (см. buildings.*.breakdown_types) - через data.get, а
+    # не data[...], иначе старый content.json без этой фичи вовсе перестал бы
+    # проходить валидацию (KeyError выше отклонил бы ВСЁ, а не только эту фичу).
+    breakdown_types = data.get("breakdown_types", {})
 
     def check_click_delay(value, where: str) -> None:
         if value is not None and (not isinstance(value, (int, float)) or value < 0):
@@ -236,6 +240,19 @@ def validate(data: dict) -> list[str]:
         if building_id is not None and building_id not in buildings:
             errors.append(f"{where}: неизвестная постройка '{building_id}'")
 
+    def check_breakdown_types_ref(value, where: str) -> None:
+        """buildings.*.breakdown_types - необязательный список id из
+        breakdown_types (см. check_breakdown_types_section ниже). Пусто/
+        отсутствует = поломка без типа (старое поведение)."""
+        if value is None:
+            return
+        if not isinstance(value, list) or not value:
+            errors.append(f"{where}: breakdown_types должен быть непустым списком id или отсутствовать вовсе")
+            return
+        for bt_id in value:
+            if bt_id not in breakdown_types:
+                errors.append(f"{where}: неизвестный вид поломки '{bt_id}'")
+
     def check_tool_tiers(requires_tool_tiers, where: str) -> None:
         if not isinstance(requires_tool_tiers, dict):
             errors.append(f"{where}: должен быть объектом инструмент -> список тиров")
@@ -295,6 +312,9 @@ def validate(data: dict) -> list[str]:
         fractional = r.get("fractional", False)
         if not isinstance(fractional, bool):
             errors.append(f"Ресурс '{rid}': fractional должен быть true или false")
+        soul_kind = r.get("soul_kind")
+        if soul_kind is not None and (not isinstance(soul_kind, str) or not soul_kind):
+            errors.append(f"Ресурс '{rid}': soul_kind должен быть null или непустой строкой (тег вида души, например 'моб'/'босс')")
         check_icon(r.get("icon"), f"Ресурс '{rid}'")
     if _ENERGY_RESOURCE_ID not in resource_ids:
         errors.append(f"Ресурс '{_ENERGY_RESOURCE_ID}' (Энергия) обязателен - с ним завязано особое поведение в движке")
@@ -333,8 +353,11 @@ def validate(data: dict) -> list[str]:
 
     # Вынесено выше (до manual_actions) - нужен уже там для проверки spawn_species.
     species = data.get("species", {})
-    # Вынесено выше (до buildings) - нужен уже там для проверки buildings.*.soul_collector.accepts.
+    # Вынесено выше (до buildings) - нужен уже там для проверки buildings.*.breeding_accepts_family.
+    species_families = {sp.get("family") for sp in species.values() if sp.get("family")}
+    # Вынесено выше (до buildings) - нужен уже там для проверки buildings.*.soul_collector.accepts_kind.
     soul_recipes = data.get("soul_recipes", {})
+    soul_kinds = {r.get("soul_kind") for r in resources if r.get("soul_kind")}
 
     for lid, loc in locations.items():
         record_id(lid, "локация")
@@ -382,12 +405,21 @@ def validate(data: dict) -> list[str]:
         if loc_id is not None and loc_id not in locations:
             errors.append(f"Действие '{aid}': неизвестная локация '{loc_id}'")
         check_tool_tiers(a.get("requires_tool_tiers", {}), f"Действие '{aid}'.requires_tool_tiers")
+        tool_scaling = a.get("tool_scaling")
+        if tool_scaling is not None:
+            if not isinstance(tool_scaling, dict) or "tool" not in tool_scaling:
+                errors.append(f"Действие '{aid}'.tool_scaling: должен быть объектом с полем tool")
+            elif tool_scaling["tool"] not in tools:
+                errors.append(f"Действие '{aid}'.tool_scaling: неизвестный инструмент '{tool_scaling['tool']}'")
         priority = a.get("priority", 0)
         if not isinstance(priority, int):
             errors.append(f"Действие '{aid}': priority должен быть целым числом")
         duration_turns = a.get("duration_turns")
         if duration_turns is not None and (not isinstance(duration_turns, int) or duration_turns < 2):
             errors.append(f"Действие '{aid}': duration_turns должен быть null или целым числом >= 2")
+        excluded_from_autocraft = a.get("excluded_from_autocraft", False)
+        if not isinstance(excluded_from_autocraft, bool):
+            errors.append(f"Действие '{aid}': excluded_from_autocraft должен быть true или false")
 
     for bid, b in buildings.items():
         record_id(bid, "постройка")
@@ -400,6 +432,7 @@ def validate(data: dict) -> list[str]:
         bc = b.get("breakdown_chance", 0)
         if not isinstance(bc, (int, float)) or not (0 <= bc <= 1):
             errors.append(f"Постройка '{bid}': breakdown_chance должен быть числом от 0 до 1")
+        check_breakdown_types_ref(b.get("breakdown_types"), f"Постройка '{bid}'")
         es = b.get("energy_storage", 0)
         if not isinstance(es, (int, float)) or es < 0:
             errors.append(f"Постройка '{bid}': energy_storage должен быть неотрицательным числом")
@@ -418,6 +451,14 @@ def validate(data: dict) -> list[str]:
         breeding_slots = b.get("breeding_slots", 0)
         if not isinstance(breeding_slots, int) or isinstance(breeding_slots, bool) or breeding_slots < 0:
             errors.append(f"Постройка '{bid}': breeding_slots должен быть неотрицательным целым числом")
+        breeding_accepts_family = b.get("breeding_accepts_family")
+        if breeding_accepts_family is not None:
+            if not isinstance(breeding_accepts_family, str) or not breeding_accepts_family:
+                errors.append(f"Постройка '{bid}': breeding_accepts_family должен быть null или непустой строкой (тег семейства, см. species.*.family)")
+            elif breeding_accepts_family not in species_families:
+                errors.append(f"Постройка '{bid}': breeding_accepts_family ссылается на семейство '{breeding_accepts_family}', которого нет ни у одного вида")
+            if not breeding_slots:
+                errors.append(f"Постройка '{bid}': breeding_accepts_family имеет смысл только у ферм (breeding_slots > 0)")
         genetics_lab = b.get("genetics_lab", False)
         if not isinstance(genetics_lab, bool):
             errors.append(f"Постройка '{bid}': genetics_lab должен быть true или false")
@@ -463,15 +504,19 @@ def validate(data: dict) -> list[str]:
                 slots = soul_collector.get("slots")
                 if not isinstance(slots, int) or isinstance(slots, bool) or slots <= 0:
                     errors.append(f"Постройка '{bid}': soul_collector.slots должен быть положительным целым числом")
-                accepts = soul_collector.get("accepts")
-                if not isinstance(accepts, list) or not accepts:
-                    errors.append(f"Постройка '{bid}': soul_collector.accepts должен быть непустым списком id душ (ресурсов)")
-                else:
-                    for rid in accepts:
-                        if rid not in resource_ids:
-                            errors.append(f"Постройка '{bid}': soul_collector.accepts ссылается на неизвестный ресурс '{rid}'")
-                        elif rid not in soul_recipes:
-                            errors.append(f"Постройка '{bid}': soul_collector.accepts включает '{rid}', но для него нет записи в soul_recipes - такая душа ничего не будет производить")
+                accepts_kind = soul_collector.get("accepts_kind")
+                if not isinstance(accepts_kind, str) or not accepts_kind:
+                    errors.append(f"Постройка '{bid}': soul_collector.accepts_kind должен быть непустой строкой (тег вида души, см. resources.*.soul_kind)")
+                elif accepts_kind not in soul_kinds:
+                    errors.append(f"Постройка '{bid}': soul_collector.accepts_kind ссылается на тег '{accepts_kind}', которого нет ни у одного ресурса-души")
+        automation_hub = b.get("automation_hub")
+        if automation_hub is not None:
+            if not isinstance(automation_hub, dict):
+                errors.append(f"Постройка '{bid}': automation_hub должен быть объектом")
+            else:
+                hub_slots = automation_hub.get("slots")
+                if not isinstance(hub_slots, int) or isinstance(hub_slots, bool) or hub_slots <= 0:
+                    errors.append(f"Постройка '{bid}': automation_hub.slots должен быть положительным целым числом")
         stages = b.get("construction_stages")
         if stages is not None:
             if not isinstance(stages, list) or len(stages) < 1:
@@ -591,12 +636,35 @@ def validate(data: dict) -> list[str]:
                             errors.append(f"{where}: value для soul_generation_efficiency должен быть числом больше 1 (множитель продукции синтезатора)")
                         if not b.get("soul_collector"):
                             errors.append(f"{where}: soul_generation_efficiency имеет смысл только у синтезаторов душ (soul_collector)")
+                    elif kind == "breakdown_immunity":
+                        # Как breeding_immortality - число не используется по значению
+                        # (куплено/не куплено), но обязано быть числом для единообразия.
+                        # В ОТЛИЧИЕ от остальных типов, разрешён у ЛЮБОЙ постройки
+                        # (не только у ферм) - это ровно и есть "апгрейд для всех
+                        # механизмов" (см. game/engine.py:effective_breakdown_chance).
+                        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для breakdown_immunity должен быть положительным числом (само число не используется - куплено/не куплено, но поле обязано быть числом для единообразия)")
+                    elif kind == "action_duration_reduction":
+                        if not isinstance(value, (int, float)) or isinstance(value, bool) or not (0 < value < 1):
+                            errors.append(f"{where}: value для action_duration_reduction должен быть числом от 0 до 1 (не включая 1) - доля сокращения duration_turns")
+                        has_multiturn_dependent = any(
+                            a.get("requires_building") == bid and (a.get("duration_turns") or 1) > 1
+                            for a in manual_actions.values()
+                        )
+                        if not has_multiturn_dependent:
+                            errors.append(f"{where}: action_duration_reduction имеет смысл только у построек, от которых зависит (requires_building) хотя бы одно многоходовое (duration_turns > 1) ручное действие")
+                    elif kind == "automation_slots":
+                        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для automation_slots должен быть положительным числом (АБСОЛЮТНАЯ добавка к вместимости автоматизатора, уровни не складываются - см. game/engine.py:automation_slots_capacity)")
+                        if not b.get("automation_hub"):
+                            errors.append(f"{where}: automation_slots имеет смысл только у построек-автоматизаторов (automation_hub)")
                     else:
                         errors.append(
                             f"{where}: type должен быть 'scale', 'energy_efficiency', 'generation_efficiency', "
                             f"'breeding_output', 'breeding_slots_bonus', 'breeding_immortality', "
                             f"'breeding_mutation_chance', 'energy_converter_capacity', 'environment_emulation', "
-                            f"'soul_collector_slots' или 'soul_generation_efficiency' (сейчас: {kind!r})"
+                            f"'soul_collector_slots', 'soul_generation_efficiency', 'breakdown_immunity', "
+                            f"'action_duration_reduction' или 'automation_slots' (сейчас: {kind!r})"
                         )
         if not b.get("name"):
             errors.append(f"Постройка '{bid}': не указано название")
@@ -611,6 +679,21 @@ def validate(data: dict) -> list[str]:
     if building_cyclic:
         names = ", ".join(f"'{buildings[b]['name']}'" for b in building_cyclic if b in buildings)
         errors.append(f"Цикл в зависимостях requires_building построек (одна ссылается на другую через цепочку): {names}")
+
+    for btid, bt in breakdown_types.items():
+        record_id(btid, "вид поломки")
+        check_id("Вид поломки", btid)
+        if not bt.get("name"):
+            errors.append(f"Вид поломки '{btid}': не указано название")
+        if not bt.get("description"):
+            errors.append(f"Вид поломки '{btid}': не указано описание - игроку должно быть понятно, что случилось")
+        required_tools = bt.get("required_tools", [])
+        if not isinstance(required_tools, list) or not required_tools:
+            errors.append(f"Вид поломки '{btid}': required_tools должен быть непустым списком id инструментов")
+        else:
+            for tool_id in required_tools:
+                if tool_id not in tools:
+                    errors.append(f"Вид поломки '{btid}': неизвестный инструмент '{tool_id}' в required_tools")
 
     for tid, t in techs.items():
         record_id(tid, "технология")
@@ -685,9 +768,9 @@ def validate(data: dict) -> list[str]:
                     weight = q.get("weight")
                     if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
                         errors.append(f"{qwhere}.weight: должен быть положительным числом")
-                    mult = q.get("yield_multiplier")
+                    mult = q.get("size_multiplier")
                     if not isinstance(mult, (int, float)) or isinstance(mult, bool) or mult <= 0:
-                        errors.append(f"{qwhere}.yield_multiplier: должен быть положительным числом")
+                        errors.append(f"{qwhere}.size_multiplier: должен быть положительным числом")
                     min_tier = q.get("min_tool_tier", 1)
                     if not isinstance(min_tier, int) or isinstance(min_tier, bool) or min_tier < 1:
                         errors.append(f"{qwhere}.min_tool_tier: должен быть положительным целым числом")
@@ -710,6 +793,7 @@ def validate(data: dict) -> list[str]:
             errors.append(f"{where}: не указано название")
         if not mob.get("description"):
             errors.append(f"{where}: не указано описание")
+        check_icon(mob.get("icon"), where)
         loc = mob.get("location")
         if loc not in locations:
             errors.append(f"{where}: location ссылается на неизвестную локацию '{loc}'")
@@ -735,6 +819,10 @@ def validate(data: dict) -> list[str]:
             # убийстве - в отличие от обычных мобов (см. ветку else ниже).
             if mob.get("soul_id") is not None or mob.get("soul_chance") is not None:
                 errors.append(f"{where}: у боссов не бывает soul_id/soul_chance - душа босса добывается только крафтом")
+            turn_limit = mob.get("turn_limit")
+            if turn_limit is not None:
+                if not isinstance(turn_limit, int) or isinstance(turn_limit, bool) or turn_limit <= 0:
+                    errors.append(f"{where}.turn_limit: должен быть положительным целым числом, если указан")
         else:
             rarity = mob.get("rarity", 0)
             if not isinstance(rarity, (int, float)) or isinstance(rarity, bool) or rarity <= 0:
@@ -746,6 +834,8 @@ def validate(data: dict) -> list[str]:
                 soul_chance = mob.get("soul_chance")
                 if not isinstance(soul_chance, (int, float)) or isinstance(soul_chance, bool) or not (0 < soul_chance <= 1):
                     errors.append(f"{where}.soul_chance: должен быть числом от 0 (не включая) до 1, если указан soul_id")
+            if mob.get("turn_limit") is not None:
+                errors.append(f"{where}: turn_limit имеет смысл только у боссов (is_boss=true)")
 
     for sid, sp in species.items():
         # Ключ - id уже существующего ресурса (тот же принцип, что у mining_info) -
@@ -764,6 +854,9 @@ def validate(data: dict) -> list[str]:
         weight = sp.get("weight", 0)
         if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight < 0:
             errors.append(f"Вид '{sid}': weight должен быть неотрицательным числом (0 = недоступен для дикого улова, только через мутацию)")
+        family = sp.get("family")
+        if family is not None and (not isinstance(family, str) or not family):
+            errors.append(f"Вид '{sid}': family должен быть null или непустой строкой (например 'bee'/'flower') - см. buildings.*.breeding_accepts_family")
 
     # 4 жёстко зашитых ГЛОБАЛЬНЫХ признака генотипа (species - отдельно, через
     # species[].dominant/weight выше) - держать в паре с GENOTYPE_TRAIT_IDS в
@@ -917,6 +1010,62 @@ def validate(data: dict) -> list[str]:
         check_resource_dict(recipe.get("consumes", {}), f"Рецепт крафта за энергию '{rid}'.consumes")
         check_building_ref(recipe.get("machine"), f"Рецепт крафта за энергию '{rid}'.machine")
 
+    # Приёмы боя (id -> {"name", "description", "mode", ...}) - разблокируются НЕ
+    # отсюда, а tools.*.tiers[].unlocks_moves (см. ниже) - здесь только сами
+    # определения, набор id нужен ДО цикла по tools, чтобы проверить ссылки
+    # unlocks_moves. "mode" (необязателен, по умолчанию "multiplier") - НЕЗАВИСИМЫЕ
+    # способы посчитать урон одного удара (см. game/engine.py:_move_damage):
+    #   "multiplier"          - damage_multiplier домножает обычный расчёт по навыку/оружию.
+    #   "percent_max_hp"      - percent от МАКСИМАЛЬНОГО HP цели, не зависит от навыка/оружия.
+    #   "percent_remaining_hp"- percent от ОСТАВШЕГОСЯ прямо сейчас HP цели.
+    #   "execute"             - добивает НАЦЕЛО, если remaining_hp уже не выше
+    #                           execute_threshold_percent от максимума; иначе - обычный
+    #                           расчёт, домноженный на необязательный damage_multiplier
+    #                           (по умолчанию 1.0 - как без приёма).
+    # У каждого mode - СВОЙ обязательный набор полей; поля чужого mode - ошибка (чтобы
+    # в контенте не оставалось "мёртвых" полей от смены mode задним числом).
+    _COMBAT_MOVE_MODES = ("multiplier", "percent_max_hp", "percent_remaining_hp", "execute")
+    combat_moves = data.get("combat_moves", {})
+    for move_id, move in combat_moves.items():
+        record_id(move_id, "приём боя")
+        check_id("Приём боя", move_id)
+        cwhere = f"Приём боя '{move_id}'"
+        if not move.get("name"):
+            errors.append(f"{cwhere}: не указано название")
+        if not move.get("description"):
+            errors.append(f"{cwhere}: не указано описание")
+        mode = move.get("mode", "multiplier")
+        if mode not in _COMBAT_MOVE_MODES:
+            errors.append(f"{cwhere}.mode: должен быть одним из {list(_COMBAT_MOVE_MODES)}, если указан")
+        if mode == "multiplier":
+            multiplier = move.get("damage_multiplier")
+            if not isinstance(multiplier, (int, float)) or isinstance(multiplier, bool) or multiplier <= 0:
+                errors.append(f"{cwhere}.damage_multiplier: должен быть положительным числом при mode=multiplier")
+            for extra in ("percent", "execute_threshold_percent"):
+                if extra in move:
+                    errors.append(f"{cwhere}.{extra}: имеет смысл только при mode=percent_max_hp/percent_remaining_hp/execute")
+        elif mode in ("percent_max_hp", "percent_remaining_hp"):
+            percent = move.get("percent")
+            if not isinstance(percent, (int, float)) or isinstance(percent, bool) or not (0 < percent <= 1):
+                errors.append(f"{cwhere}.percent: должен быть числом от 0 (не включая) до 1 (включительно) при mode={mode}")
+            if "damage_multiplier" in move:
+                errors.append(f"{cwhere}.damage_multiplier: имеет смысл только при mode=multiplier/execute")
+            if "execute_threshold_percent" in move:
+                errors.append(f"{cwhere}.execute_threshold_percent: имеет смысл только при mode=execute")
+        elif mode == "execute":
+            threshold = move.get("execute_threshold_percent")
+            if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not (0 < threshold <= 1):
+                errors.append(f"{cwhere}.execute_threshold_percent: должен быть числом от 0 (не включая) до 1 (включительно) при mode=execute")
+            if "damage_multiplier" in move:
+                fallback = move["damage_multiplier"]
+                if not isinstance(fallback, (int, float)) or isinstance(fallback, bool) or fallback <= 0:
+                    errors.append(f"{cwhere}.damage_multiplier: должен быть положительным числом, если указан (запасной урон, пока цель ещё выше порога)")
+            if "percent" in move:
+                errors.append(f"{cwhere}.percent: имеет смысл только при mode=percent_max_hp/percent_remaining_hp")
+        cooldown = move.get("cooldown_turns", 0)
+        if not isinstance(cooldown, int) or isinstance(cooldown, bool) or cooldown < 0:
+            errors.append(f"{cwhere}.cooldown_turns: должен быть неотрицательным целым числом, если указан")
+
     if not tools:
         errors.append("Список инструментов пуст - должен быть хотя бы один (например, кирка)")
     for tool_id, tool in tools.items():
@@ -930,11 +1079,23 @@ def validate(data: dict) -> list[str]:
             continue
         if tiers[0].get("cost") not in (None, {}):
             errors.append(f"Инструмент '{tool_id}': тир №1 (стартовый) должен иметь пустую cost - он уже есть у игрока бесплатно")
+        if tiers[0].get("max_durability") is not None:
+            errors.append(f"Инструмент '{tool_id}': тир №1 (стартовый, \"без инструмента\") не может изнашиваться - max_durability имеет смысл только у тира 2+")
         for i, tier in enumerate(tiers[1:], start=2):
             if not tier.get("name"):
                 errors.append(f"Инструмент '{tool_id}', тир №{i}: не указано название")
             check_tech_ref(tier.get("requires_tech"), f"Инструмент '{tool_id}', тир №{i}")
             check_resource_dict(tier.get("cost") or {}, f"Инструмент '{tool_id}', тир №{i}.cost")
+            twhere_tier = f"Инструмент '{tool_id}', тир №{i}"
+            max_durability = tier.get("max_durability")
+            if max_durability is not None:
+                if not isinstance(max_durability, int) or isinstance(max_durability, bool) or max_durability <= 0:
+                    errors.append(f"{twhere_tier}: max_durability должен быть null или положительным целым числом")
+                check_resource_dict(tier.get("repair_cost") or {}, f"{twhere_tier}.repair_cost")
+                if not tier.get("repair_cost"):
+                    errors.append(f"{twhere_tier}: repair_cost обязателен, если задан max_durability - иначе непонятно, чем инструмент чинится, когда прочность дойдёт до 0")
+            elif tier.get("repair_cost"):
+                errors.append(f"{twhere_tier}: repair_cost имеет смысл только вместе с max_durability (инструмент без прочности не ломается вовсе)")
         weapon = tool.get("weapon", False)
         if not isinstance(weapon, bool):
             errors.append(f"Инструмент '{tool_id}': weapon должен быть true или false")
@@ -962,6 +1123,20 @@ def validate(data: dict) -> list[str]:
                     errors.append(f"{twhere}.instant_kill_max_hp: должен быть неотрицательным числом, если указан")
                 if not weapon:
                     errors.append(f"{twhere}: instant_kill_max_hp имеет смысл только у оружия (weapon=true)")
+            # unlocks_moves - приёмы боя, которые игрок получает, ДОСТИГНУВ этого тира
+            # (кумулятивно с более ранними тирами той же линейки, см.
+            # game/engine.py:unlocked_attack_moves) - в отличие от остальных боевых
+            # полей тира (которые действуют только пока это ТЕКУЩИЙ тир), список
+            # НЕ обязан повторяться на более высоких тирах - разблокировка не забывается.
+            unlocks_moves = tier.get("unlocks_moves", [])
+            if not isinstance(unlocks_moves, list):
+                errors.append(f"{twhere}.unlocks_moves: должен быть списком id приёмов боя")
+            else:
+                if unlocks_moves and not weapon:
+                    errors.append(f"{twhere}: unlocks_moves имеет смысл только у оружия (weapon=true)")
+                for move_id in unlocks_moves:
+                    if move_id not in combat_moves:
+                        errors.append(f"{twhere}.unlocks_moves: неизвестный приём боя '{move_id}'")
 
     skills = data.get("skills", {})
     for skid, skill in skills.items():
@@ -1001,6 +1176,9 @@ def validate(data: dict) -> list[str]:
         if not produces:
             errors.append(f"{where}: produces пустой - эта душа ничего не производит")
         check_chance_dict(recipe.get("produces_chance"), produces, f"{where}.produces_chance")
+        resource = next((r for r in resources if r.get("id") == soul_id), None)
+        if resource is not None and not resource.get("soul_kind"):
+            errors.append(f"{where}: у ресурса '{soul_id}' не задан soul_kind - его нельзя будет вставить ни в один синтезатор (см. resources.*.soul_kind)")
 
     def check_conditions(conditions, label: str) -> None:
         """Список условий {type, ...} квеста. Пусто/не список - единственная

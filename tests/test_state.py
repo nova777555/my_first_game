@@ -14,6 +14,8 @@ class StateRoundTripTests(unittest.TestCase):
             buildings={"lumber_camp": 2},
             techs={"woodworking", "toolmaking"},
             broken={"lumber_camp": 1},
+            broken_types={"lumber_camp": ["worn_gear"]},
+            tool_durability={"wrench": 1},
             building_disabled={"lumber_camp": 1},
             pinned=["wood", "ore"],
             tool_tiers={"pickaxe": 3},
@@ -44,6 +46,8 @@ class StateRoundTripTests(unittest.TestCase):
         self.assertEqual(restored.buildings, {"lumber_camp": 2})
         self.assertEqual(restored.techs, {"woodworking", "toolmaking"})
         self.assertEqual(restored.broken, {"lumber_camp": 1})
+        self.assertEqual(restored.broken_types, {"lumber_camp": ["worn_gear"]})
+        self.assertEqual(restored.tool_durability, {"wrench": 1})
         self.assertEqual(restored.building_disabled, {"lumber_camp": 1})
         self.assertEqual(restored.pinned, ["wood", "ore"])
         self.assertEqual(restored.tool_tiers, {"pickaxe": 3})
@@ -89,6 +93,10 @@ class StateRoundTripTests(unittest.TestCase):
         restored = GameState.from_dict({})
         self.assertEqual(restored.turn, 1)
         self.assertEqual(restored.resources, {})
+        # Старое сохранение без этих полей (появились вместе с типами поломки/
+        # прочностью инструментов) - пустые словари, а не KeyError.
+        self.assertEqual(restored.broken_types, {})
+        self.assertEqual(restored.tool_durability, {})
         self.assertEqual(restored.building_disabled, {})
         # пусто, а не конкретные id - список ресурсов вообще не знает о конкретном контенте
         self.assertEqual(restored.pinned, [])

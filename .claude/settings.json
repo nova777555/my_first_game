@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/run_tests_on_core_edit.py",
+            "timeout": 60,
+            "statusMessage": "Гоняю тесты после правки engine.py/state.py..."
+          }
+        ]
+      }
+    ]
+  }
+}

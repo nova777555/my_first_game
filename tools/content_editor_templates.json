@@ -1,0 +1,25 @@
+{
+  "storage_tier": [
+    {
+      "name": "Склад дефолт",
+      "items": [
+        {
+          "capacity_add": 3000,
+          "cost": {
+            "wood": 200,
+            "stone": 100
+          },
+          "requires_tech": null
+        },
+        {
+          "capacity_add": 8000,
+          "cost": {
+            "wood": 600,
+            "stone": 300
+          },
+          "requires_tech": "woodworking"
+        }
+      ]
+    }
+  ]
+}

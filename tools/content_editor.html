@@ -54,8 +54,9 @@
 
   nav {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
-    padding: 10px 20px 0;
+    padding: 10px 20px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
   }
@@ -391,6 +392,7 @@
   <div id="tab-locations" class="tab"></div>
   <div id="tab-manual" class="tab"></div>
   <div id="tab-buildings" class="tab"></div>
+  <div id="tab-breakdown-types" class="tab"></div>
   <div id="tab-techs" class="tab"></div>
   <div id="tab-energy-recipes" class="tab"></div>
   <div id="tab-species" class="tab"></div>
@@ -399,6 +401,7 @@
   <div id="tab-mining" class="tab"></div>
   <div id="tab-tools" class="tab"></div>
   <div id="tab-mobs" class="tab"></div>
+  <div id="tab-combat-moves" class="tab"></div>
   <div id="tab-skills" class="tab"></div>
   <div id="tab-quests" class="tab"></div>
   <div id="tab-settings" class="tab"></div>
@@ -412,6 +415,9 @@
 
 <script>
 let DATA = null;
+// Шаблоны повторяющихся "лестниц" карточек (тиры склада/инструмента, улучшения
+// построек) - см. templateListButtons/openTemplatePickerModal ниже. {kind: [{name, items}]}.
+let TEMPLATES = {};
 
 const TABS = [
   ["resources", "Ресурсы"],
@@ -419,6 +425,7 @@ const TABS = [
   ["locations", "Локации"],
   ["manual", "Ручные действия"],
   ["buildings", "Постройки"],
+  ["breakdown-types", "Виды поломок"],
   ["techs", "Технологии"],
   ["energy-recipes", "Рецепты за энергию"],
   ["species", "Виды"],
@@ -427,6 +434,7 @@ const TABS = [
   ["mining", "Добыча"],
   ["tools", "Инструменты"],
   ["mobs", "Мобы/Боссы"],
+  ["combat-moves", "Приёмы боя"],
   ["skills", "Навыки"],
   ["quests", "Квесты"],
   ["settings", "Настройки"],
@@ -545,6 +553,13 @@ const DEFAULT_ICONS = {
     "..AAAA..", ".AAAAAA.", "AABBBBAA", "AABBBBAA",
     "AABBBBAA", "AABBBBAA", "AAAAAAAA", "A.AAAA.A",
   ], palette: { A: "#c07a2e", B: "#3a2f28" } },
+
+  // ДЕРЖАТЬ В ПАРЕ с ICONS.monster в tools/web_ui.html - фоллбэк для mobs.*.icon
+  // без своей кастомной иконки (см. defaultMobIcon ниже).
+  monster: { grid: [
+    "..A....A..", ".AA....AA.", "AABAAAABAA", "AABBAABBAA",
+    "AAAAAAAAAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
+  ], palette: { A: "#6b6f7a", B: "#1f2226" } },
 };
 const DEFAULT_PICKAXE_PALETTES = [
   { A: "#6b4423", B: "#8a5a34" }, { A: "#6b4423", B: "#8b8f94" }, { A: "#6b4423", B: "#c7ccd1" },
@@ -575,6 +590,10 @@ function defaultToolTierIcon(toolId, tierIndex) {
   }
   return { grid: DEFAULT_ICONS.machine.grid, palette: { A: "#3f7a52", B: "#1c2b21" } };
 }
+// Дефолтная иконка МОБА/БОССА без своей кастомной icon - ОБЯЗАНА совпадать с тем,
+// что рисует игра (tools/web_ui.html:mobIcon() -> ICONS.monster), см. комментарий
+// у DEFAULT_ICONS.monster выше.
+function defaultMobIcon() { return DEFAULT_ICONS.monster; }
 
 // ---------- редактор пиксельных иконок ----------
 
@@ -960,7 +979,7 @@ function iconEditButton(title, entity, fallbackIcon, onChanged) {
 
 // ---------- фильтрация внутри вкладки ----------
 
-const filters = { resources: "", storage: "", locations: "", manual: "", buildings: "", techs: "", "energy-recipes": "", mining: "", tools: "", mobs: "", skills: "", quests: "" };
+const filters = { resources: "", storage: "", locations: "", manual: "", buildings: "", "breakdown-types": "", techs: "", "energy-recipes": "", mining: "", tools: "", mobs: "", "combat-moves": "", skills: "", quests: "" };
 
 // Оборачивает контейнер карточек строкой поиска. Каждая карточка/строка должна иметь
 // data-search (текст для сравнения) - см. вызовы ниже. Вызови вернувшуюся apply() один
@@ -1011,6 +1030,8 @@ function buildSearchIndex() {
     idx.push({ tab: "manual", anchor: `card-manual-${aid}`, cat: "Действие", label: a.name, sub: aid }));
   Object.entries(DATA.buildings).forEach(([bid, b]) =>
     idx.push({ tab: "buildings", anchor: `card-buildings-${bid}`, cat: "Постройка", label: b.name, sub: bid }));
+  Object.entries(DATA.breakdown_types || {}).forEach(([btId, bt]) =>
+    idx.push({ tab: "breakdown-types", anchor: `card-breakdown-types-${btId}`, cat: "Вид поломки", label: bt.name, sub: btId }));
   Object.entries(DATA.techs).forEach(([tid, t]) =>
     idx.push({ tab: "techs", anchor: `card-techs-${tid}`, cat: "Технология", label: t.name, sub: tid }));
   Object.entries(DATA.energy_recipes || {}).forEach(([rid, r]) =>
@@ -1025,6 +1046,8 @@ function buildSearchIndex() {
   });
   Object.entries(DATA.mobs || {}).forEach(([mid, m]) =>
     idx.push({ tab: "mobs", anchor: `card-mobs-${mid}`, cat: m.is_boss ? "Босс" : "Моб", label: m.name, sub: mid }));
+  Object.entries(DATA.combat_moves || {}).forEach(([moveId, move]) =>
+    idx.push({ tab: "combat-moves", anchor: `card-combat-moves-${moveId}`, cat: "Приём боя", label: move.name, sub: moveId }));
   Object.entries(DATA.skills || {}).forEach(([skid, sk]) =>
     idx.push({ tab: "skills", anchor: `card-skills-${skid}`, cat: "Навык", label: sk.name, sub: skid }));
   Object.entries(DATA.quests || {}).forEach(([qid, q]) =>
@@ -1127,9 +1150,95 @@ function toast(kind, title, details) {
 }
 
 async function load() {
-  const res = await fetch("/api/content");
-  DATA = await res.json();
+  const [contentRes] = await Promise.all([fetch("/api/content"), loadTemplates()]);
+  DATA = await contentRes.json();
   renderAll();
+}
+
+async function loadTemplates() {
+  const res = await fetch("/api/templates");
+  TEMPLATES = await res.json();
+}
+
+async function saveTemplates() {
+  await fetch("/api/templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(TEMPLATES),
+  });
+}
+
+// Общий виджет для мест, где повторяется однотипная "лестница" карточек (тиры
+// склада/инструмента, улучшения построек, см. вызовы ниже) - шаблон целиком
+// снимок ТЕКУЩЕГО списка на момент сохранения (может быть и из одной записи,
+// если сохранили один тир/апгрейд - тогда шаблон просто применяют повторно,
+// донабирая лестницу вручную). Применение ДОБАВЛЯЕТ глубокую копию сохранённых
+// записей в КОНЕЦ getList() - для тиров это само по себе соответствует
+// инварианту "тиры добавляются/удаляются только с конца". kind - плоский
+// namespace в TEMPLATES ("storage_tier"/"tool_tier"/"building_upgrade") - не
+// связан с content.json, только с TEMPLATES/content_editor_templates.json.
+function templateListButtons(kind, label, getList, onApplied) {
+  const saveBtn = el("button", { class: "small", text: "Сохранить как шаблон", onclick: () => {
+    const list = getList();
+    if (!list.length) { alert("Список пуст - нечего сохранять."); return; }
+    const name = prompt(`Имя шаблона (${label}):`);
+    if (!name) return;
+    if (!TEMPLATES[kind]) TEMPLATES[kind] = [];
+    if (TEMPLATES[kind].some(t => t.name === name)) {
+      TEMPLATES[kind] = TEMPLATES[kind].filter(t => t.name !== name);
+    }
+    TEMPLATES[kind].push({ name, items: JSON.parse(JSON.stringify(list)) });
+    saveTemplates();
+  }});
+
+  const applyBtn = el("button", { class: "small", text: "+ добавить из шаблона", onclick: () => {
+    openTemplatePickerModal(kind, label, (items) => onApplied(JSON.parse(JSON.stringify(items))));
+  }});
+
+  return [saveBtn, applyBtn];
+}
+
+function openTemplatePickerModal(kind, label, onPick) {
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal settings-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: `Шаблоны: ${label}` }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => overlay.remove() }));
+  modal.appendChild(head);
+
+  const listBox = el("div", { class: "stages-box" });
+  function renderList() {
+    listBox.innerHTML = "";
+    const templates = TEMPLATES[kind] || [];
+    if (!templates.length) {
+      listBox.appendChild(el("p", { class: "hint", text:
+        "Шаблонов пока нет - сохраните текущий список кнопкой \"Сохранить как шаблон\"." }));
+      return;
+    }
+    templates.forEach((t, i) => {
+      const card = el("div", { class: "stage-card" });
+      const applyRowBtn = el("button", { class: "small", text: "Добавить", onclick: () => { onPick(t.items); overlay.remove(); } });
+      const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
+        TEMPLATES[kind].splice(i, 1);
+        saveTemplates();
+        renderList();
+      }});
+      card.appendChild(el("div", { class: "stage-head" }, [
+        el("strong", { text: t.name }),
+        el("span", { class: "hint", text: `(${t.items.length} шт.)` }),
+        el("div", { class: "spacer" }),
+        applyRowBtn,
+        rm,
+      ]));
+      listBox.appendChild(card);
+    });
+  }
+  renderList();
+  modal.appendChild(listBox);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
 }
 
 async function save() {
@@ -1147,9 +1256,6 @@ async function save() {
 }
 
 async function resetSave() {
-  if (!confirm("Удалить save.json и обнулить весь прогресс игрока? Это касается сохранения игры (не content.json) и не отменяется.")) {
-    return;
-  }
   const res = await fetch("/api/reset_save", { method: "POST" });
   const payload = await res.json();
   if (res.ok) {
@@ -1165,6 +1271,7 @@ function renderAll() {
   renderLocations();
   renderManual();
   renderBuildings();
+  renderBreakdownTypes();
   renderTechs();
   renderEnergyRecipes();
   renderSpecies();
@@ -1173,6 +1280,7 @@ function renderAll() {
   renderMining();
   renderTools();
   renderMobs();
+  renderCombatMoves();
   renderSkills();
   renderQuests();
   renderSettings();
@@ -1363,6 +1471,44 @@ function openBuildingRequirementPicker(currentValue, excludeId, onPick) {
 function closeBuildingRequirementPicker() {
   const overlay = document.getElementById("buildingRequirementPickerOverlay");
   if (overlay) overlay.remove();
+}
+
+// Свободный текстовый тег "семейства" вида (species.*.family) и той же
+// строкой - что фермы принимают (buildings.*.breeding_accepts_family, см.
+// game/engine.py:species_family/breeding_accepts_family) - НЕ фиксированный
+// enum (тот же принцип, что id сред у environment_emulation), поэтому обычный
+// текстовый input, а не кнопка+модалка, как у speciesSelect. datalist из уже
+// встречающихся в DATA.species значений - только подсказка (защита от
+// опечатки вроде "bee"/"bees"), сохранить можно любую непустую строку. id
+// datalist генерируется на каждый вызов (счётчик ниже) - на странице может
+// быть сразу несколько таких полей (по одному на карточку постройки/вида),
+// одинаковый id у нескольких <datalist> в DOM был бы невалиден.
+let _speciesFamilyDatalistCounter = 0;
+function speciesFamilyInput(value, onChange) {
+  const listId = `speciesFamilyList_${_speciesFamilyDatalistCounter++}`;
+  const input = el("input", { type: "text", list: listId, placeholder: "пусто - без ограничений", value: value || "" });
+  input.addEventListener("change", () => onChange(input.value.trim()));
+  const families = new Set();
+  Object.values(DATA.species || {}).forEach(sp => { if (sp.family) families.add(sp.family); });
+  const datalist = el("datalist", { id: listId });
+  [...families].sort().forEach(f => datalist.appendChild(el("option", { value: f })));
+  return el("span", {}, [input, datalist]);
+}
+
+// Тот же приём, что speciesFamilyInput, только для тега вида души
+// (resources.*.soul_kind, например "моб"/"босс" - см. buildings.*.
+// soul_collector.accepts_kind/game/engine.py:soul_kind) - свободная строка,
+// datalist из уже встречающихся значений только подсказка.
+let _soulKindDatalistCounter = 0;
+function soulKindInput(value, onChange) {
+  const listId = `soulKindList_${_soulKindDatalistCounter++}`;
+  const input = el("input", { type: "text", list: listId, placeholder: "например 'моб'/'босс'", value: value || "" });
+  input.addEventListener("change", () => onChange(input.value.trim()));
+  const kinds = new Set();
+  (DATA.resources || []).forEach(r => { if (r.soul_kind) kinds.add(r.soul_kind); });
+  const datalist = el("datalist", { id: listId });
+  [...kinds].sort().forEach(k => datalist.appendChild(el("option", { value: k })));
+  return el("span", {}, [input, datalist]);
 }
 
 // Выбор вида (DATA.species) - используется мутациями (parent_a/parent_b/
@@ -1739,10 +1885,12 @@ function findIdOwner(id) {
   if (id in DATA.locations) return "локацией";
   if (id in DATA.manual_actions) return "ручным действием";
   if (id in DATA.buildings) return "постройкой";
+  if (DATA.breakdown_types && id in DATA.breakdown_types) return "видом поломки";
   if (id in DATA.techs) return "технологией";
   if (DATA.energy_recipes && id in DATA.energy_recipes) return "рецептом за энергию";
   if (id in DATA.tools) return "инструментом";
   if (DATA.mobs && id in DATA.mobs) return "мобом/боссом";
+  if (DATA.combat_moves && id in DATA.combat_moves) return "приёмом боя";
   if (DATA.skills && id in DATA.skills) return "навыком";
   if (DATA.quests && id in DATA.quests) return "квестом";
   if (DATA.loot_cases && id in DATA.loot_cases) return "кейсом с лутом";
@@ -1956,7 +2104,6 @@ function renderResources() {
     const lastCell = r.id === ENERGY_RESOURCE_ID
       ? el("span", { class: "hint", text: "🔒 обязательный ресурс" })
       : el("button", { class: "small danger", text: "Удалить", onclick: () => {
-          if (!confirm(`Удалить ресурс "${r.name}"? Если он где-то используется, сохранение откажет с понятной ошибкой.`)) return;
           DATA.resources.splice(i, 1);
           renderResources();
         }});
@@ -2021,7 +2168,6 @@ function renderStorage() {
 
     head.appendChild(el("div", { class: "spacer" }));
     head.appendChild(el("button", { class: "small danger", text: "Убрать вместимость", onclick: () => {
-      if (!confirm(`Убрать ограничение склада у "${r.name}"? Ресурс снова будет храниться без ограничений; купленные игроками тиры расширения (в их save.json) просто перестанут на что-либо влиять.`)) return;
       delete r.storage;
       renderStorage();
     }}));
@@ -2041,7 +2187,6 @@ function renderStorage() {
         class: "small danger", text: "Удалить тир",
         disabled: !isLast ? "true" : null,
         onclick: () => {
-          if (!confirm(`Удалить тир расширения №${i + 1}? Тиры удаляются только с конца - иначе сместятся номера, на которые уже могли сослаться сохранения игроков.`)) return;
           r.storage.tiers.pop();
           renderStorage();
         },
@@ -2075,6 +2220,10 @@ function renderStorage() {
       renderStorage();
       jumpTo(`card-storage-${r.id}-${r.storage.tiers.length - 1}`, "storage", {});
     }}));
+    templateListButtons("storage_tier", "тиры склада", () => r.storage.tiers, (items) => {
+      r.storage.tiers.push(...items);
+      renderStorage();
+    }).forEach(btn => card.appendChild(btn));
 
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
@@ -2181,7 +2330,6 @@ function renderManual() {
       jumpToNew: (id) => { renderManual(); jumpTo(`card-manual-${id}`, "manual", { focusName: true }); },
     });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить действие "${a.name}"?`)) return;
       delete DATA.manual_actions[aid];
       renderManual();
     }});
@@ -2213,6 +2361,24 @@ function renderManual() {
     }}));
     card.appendChild(toolTiersRow);
 
+    const toolScalingRow = el("div", { class: "field-row" });
+    toolScalingRow.appendChild(el("label", { text: "Множитель от тира инструмента" }));
+    const toolScalingSelect = el("select");
+    toolScalingSelect.appendChild(el("option", { value: "", text: "— не выбран —" }));
+    Object.entries(DATA.tools).forEach(([tid, t]) => {
+      const o = el("option", { value: tid, text: t.name });
+      if (a.tool_scaling && a.tool_scaling.tool === tid) o.selected = true;
+      toolScalingSelect.appendChild(o);
+    });
+    toolScalingSelect.addEventListener("change", () => {
+      if (toolScalingSelect.value) a.tool_scaling = { tool: toolScalingSelect.value };
+      else delete a.tool_scaling;
+    });
+    toolScalingRow.appendChild(toolScalingSelect);
+    toolScalingRow.appendChild(el("span", { class: "hint", text:
+      "необязательно - если выбран инструмент, весь gain этого действия домножается на его ТЕКУЩИЙ тир (тир 1 = без инструмента = множитель x1, не влияет на cost)" }));
+    card.appendChild(toolScalingRow);
+
     const priorityRow = el("div", { class: "field-row" });
     priorityRow.appendChild(el("label", { text: "Приоритет автокрафта (по умолчанию)" }));
     const priorityInput = el("input", { type: "number", value: a.priority || 0, style: "width:70px" });
@@ -2224,6 +2390,18 @@ function renderManual() {
     priorityRow.appendChild(el("span", { class: "hint", text:
       "если несколько действий производят один и тот же ресурс, автокрафт выбирает то, у которого приоритет БОЛЬШЕ (при равенстве - любое из них). Это значение ПО УМОЛЧАНИЮ - игрок может переопределить его под своё сохранение в панели «Автокрафт» веб-версии, не трогая content.json" }));
     card.appendChild(priorityRow);
+
+    const noAutocraftRow = el("div", { class: "field-row" });
+    const noAutocraftCheckbox = el("input", { type: "checkbox" });
+    noAutocraftCheckbox.checked = !!a.excluded_from_autocraft;
+    noAutocraftCheckbox.addEventListener("change", () => {
+      if (noAutocraftCheckbox.checked) a.excluded_from_autocraft = true; else delete a.excluded_from_autocraft;
+    });
+    noAutocraftRow.appendChild(noAutocraftCheckbox);
+    noAutocraftRow.appendChild(el("label", { text: "Исключить из автокрафта (excluded_from_autocraft)" }));
+    noAutocraftRow.appendChild(el("span", { class: "hint", text:
+      "автокрафт (resource_recipe) никогда не выберет это действие рецептом для его gain-ресурса, даже если оно полностью детерминировано и мгновенно - как будто рецепта не существует вовсе (нехватка ресурса покажется игроку как обычная нехватка сырья). Кнопка «Перейти к рецепту» этим не гейтится - игрок всё ещё может найти и выполнить действие вручную. Для действий, которые НЕЛЬЗЯ доверять автоматике (например, убийство босса)." }));
+    card.appendChild(noAutocraftRow);
 
     const durationRow = el("div", { class: "field-row" });
     durationRow.appendChild(el("label", { text: "Длительность (ходов)" }));
@@ -2323,14 +2501,6 @@ function renderLocations() {
       head.push(el("span", { class: "hint", text: "🔒 обязательная локация" }));
     } else {
       head.push(el("button", { class: "small danger", text: "Удалить", onclick: () => {
-        const usedBy = Object.values(DATA.manual_actions).filter(a => a.location === lid);
-        const usedByMobs = Object.values(DATA.mobs || {}).filter(m => m.location === lid);
-        const childLocations = Object.values(DATA.locations).filter(l => l.parent_location === lid);
-        const warnings = [];
-        if (usedBy.length) warnings.push(`${usedBy.length} действий останутся без локации`);
-        if (usedByMobs.length) warnings.push(`${usedByMobs.length} мобов/боссов останутся без локации`);
-        if (childLocations.length) warnings.push(`${childLocations.length} вложенных локаций останутся без родителя`);
-        if (warnings.length && !confirm(`У этой локации ${warnings.join(", ")} - сохранение будет отклонено, пока не поправишь это. Всё равно удалить локацию?`)) return;
         delete DATA.locations[lid];
         renderLocations();
         renderManual();
@@ -2521,8 +2691,7 @@ function openEnergyConverterModal(b, onChange) {
 
 function soulCollectorSummaryText(b) {
   if (!b.soul_collector) return "не синтезатор душ";
-  const accepts = b.soul_collector.accepts || [];
-  return `${b.soul_collector.slots || 1} слот(ов)/копия, принимает душ: ${accepts.length}`;
+  return `${b.soul_collector.slots || 1} слот(ов)/копия, принимает тег: ${b.soul_collector.accepts_kind || "—"}`;
 }
 
 function openSoulCollectorSettingsModal(b, onChange) {
@@ -2537,9 +2706,10 @@ function openSoulCollectorSettingsModal(b, onChange) {
   modal.appendChild(el("p", { class: "hint", text:
     "Постройка, в слоты которой можно вручную вставить \"душу\" (ресурс, обычно выбитый с моба - см. вкладку "
     + "«Мобы/Боссы» - или скрафтенный) - пока душа стоит в слоте, она вечно (без расхода) производит ресурсы по "
-    + "своему рецепту (вкладка «Мобы/Боссы» → «Продукция синтезаторов душ» внизу страницы). accepts - список "
-    + "ДОПУСТИМЫХ для ЭТОЙ постройки душ - разным постройкам обычно назначают разные, непересекающиеся души "
-    + "(например, «синтезатор» под обычных мобов и отдельный «алтарь» под боссовые)." }));
+    + "своему рецепту (вкладка «Мобы/Боссы» → «Продукция синтезаторов душ» внизу страницы, там же задаётся тег "
+    + "soul_kind у самой души). accepts_kind - ЕДИНЫЙ тег, который принимает ЭТА постройка - синтезатор примет "
+    + "ЛЮБУЮ душу с таким же soul_kind, а не перечисленный вручную список id (разным постройкам обычно назначают "
+    + "разные, непересекающиеся теги - например, «синтезатор» под тег «моб» и отдельный «алтарь» под «босс»)." }));
 
   const toggleRow = el("div", { class: "field-row" });
   const enabled = el("input", { type: "checkbox" });
@@ -2561,34 +2731,74 @@ function openSoulCollectorSettingsModal(b, onChange) {
     slotsRow.appendChild(el("span", { class: "hint", text: "умножается на число РАБОЧИХ копий этой постройки, плюс бонус от апгрейдов типа «Слоты синтезатора душ»" }));
     body.appendChild(slotsRow);
 
-    body.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Допустимые души (accepts)" })]));
-    const acceptsBox = el("div", { class: "dict-editor" });
-    const renderAccepts = () => {
-      acceptsBox.innerHTML = "";
-      if (!Array.isArray(b.soul_collector.accepts)) b.soul_collector.accepts = [];
-      b.soul_collector.accepts.forEach((rid, i) => {
-        const row = el("div", { class: "dict-row" });
-        row.appendChild(resourceSelect(rid, (v) => { b.soul_collector.accepts[i] = v; }));
-        row.appendChild(el("button", { class: "small danger", text: "✕", onclick: () => { b.soul_collector.accepts.splice(i, 1); renderAccepts(); } }));
-        acceptsBox.appendChild(row);
-      });
-      acceptsBox.appendChild(el("button", { class: "small", text: "+ душа", onclick: () => {
-        const free = DATA.resources.find(r => !b.soul_collector.accepts.includes(r.id));
-        if (!free) { alert("Все ресурсы уже добавлены"); return; }
-        b.soul_collector.accepts.push(free.id);
-        renderAccepts();
-      }}));
-    };
-    renderAccepts();
-    body.appendChild(acceptsBox);
-    body.appendChild(el("p", { class: "hint", text: "у души без соответствующей записи в «Продукция синтезаторов душ» (вкладка «Мобы/Боссы») ничего не будет производиться." }));
+    const acceptsRow = el("div", { class: "field-row" });
+    acceptsRow.appendChild(el("label", { text: "Принимает тег (accepts_kind)" }));
+    acceptsRow.appendChild(soulKindInput(b.soul_collector.accepts_kind, (v) => {
+      if (v) b.soul_collector.accepts_kind = v; else delete b.soul_collector.accepts_kind;
+    }));
+    body.appendChild(acceptsRow);
+    body.appendChild(el("p", { class: "hint", text: "тег задаётся на самой душе (soul_kind) в «Продукция синтезаторов душ» (вкладка «Мобы/Боссы»); у души без soul_kind или с другим тегом её нельзя будет вставить в этот синтезатор." }));
   };
   renderBody();
   modal.appendChild(body);
 
   enabled.addEventListener("change", () => {
-    if (enabled.checked) b.soul_collector = { slots: 1, accepts: [] };
+    if (enabled.checked) b.soul_collector = { slots: 1 };
     else delete b.soul_collector;
+    renderBody();
+  });
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function automationHubSummaryText(b) {
+  if (!b.automation_hub) return "нет";
+  return `${b.automation_hub.slots || 1} слот(ов)/копия`;
+}
+
+function openAutomationHubSettingsModal(b, onChange) {
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal settings-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Автоматизатор" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => { overlay.remove(); onChange(); } }));
+  modal.appendChild(head);
+
+  modal.appendChild(el("p", { class: "hint", text:
+    "Постройка, в слоты которой игрок сам настраивает правила вида «если ресурс X >= / <= K (и, "
+    + "может быть, ещё условия) - выполнить ручное действие Y» - каждый ход правило проверяется и, "
+    + "если все условия истинны, действие выполняется само, без клика. Сами правила - это save.json "
+    + "(state.automation_rules), контент только задаёт, СКОЛЬКО слотов доступно на постройке - см. "
+    + "game/engine.py:process_automation_rules." }));
+
+  const toggleRow = el("div", { class: "field-row" });
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = !!b.automation_hub;
+  toggleRow.appendChild(enabled);
+  toggleRow.appendChild(el("label", { text: "Автоматизатор (automation_hub)" }));
+  modal.appendChild(toggleRow);
+
+  const body = el("div");
+  const renderBody = () => {
+    body.innerHTML = "";
+    if (!b.automation_hub) return;
+
+    const slotsRow = el("div", { class: "field-row" });
+    slotsRow.appendChild(el("label", { text: "Слотов на копию" }));
+    const slotsInput = el("input", { type: "number", min: "1", value: b.automation_hub.slots || 1 });
+    slotsInput.addEventListener("change", () => { b.automation_hub.slots = Number(slotsInput.value) || 1; });
+    slotsRow.appendChild(slotsInput);
+    slotsRow.appendChild(el("span", { class: "hint", text: "умножается на число РАБОЧИХ копий этой постройки, плюс бонус от апгрейдов типа «Слоты автоматизатора»" }));
+    body.appendChild(slotsRow);
+  };
+  renderBody();
+  modal.appendChild(body);
+
+  enabled.addEventListener("change", () => {
+    if (enabled.checked) b.automation_hub = { slots: 1 };
+    else delete b.automation_hub;
     renderBody();
   });
 
@@ -2618,6 +2828,9 @@ const UPGRADE_TYPE_OPTIONS = [
   ["breeding_slots_bonus", "Слоты фермы (доп. вместимость ЭТОГО экземпляра)"],
   ["soul_collector_slots", "Слоты синтезатора душ"],
   ["soul_generation_efficiency", "Эффективность синтезатора душ"],
+  ["breakdown_immunity", "Неломкость (отключает поломку постройки)"],
+  ["action_duration_reduction", "Ускорение действия (сокращает duration_turns)"],
+  ["automation_slots", "Слоты автоматизатора"],
 ];
 const UPGRADE_TYPE_HINTS = {
   scale: "любое положительное число (не обязательно целое) - во сколько раз рецепт домножается относительно БАЗОВОГО (и produces, и consumes). Если у постройки НЕСКОЛЬКО scale-улучшений, действует только САМОЕ БОЛЬШОЕ купленное значение (они не перемножаются) - чтобы задать прогрессию \"1:1 -> 2:2 -> 3:3\", просто заведите отдельные улучшения со значениями 2 и 3, а не 2 и 1.5",
@@ -2631,6 +2844,9 @@ const UPGRADE_TYPE_HINTS = {
   breeding_slots_bonus: "положительное число - АБСОЛЮТНАЯ добавка к вместимости ИМЕННО ЭТОГО экземпляра фермы (покупается на экземпляр, не на тип - как breeding_output). Имеет смысл только у ферм (breeding_slots > 0). Обычно repeatable (см. галочку ниже) - \"+1 слот\", покупаемый сколько угодно раз подряд",
   soul_collector_slots: "положительное число - АБСОЛЮТНАЯ добавка к вместимости синтезатора душ ЭТОЙ постройки (см. модалку «Синтезатор душ»). Имеет смысл только у построек с soul_collector. Обычно repeatable",
   soul_generation_efficiency: "число больше 1 - множитель продукции ВСЕХ душ, вставленных в синтезатор ЭТОЙ постройки. Имеет смысл только у построек с soul_collector. При нескольких таких улучшениях действует САМОЕ БОЛЬШОЕ купленное значение",
+  breakdown_immunity: "само число не используется (куплено/не куплено) - постройка (или, для фермы, ИМЕННО ЭТОТ экземпляр - апгрейд покупается через 'Особи') перестаёт ломаться вовсе, независимо от breakdown_chance и любых тех-эффектов. Разрешён у ЛЮБОЙ постройки, не только у ферм",
+  action_duration_reduction: "число от 0 до 1 (не включая 1) - доля сокращения duration_turns у ручных действий, которые зависят от ЭТОЙ постройки (requires_building) и многоходовые (duration_turns > 1). При нескольких таких улучшениях действует САМОЕ БОЛЬШОЕ купленное значение (сильнейшее сокращение). Настолько сильное сокращение, что итог округляется до 1 хода, делает действие фактически мгновенным",
+  automation_slots: "положительное число - АБСОЛЮТНАЯ добавка к вместимости автоматизатора ЭТОЙ постройки (см. модалку «Автоматизатор»). Имеет смысл только у построек с automation_hub. Обычно repeatable",
 };
 
 function upgradesSummaryText(b) {
@@ -2650,6 +2866,17 @@ function promptNewUpgradeId(b) {
     return null;
   }
   return id;
+}
+
+// Для массового добавления улучшений из шаблона (в отличие от promptNewUpgradeId,
+// который используется при ручном добавлении ОДНОГО улучшения) - id из шаблона мог
+// уже встретиться у ЭТОЙ постройки (тот же шаблон применили дважды, или у неё уже
+// было одноимённое улучшение), тогда просто подбираем следующий свободный "_2"/"_3".
+function uniqueUpgradeId(b, baseId) {
+  if (!(b.upgrades || []).some(u => u.id === baseId)) return baseId;
+  let n = 2;
+  while ((b.upgrades || []).some(u => u.id === `${baseId}_${n}`)) n++;
+  return `${baseId}_${n}`;
 }
 
 function openBuildingUpgradesEditorModal(b, onChange) {
@@ -2680,7 +2907,6 @@ function openBuildingUpgradesEditorModal(b, onChange) {
       const nameInput = el("input", { type: "text", value: u.name || "" });
       nameInput.addEventListener("change", () => { u.name = nameInput.value; });
       const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-        if (!confirm(`Удалить улучшение "${u.name}"?`)) return;
         b.upgrades.splice(i, 1);
         renderList();
       }});
@@ -2799,7 +3025,11 @@ function openBuildingUpgradesEditorModal(b, onChange) {
     b.upgrades.push({ id, name: "Новое улучшение", description: "", type: "scale", value: 2, requires_tech: null, cost: {} });
     renderList();
   }});
-  modal.appendChild(el("div", { class: "tab-toolbar" }, [addBtn]));
+  const templateBtns = templateListButtons("building_upgrade", "улучшения построек", () => b.upgrades, (items) => {
+    items.forEach(item => { item.id = uniqueUpgradeId(b, item.id); b.upgrades.push(item); });
+    renderList();
+  });
+  modal.appendChild(el("div", { class: "tab-toolbar" }, [addBtn, ...templateBtns]));
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
@@ -2836,7 +3066,6 @@ function renderBuildings() {
       jumpToNew: (id) => { renderBuildings(); jumpTo(`card-buildings-${id}`, "buildings", { focusName: true }); },
     });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить постройку "${b.name}"?`)) return;
       delete DATA.buildings[bid];
       renderBuildings();
     }});
@@ -2866,6 +3095,35 @@ function renderBuildings() {
     bcInput.addEventListener("change", () => { b.breakdown_chance = Number(bcInput.value) || 0; });
     bcRow.appendChild(bcInput);
     card.appendChild(bcRow);
+
+    const breakdownTypeEntries = Object.entries(DATA.breakdown_types || {});
+    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Виды поломки" })]));
+    if (!breakdownTypeEntries.length) {
+      card.appendChild(el("p", { class: "hint", text:
+        "Видов поломки пока нет - заведи их на вкладке «Виды поломок». Без них поломка этой постройки "
+        + "остаётся \"без типа\" - починка не требует никакого инструмента, как раньше." }));
+    } else {
+      if (!Array.isArray(b.breakdown_types)) b.breakdown_types = [];
+      const btBox = el("div", { class: "req-list" });
+      breakdownTypeEntries.forEach(([btId, bt]) => {
+        const cb = el("input", { type: "checkbox" });
+        cb.checked = b.breakdown_types.includes(btId);
+        cb.addEventListener("change", () => {
+          if (cb.checked) {
+            if (!b.breakdown_types.includes(btId)) b.breakdown_types.push(btId);
+          } else {
+            b.breakdown_types = b.breakdown_types.filter(x => x !== btId);
+            if (!b.breakdown_types.length) delete b.breakdown_types;
+          }
+        });
+        btBox.appendChild(el("label", {}, [cb, document.createTextNode(bt.name)]));
+      });
+      card.appendChild(btBox);
+      card.appendChild(el("span", { class: "hint", text:
+        "при поломке одной копии случайно выбирается ОДИН из отмеченных видов (равновероятно) - его "
+        + "required_tools решает, какой инструмент понадобится, чтобы починить именно эту копию. Пусто = "
+        + "поломка без типа, как раньше." }));
+    }
 
     const labelRow = el("div", { class: "field-row" });
     labelRow.appendChild(el("label", { text: "Метка на иконке" }));
@@ -2934,6 +3192,14 @@ function renderBuildings() {
     breedingSlotsRow.appendChild(el("span", { class: "hint", text: "0 - постройка не ферма; иначе даёт столько слотов на КАЖДЫЙ физический экземпляр (не складывается с другими типами ферм и не делится между экземплярами одного типа - см. game/engine.py:farm_instance_slot_capacity) и появляется в модалке «Пасеки» игры" }));
     card.appendChild(breedingSlotsRow);
 
+    const breedingAcceptsRow = el("div", { class: "field-row" });
+    breedingAcceptsRow.appendChild(el("label", { text: "Семейство для заселения (breeding_accepts_family)" }));
+    breedingAcceptsRow.appendChild(speciesFamilyInput(b.breeding_accepts_family, (v) => {
+      if (v) b.breeding_accepts_family = v; else delete b.breeding_accepts_family;
+    }));
+    breedingAcceptsRow.appendChild(el("span", { class: "hint", text: "пусто - в эту ферму можно поселить ЛЮБОЙ вид (старое поведение); иначе - только виды с ТАКИМ ЖЕ тегом family (вкладка «Виды») - например, пасека принимает только 'bee', оранжерея - только 'flower', чтобы игрок не путал их в одном меню. Новый вид того же семейства подхватывается автоматически - ничего в постройке менять не нужно" }));
+    card.appendChild(breedingAcceptsRow);
+
     const geneticsLabRow = el("div", { class: "field-row" });
     const geneticsLabCheckbox = el("input", { type: "checkbox" });
     geneticsLabCheckbox.checked = !!b.genetics_lab;
@@ -2997,6 +3263,15 @@ function renderBuildings() {
       openSoulCollectorSettingsModal(b, () => { soulCollectorSummary.textContent = soulCollectorSummaryText(b); });
     }}));
     card.appendChild(soulCollectorRow);
+
+    const automationHubRow = el("div", { class: "field-row settings-summary-row" });
+    automationHubRow.appendChild(el("label", { text: "Автоматизатор" }));
+    const automationHubSummary = el("span", { class: "hint", text: automationHubSummaryText(b) });
+    automationHubRow.appendChild(automationHubSummary);
+    automationHubRow.appendChild(el("button", { class: "small", text: "Настроить", onclick: () => {
+      openAutomationHubSettingsModal(b, () => { automationHubSummary.textContent = automationHubSummaryText(b); });
+    }}));
+    card.appendChild(automationHubRow);
 
     const upgradesRow = el("div", { class: "field-row settings-summary-row" });
     upgradesRow.appendChild(el("label", { text: "Улучшения" }));
@@ -3183,7 +3458,6 @@ function renderTechListView(root) {
       jumpToNew: (id) => jumpToTechCard(id, { focusName: true }),
     });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить технологию "${t.name}"?`)) return;
       delete DATA.techs[tid];
       renderTechs();
     }});
@@ -3372,7 +3646,6 @@ function renderTechGraphView(root) {
     jumpToTechCard(id, { focusName: true });
   });
   const resetBtn = el("button", { text: "Сбросить расположение", onclick: () => {
-    if (!confirm("Вернуть все узлы к автоматической раскладке по тирам? Ручные перемещения будут сброшены.")) return;
     Object.values(DATA.techs).forEach(t => { delete t.pos; });
     renderTechs();
   }});
@@ -3450,7 +3723,6 @@ function renderTechGraphView(root) {
       hit.dataset.from = reqId;
       hit.dataset.to = tid;
       hit.addEventListener("click", () => {
-        if (!confirm(`Убрать зависимость: "${t.name}" больше не будет требовать "${DATA.techs[reqId]?.name || reqId}"?`)) return;
         t.requires = t.requires.filter(x => x !== reqId);
         renderTechsKeepScroll();
       });
@@ -3751,7 +4023,6 @@ function renderEnergyRecipes() {
       jumpToNew: (id) => { renderEnergyRecipes(); jumpTo(`card-energy-recipes-${id}`, "energy-recipes", { focusName: true }); },
     });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить рецепт "${r.name}"?`)) return;
       delete DATA.energy_recipes[rid];
       renderEnergyRecipes();
     }});
@@ -3842,13 +4113,20 @@ function renderSpecies() {
     const card = el("div", { class: "card", id: `card-species-${sid}` });
     card.dataset.search = (sid + " " + resName).toLowerCase();
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Убрать разведение для "${resName}"? Ссылки на этот вид в мутациях станут невалидными - сохранение будет отклонено, пока их не поправишь.`)) return;
       delete DATA.species[sid];
       renderSpecies();
     }});
     card.appendChild(el("div", { class: "card-head" }, [el("code", { text: sid }), el("strong", { text: resName }), el("div", { class: "spacer" }), rm]));
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Описание" }), descriptionTextarea(sp.description, "Флейвор-текст для модалки «Фермы»", (v) => { sp.description = v; })]));
+
+    const familyRow = el("div", { class: "field-row" });
+    familyRow.appendChild(el("label", { text: "Семейство (family)" }));
+    familyRow.appendChild(speciesFamilyInput(sp.family, (v) => {
+      if (v) sp.family = v; else delete sp.family;
+    }));
+    familyRow.appendChild(el("span", { class: "hint", text: "тег для фильтра ферм (buildings.*.breeding_accepts_family) - например 'bee' у всех пчёл, 'flower' у всех манацветов; ферма с таким же тегом сама подхватит этот вид, ничего в ней менять не придётся" }));
+    card.appendChild(familyRow);
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Производит за ход (produces)" })]));
     if (!sp.produces) sp.produces = {};
@@ -4096,7 +4374,6 @@ function renderMutations() {
     down.addEventListener("click", () => { moveArrayItem(DATA.mutations, i, 1); renderMutations(); });
     order.append(up, down);
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить мутацию "${headLabel.textContent}"?`)) return;
       DATA.mutations.splice(i, 1);
       renderMutations();
     }});
@@ -4210,7 +4487,6 @@ function renderMining() {
     const card = el("div", { class: "card", id: `card-mining-${rid}` });
     card.dataset.search = (rid + " " + resName).toLowerCase();
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Убрать ручную добычу для "${resName}"?`)) return;
       delete DATA.mining_info[rid];
       renderMining();
     }});
@@ -4274,9 +4550,10 @@ function renderMining() {
       "Каждая новая найденная жила этого ресурса дополнительно розыгрывается по тирам качества (взвешенно, "
       + "weight) - в пул попадают только тиры, чей мин. тир инструмента (min_tool_tier) не выше ТЕКУЩЕГО тира "
       + "required_tool у игрока: чем лучше инструмент, тем больше хороших тиров участвует в розыгрыше. "
-      + "yield_multiplier домножает добычу за ход (итог округляется вверх). Хотя бы один тир должен быть "
-      + "доступен уже на пороге required_tier выше - иначе на самом раннем доступном тире инструмента розыгрыш "
-      + "качества окажется пустым." }));
+      + "size_multiplier домножает СЛУЧАЙНЫЙ ЗАПАС жилы в момент находки (итог округляется вверх) - на "
+      + "скорость добычи за ход качество не влияет. Хотя бы один тир должен быть доступен уже на пороге "
+      + "required_tier выше - иначе на самом раннем доступном тире инструмента розыгрыш качества окажется "
+      + "пустым." }));
 
     const qualityBox = el("div", { class: "stages-box" });
     function renderQualityBox() {
@@ -4307,9 +4584,9 @@ function renderMining() {
         qCard.appendChild(weightRow);
 
         const multRow = el("div", { class: "field-row" });
-        multRow.appendChild(el("label", { text: "Множитель добычи (yield_multiplier)" }));
-        const multInput = el("input", { type: "number", min: "0.01", step: "0.1", value: q.yield_multiplier ?? 1 });
-        multInput.addEventListener("change", () => { q.yield_multiplier = Number(multInput.value) || 1; });
+        multRow.appendChild(el("label", { text: "Множитель запаса жилы (size_multiplier)" }));
+        const multInput = el("input", { type: "number", min: "0.01", step: "0.1", value: q.size_multiplier ?? 1 });
+        multInput.addEventListener("change", () => { q.size_multiplier = Number(multInput.value) || 1; });
         multRow.appendChild(multInput);
         qCard.appendChild(multRow);
 
@@ -4324,7 +4601,7 @@ function renderMining() {
         qualityBox.appendChild(qCard);
       });
       const addBtn = el("button", { class: "small", text: "+ добавить тир качества", onclick: () => {
-        info.quality_tiers.push({ name: "Новый тир", weight: 1, yield_multiplier: 1, min_tool_tier: 1 });
+        info.quality_tiers.push({ name: "Новый тир", weight: 1, size_multiplier: 1, min_tool_tier: 1 });
         renderQualityBox();
       }});
       qualityBox.appendChild(addBtn);
@@ -4335,7 +4612,7 @@ function renderMining() {
 
     qualityEnabled.addEventListener("change", () => {
       if (qualityEnabled.checked) {
-        info.quality_tiers = [{ name: "Обычная", weight: 1, yield_multiplier: 1, min_tool_tier: 1 }];
+        info.quality_tiers = [{ name: "Обычная", weight: 1, size_multiplier: 1, min_tool_tier: 1 }];
       } else {
         delete info.quality_tiers;
       }
@@ -4386,7 +4663,6 @@ function renderTools() {
     const nameInput = el("input", { type: "text", value: tool.name });
     nameInput.addEventListener("change", () => { tool.name = nameInput.value; card.dataset.search = (toolId + " " + tool.name).toLowerCase(); });
     const rm = el("button", { class: "small danger", text: "Удалить инструмент", onclick: () => {
-      if (!confirm(`Удалить инструмент "${tool.name}" целиком, со всеми тирами? Ссылки на него в «Добыче»/«Ручных действиях» станут невалидными - сохранение будет отклонено, пока их не поправишь.`)) return;
       delete DATA.tools[toolId];
       renderTools();
       refreshToolDependentTabs();
@@ -4420,7 +4696,6 @@ function renderTools() {
         class: "small danger", text: "Удалить тир",
         disabled: (!isLast || tool.tiers.length === 1) ? "true" : null,
         onclick: () => {
-          if (!confirm(`Удалить тир "${tier.name}"?`)) return;
           tool.tiers.pop();
           renderTools();
           refreshToolDependentTabs();
@@ -4442,6 +4717,44 @@ function renderTools() {
         const costBox = el("div", { class: "dict-editor" });
         renderDictEditor(costBox, tier.cost);
         tierCard.appendChild(costBox);
+
+        // Прочность (см. "Виды поломок и ремонт инструментов" в CLAUDE.md) -
+        // необязательна: без неё инструмент на этом тире не изнашивается вовсе
+        // (как топор/кирка/меч сейчас). Цена ремонта самого инструмента
+        // обязательна, если прочность задана - иначе непонятно, чем платить,
+        // когда прочность дойдёт до 0 (см. content_validation.py).
+        const durRow = el("div", { class: "field-row" });
+        durRow.appendChild(el("label", { text: "Прочность (починок до поломки)" }));
+        const durInput = el("input", { type: "number", min: "1", step: "1", value: tier.max_durability ?? "", placeholder: "не изнашивается" });
+        durRow.appendChild(durInput);
+        tierCard.appendChild(durRow);
+
+        const toolRepairCostRow = el("div", { class: "field-row" }, [el("label", { text: "Цена ремонта инструмента" })]);
+        const toolRepairCostBox = el("div", { class: "dict-editor" });
+        function renderToolRepairCost() {
+          toolRepairCostBox.innerHTML = "";
+          if (tier.max_durability == null) {
+            toolRepairCostRow.style.display = "none";
+            toolRepairCostBox.style.display = "none";
+            return;
+          }
+          toolRepairCostRow.style.display = "";
+          toolRepairCostBox.style.display = "";
+          if (!tier.repair_cost) tier.repair_cost = {};
+          renderDictEditor(toolRepairCostBox, tier.repair_cost);
+        }
+        durInput.addEventListener("change", () => {
+          if (durInput.value === "") {
+            delete tier.max_durability;
+            delete tier.repair_cost;
+          } else {
+            tier.max_durability = Math.max(1, Math.round(Number(durInput.value) || 1));
+          }
+          renderToolRepairCost();
+        });
+        renderToolRepairCost();
+        tierCard.appendChild(toolRepairCostRow);
+        tierCard.appendChild(toolRepairCostBox);
       }
 
       if (tool.weapon) {
@@ -4481,6 +4794,33 @@ function renderTools() {
         });
         soulChanceMultRow.appendChild(soulMultInput);
         tierCard.appendChild(soulChanceMultRow);
+
+        if (!DATA.combat_moves) DATA.combat_moves = {};
+        const moveEntries = Object.entries(DATA.combat_moves);
+        tierCard.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Открывает приёмы боя" })]));
+        if (!moveEntries.length) {
+          tierCard.appendChild(el("p", { class: "hint", text: "Приёмов боя пока нет - заведи их на вкладке «Приёмы боя»." }));
+        } else {
+          if (!tier.unlocks_moves) tier.unlocks_moves = [];
+          const movesBox = el("div", { class: "req-list" });
+          moveEntries.forEach(([moveId, move]) => {
+            const cb = el("input", { type: "checkbox" });
+            cb.checked = tier.unlocks_moves.includes(moveId);
+            cb.addEventListener("change", () => {
+              if (cb.checked) {
+                if (!tier.unlocks_moves.includes(moveId)) tier.unlocks_moves.push(moveId);
+              } else {
+                tier.unlocks_moves = tier.unlocks_moves.filter(x => x !== moveId);
+                if (!tier.unlocks_moves.length) delete tier.unlocks_moves;
+              }
+            });
+            movesBox.appendChild(el("label", {}, [cb, document.createTextNode(move.name)]));
+          });
+          tierCard.appendChild(movesBox);
+          tierCard.appendChild(el("span", { class: "hint", text:
+            "разблокировка КУМУЛЯТИВНА по тирам ЭТОЙ линейки - дойдя до тира N, игрок сохраняет приёмы всех "
+            + "тиров 1..N (не только текущего), см. game/engine.py:unlocked_attack_moves" }));
+        }
       }
 
       tiersBox.appendChild(tierCard);
@@ -4493,6 +4833,13 @@ function renderTools() {
       refreshToolDependentTabs();
       jumpTo(`card-tools-${toolId}-${tool.tiers.length - 1}`, "tools", { focusName: true });
     }}));
+    // slice(1) - тир №1 (стартовый, бесплатный) нарочно исключён из шаблонов: он не
+    // "тир прогрессии", а обязательное боилерплейт-поле, у каждого инструмента одно.
+    templateListButtons("tool_tier", "тиры инструмента", () => tool.tiers.slice(1), (items) => {
+      tool.tiers.push(...items);
+      renderTools();
+      refreshToolDependentTabs();
+    }).forEach(btn => card.appendChild(btn));
 
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
@@ -4579,11 +4926,20 @@ function renderSoulRecipesSection() {
     const resName = DATA.resources.find(r => r.id === rid)?.name || rid;
     const card = el("div", { class: "card" });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить продукцию для "${resName}"?`)) return;
       delete DATA.soul_recipes[rid];
       renderMobs();
     }});
     card.appendChild(el("div", { class: "card-head" }, [el("code", { text: rid }), el("strong", { text: resName }), el("div", { class: "spacer" }), rm]));
+
+    const kindRow = el("div", { class: "field-row" });
+    kindRow.appendChild(el("label", { text: "Тег вида души (soul_kind)" }));
+    const resource = DATA.resources.find(r => r.id === rid);
+    kindRow.appendChild(soulKindInput(resource?.soul_kind, (v) => {
+      if (!resource) return;
+      if (v) resource.soul_kind = v; else delete resource.soul_kind;
+    }));
+    kindRow.appendChild(el("span", { class: "hint", text: "например 'моб'/'босс' - синтезатор с тем же accepts_kind (вкладка «Постройки») примет эту душу" }));
+    card.appendChild(kindRow);
 
     if (!recipe.produces) recipe.produces = {};
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Производит за ход (гарантированно)" })]));
@@ -4600,6 +4956,128 @@ function renderSoulRecipesSection() {
     cardsBox.appendChild(card);
   });
   return box;
+}
+
+// ---------- Приёмы боя ----------
+// content.json["combat_moves"] - альтернативные варианты атаки (game/engine.py:
+// attack_encounter(move_id=...)). КОМУ и С КАКОГО ТИРА оружия открывается конкретный
+// приём настраивается НЕ здесь, а на вкладке «Инструменты» у тира оружия
+// (tier.unlocks_moves) - этот список только сами определения приёмов.
+function renderCombatMoves() {
+  const root = document.getElementById("tab-combat-moves");
+  root.innerHTML = "";
+  if (!DATA.combat_moves) DATA.combat_moves = {};
+  root.appendChild(el("p", { class: "hint", text:
+    "Альтернативные варианты атаки в схватке - у каждого свой независимый способ посчитать урон (см. режим ниже). "
+    + "cooldown_turns - сколько ходов приём недоступен после применения (тикает КАЖДЫЙ ход игры, не только пока "
+    + "идёт бой). Какой тир оружия открывает какой приём - настраивается на вкладке «Инструменты» у конкретного "
+    + "тира (галочки «Открывает приёмы боя», видны только у weapon=true)." }));
+
+  const cardsBox = el("div");
+  const filterBar = makeFilterBar("combat-moves", cardsBox);
+  const addForm = idPromptAndAdd("приём боя", (id) => {
+    DATA.combat_moves[id] = { name: "Новый приём", description: "", damage_multiplier: 1.5, cooldown_turns: 2 };
+    renderCombatMoves();
+    renderTools(); // список приёмов у чекбоксов unlocks_moves должен увидеть новую запись
+    jumpTo(`card-combat-moves-${id}`, "combat-moves", { focusName: true });
+  });
+  root.appendChild(makeToolbar(addForm, filterBar));
+  root.appendChild(cardsBox);
+
+  Object.entries(DATA.combat_moves).forEach(([moveId, move]) => {
+    const card = el("div", { class: "card", id: `card-combat-moves-${moveId}` });
+    card.dataset.search = (moveId + " " + move.name).toLowerCase();
+    const nameInput = el("input", { type: "text", value: move.name });
+    nameInput.addEventListener("change", () => { move.name = nameInput.value; card.dataset.search = (moveId + " " + move.name).toLowerCase(); });
+    const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
+      delete DATA.combat_moves[moveId];
+      renderCombatMoves();
+      renderTools(); // сняли из чекбоксов unlocks_moves - сама ссылка в tier.unlocks_moves[] тут не чистится
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: moveId }), nameInput, el("div", { class: "spacer" }), rm]));
+
+    const descRow = el("div", { class: "field-row" });
+    descRow.appendChild(el("label", { text: "Описание" }));
+    descRow.appendChild(descriptionTextarea(move.description, "Что это за приём, чем ощущается иначе, чем обычная атака", (v) => { move.description = v; }));
+    card.appendChild(descRow);
+
+    const modeRow = el("div", { class: "field-row" });
+    modeRow.appendChild(el("label", { text: "Режим расчёта урона" }));
+    const modeSelect = el("select");
+    const MOVE_MODE_OPTIONS = [
+      ["multiplier", "Множитель обычного урона"],
+      ["percent_max_hp", "% от максимального HP цели"],
+      ["percent_remaining_hp", "% от текущего (оставшегося) HP цели"],
+      ["execute", "Добивающий удар (казнь ниже порога HP)"],
+    ];
+    MOVE_MODE_OPTIONS.forEach(([value, text]) => modeSelect.appendChild(el("option", { value, text })));
+    modeSelect.value = move.mode || "multiplier";
+    modeSelect.addEventListener("change", () => {
+      // Поля СТАРОГО режима валидатору чужие у нового mode (tools/content_validation.py) -
+      // чистим и подставляем разумные дефолты нового режима.
+      delete move.damage_multiplier; delete move.percent; delete move.execute_threshold_percent;
+      move.mode = modeSelect.value;
+      if (move.mode === "multiplier") move.damage_multiplier = 1.5;
+      else if (move.mode === "percent_max_hp" || move.mode === "percent_remaining_hp") move.percent = 0.15;
+      else if (move.mode === "execute") move.execute_threshold_percent = 0.2;
+      renderCombatMoves();
+    });
+    modeRow.appendChild(modeSelect);
+    card.appendChild(modeRow);
+
+    const mode = move.mode || "multiplier";
+    if (mode === "multiplier") {
+      const dmgRow = el("div", { class: "field-row" });
+      dmgRow.appendChild(el("label", { text: "Множитель урона" }));
+      const dmgInput = el("input", { type: "number", min: "0.1", step: "0.1", value: move.damage_multiplier ?? 1 });
+      dmgInput.addEventListener("change", () => { move.damage_multiplier = Number(dmgInput.value) || 1; });
+      dmgRow.appendChild(dmgInput);
+      dmgRow.appendChild(el("span", { class: "hint", text: "домножает уже посчитанный обычный урон (навык × лучший множитель владеемого оружия)" }));
+      card.appendChild(dmgRow);
+    } else if (mode === "percent_max_hp" || mode === "percent_remaining_hp") {
+      const pctRow = el("div", { class: "field-row" });
+      pctRow.appendChild(el("label", { text: mode === "percent_max_hp" ? "Урон, % от максимального HP цели" : "Урон, % от текущего HP цели" }));
+      const pctInput = el("input", { type: "number", min: "1", max: "100", step: "1", value: Math.round((move.percent ?? 0.15) * 100) });
+      pctInput.addEventListener("change", () => { move.percent = Math.max(1, Math.min(100, Number(pctInput.value) || 1)) / 100; });
+      pctRow.appendChild(pctInput);
+      pctRow.appendChild(el("span", { class: "hint", text:
+        mode === "percent_max_hp"
+          ? "не зависит от навыка/оружия - постоянная доля от МАКСИМАЛЬНОГО HP цели"
+          : "не зависит от навыка/оружия - доля от ОСТАВШЕГОСЯ прямо сейчас HP (убывает с каждым применением)" }));
+      card.appendChild(pctRow);
+    } else if (mode === "execute") {
+      const threshRow = el("div", { class: "field-row" });
+      threshRow.appendChild(el("label", { text: "Добивает при HP цели ≤, %" }));
+      const threshInput = el("input", { type: "number", min: "1", max: "100", step: "1", value: Math.round((move.execute_threshold_percent ?? 0.2) * 100) });
+      threshInput.addEventListener("change", () => { move.execute_threshold_percent = Math.max(1, Math.min(100, Number(threshInput.value) || 1)) / 100; });
+      threshRow.appendChild(threshInput);
+      threshRow.appendChild(el("span", { class: "hint", text: "порог считается от МАКСИМАЛЬНОГО HP цели" }));
+      card.appendChild(threshRow);
+
+      const fallbackRow = el("div", { class: "field-row" });
+      fallbackRow.appendChild(el("label", { text: "Запасной множитель урона (необязательно)" }));
+      const fallbackInput = el("input", { type: "number", min: "0.1", step: "0.1", value: move.damage_multiplier ?? "", placeholder: "1 (как обычная атака)" });
+      fallbackInput.addEventListener("change", () => {
+        if (fallbackInput.value === "") delete move.damage_multiplier;
+        else move.damage_multiplier = Number(fallbackInput.value) || 1;
+      });
+      fallbackRow.appendChild(fallbackInput);
+      fallbackRow.appendChild(el("span", { class: "hint", text: "чем бьёт приём, ПОКА HP цели ещё выше порога - пусто значит как обычная атака" }));
+      card.appendChild(fallbackRow);
+    }
+
+    const cdRow = el("div", { class: "field-row" });
+    cdRow.appendChild(el("label", { text: "Кулдаун, ходов" }));
+    const cdInput = el("input", { type: "number", min: "0", step: "1", value: move.cooldown_turns ?? 0 });
+    cdInput.addEventListener("change", () => { move.cooldown_turns = Math.max(0, Math.round(Number(cdInput.value) || 0)); });
+    cdRow.appendChild(cdInput);
+    cdRow.appendChild(el("span", { class: "hint", text: "0 - без ограничения, можно применять хоть каждый ход" }));
+    card.appendChild(cdRow);
+
+    makeCardCollapsible(card);
+    cardsBox.appendChild(card);
+  });
+  filterBar._apply();
 }
 
 function renderMobs() {
@@ -4634,11 +5112,11 @@ function renderMobs() {
     const nameInput = el("input", { type: "text", value: mob.name });
     nameInput.addEventListener("change", () => { mob.name = nameInput.value; card.dataset.search = (mid + " " + mob.name).toLowerCase(); });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить "${mob.name}"?`)) return;
       delete DATA.mobs[mid];
       renderMobs();
     }});
-    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: mid }), nameInput, el("div", { class: "spacer" }), rm]));
+    const iconBtn = iconEditButton(mob.name, mob, defaultMobIcon(), () => {});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: mid }), iconBtn, nameInput, el("div", { class: "spacer" }), rm]));
 
     const descRow = el("div", { class: "field-row" });
     descRow.appendChild(el("label", { text: "Описание" }));
@@ -4674,6 +5152,7 @@ function renderMobs() {
         if (!mob.summon_cost) mob.summon_cost = {};
       } else {
         delete mob.summon_cost;
+        delete mob.turn_limit;
         if (mob.rarity == null) mob.rarity = 1;
       }
       renderMobs();
@@ -4724,6 +5203,19 @@ function renderMobs() {
       const summonBox = el("div", { class: "dict-editor" });
       renderDictEditor(summonBox, mob.summon_cost);
       card.appendChild(summonBox);
+
+      const turnLimitRow = el("div", { class: "field-row" });
+      turnLimitRow.appendChild(el("label", { text: "Лимит ходов на убийство (необязательно)" }));
+      const turnLimitInput = el("input", { type: "number", min: "1", step: "1", value: mob.turn_limit ?? "", placeholder: "нет лимита" });
+      turnLimitInput.addEventListener("change", () => {
+        if (turnLimitInput.value === "") delete mob.turn_limit;
+        else mob.turn_limit = Math.max(1, Math.round(Number(turnLimitInput.value) || 1));
+      });
+      turnLimitRow.appendChild(turnLimitInput);
+      turnLimitRow.appendChild(el("span", { class: "hint", text:
+        "если не убить босса за столько ходов ПОСЛЕ призыва - он сбегает сам (схватка обрывается, прогресс/цена "
+        + "призыва теряются, как при обычном abandon_encounter). Пусто - лимита нет, как раньше." }));
+      card.appendChild(turnLimitRow);
     } else {
       const soulRow = el("div", { class: "field-row" });
       soulRow.appendChild(el("label", { text: "Душа (soul_id)" }));
@@ -4765,6 +5257,74 @@ function renderMobs() {
 
 // ---------- Навыки ----------
 
+// Виды поломки построек (content.json["breakdown_types"], необязательный
+// раздел) - buildings.*.breakdown_types (см. renderBuildings) ссылается на эти
+// id. Удаление вида/инструмента отсюда НЕ чистит дальние ссылки само по себе
+// (тот же принцип, что удаление приёма боя/инструмента - см. combat_moves) -
+// осиротевшую ссылку поймает validate() при сохранении.
+function renderBreakdownTypes() {
+  const root = document.getElementById("tab-breakdown-types");
+  root.innerHTML = "";
+  if (!DATA.breakdown_types) DATA.breakdown_types = {};
+  root.appendChild(el("p", { class: "hint", text:
+    "Необязательная подсистема поломок построек (см. CLAUDE.md). Постройка без единого отмеченного здесь "
+    + "вида поломки (вкладка «Постройки») ломается \"без типа\" - починка не требует инструмента, как раньше. "
+    + "required_tools - инструменты (вкладка «Инструменты»), которыми должен ВЛАДЕТЬ игрок (тир 2+, т.е. не "
+    + "стартовый \"без инструмента\"), чтобы починить поломку этого вида - если инструментов несколько, нужны "
+    + "ВСЕ сразу." }));
+
+  const cardsBox = el("div");
+  const filterBar = makeFilterBar("breakdown-types", cardsBox);
+  const addForm = idPromptAndAdd("вид поломки", (id) => {
+    DATA.breakdown_types[id] = { name: "Новый вид поломки", description: "", required_tools: [] };
+    renderBreakdownTypes();
+    jumpTo(`card-breakdown-types-${id}`, "breakdown-types", { focusName: true });
+  });
+  root.appendChild(makeToolbar(addForm, filterBar));
+  root.appendChild(cardsBox);
+
+  Object.entries(DATA.breakdown_types).forEach(([btId, bt]) => {
+    const card = el("div", { class: "card", id: `card-breakdown-types-${btId}` });
+    card.dataset.search = (btId + " " + bt.name).toLowerCase();
+    const nameInput = el("input", { type: "text", value: bt.name });
+    nameInput.addEventListener("change", () => { bt.name = nameInput.value; card.dataset.search = (btId + " " + bt.name).toLowerCase(); });
+    const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
+      delete DATA.breakdown_types[btId];
+      renderBreakdownTypes();
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: btId }), nameInput, el("div", { class: "spacer" }), rm]));
+
+    const descRow = el("div", { class: "field-row" });
+    descRow.appendChild(el("label", { text: "Описание" }));
+    descRow.appendChild(descriptionTextarea(bt.description, "Что случилось с постройкой и как это выглядит для игрока", (v) => { bt.description = v; }));
+    card.appendChild(descRow);
+
+    const toolEntries = Object.entries(DATA.tools || {});
+    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Нужные инструменты (required_tools)" })]));
+    if (!toolEntries.length) {
+      card.appendChild(el("p", { class: "hint", text: "Инструментов пока нет - заведи их на вкладке «Инструменты»." }));
+    } else {
+      if (!Array.isArray(bt.required_tools)) bt.required_tools = [];
+      const toolsBox = el("div", { class: "req-list" });
+      toolEntries.forEach(([toolId, tool]) => {
+        const cb = el("input", { type: "checkbox" });
+        cb.checked = bt.required_tools.includes(toolId);
+        cb.addEventListener("change", () => {
+          if (cb.checked) {
+            if (!bt.required_tools.includes(toolId)) bt.required_tools.push(toolId);
+          } else {
+            bt.required_tools = bt.required_tools.filter(x => x !== toolId);
+          }
+        });
+        toolsBox.appendChild(el("label", {}, [cb, document.createTextNode(tool.name)]));
+      });
+      card.appendChild(toolsBox);
+    }
+
+    cardsBox.appendChild(card);
+  });
+}
+
 function renderSkills() {
   const root = document.getElementById("tab-skills");
   root.innerHTML = "";
@@ -4792,7 +5352,6 @@ function renderSkills() {
     const nameInput = el("input", { type: "text", value: skill.name });
     nameInput.addEventListener("change", () => { skill.name = nameInput.value; card.dataset.search = (skid + " " + skill.name).toLowerCase(); });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить навык "${skill.name}"?`)) return;
       delete DATA.skills[skid];
       renderSkills();
     }});
@@ -5079,7 +5638,6 @@ function renderQuestListView(root) {
       jumpToNew: (id) => jumpToQuestCard(id, { focusName: true }),
     });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить квест "${q.name}"?`)) return;
       // Убираем ссылки на удаляемый квест из requires у ВСЕХ остальных - иначе
       // осталась бы битая ссылка на несуществующий id в чужом requires.
       Object.values(DATA.quests).forEach(other => { other.requires = (other.requires || []).filter(r => r !== qid); });
@@ -5252,7 +5810,6 @@ function renderQuestGraphView(root) {
     jumpToQuestCard(id, { focusName: true });
   });
   const resetBtn = el("button", { text: "Сбросить расположение этой эры", onclick: () => {
-    if (!confirm(`Вернуть узлы эры ${questGraphEra} к автоматической раскладке? Ручные перемещения будут сброшены.`)) return;
     Object.values(DATA.quests).forEach(q => { if ((q.era || 1) === questGraphEra) delete q.pos; });
     renderQuests();
   }});
@@ -5322,7 +5879,6 @@ function renderQuestGraphView(root) {
       hit.dataset.from = reqId;
       hit.dataset.to = qid;
       hit.addEventListener("click", () => {
-        if (!confirm(`Убрать зависимость: "${q.name}" больше не будет требовать "${DATA.quests[reqId]?.name || reqId}"?`)) return;
         q.requires = q.requires.filter(x => x !== reqId);
         renderQuestsKeepScroll();
       });
@@ -5592,7 +6148,6 @@ function renderLootCasesSection() {
     const nameInput = el("input", { type: "text", value: c.name });
     nameInput.addEventListener("change", () => { c.name = nameInput.value; card.dataset.search = (cid + " " + c.name).toLowerCase(); });
     const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
-      if (!confirm(`Удалить кейс "${c.name}"?`)) return;
       delete DATA.loot_cases[cid];
       renderQuests();
     }});
@@ -5726,6 +6281,7 @@ const RENDER_BY_TAB = {
   locations: renderLocations,
   manual: renderManual,
   buildings: renderBuildings,
+  "breakdown-types": renderBreakdownTypes,
   techs: renderTechs,
   "energy-recipes": renderEnergyRecipes,
   species: renderSpecies,
@@ -5765,9 +6321,7 @@ window.addEventListener("resize", updateTopbarHeight);
 selectTab("resources");
 document.getElementById("saveBtn").addEventListener("click", save);
 document.getElementById("resetSaveBtn").addEventListener("click", resetSave);
-document.getElementById("reloadBtn").addEventListener("click", () => {
-  if (confirm("Перезагрузить с диска? Несохранённые изменения будут потеряны.")) load();
-});
+document.getElementById("reloadBtn").addEventListener("click", () => { load(); });
 load();
 </script>
 </body>

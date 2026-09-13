@@ -64,6 +64,28 @@ class AutocraftTests(FixtureTestCase):
         self.assertIn("mid", recipe)
         self.assertIn("final", recipe)
 
+    def test_resource_recipe_excludes_actions_flagged_excluded_from_autocraft(self):
+        # "final" - единственный производитель craft_final (в отличие от "mid", которое
+        # ещё даёт tech-запертый locked_action - тот не годится для этой проверки:
+        # resource_recipe нарочно не смотрит на текущую доступность, см. её докстринг).
+        engine.MANUAL_ACTIONS["craft_final"]["excluded_from_autocraft"] = True
+        self.addCleanup(lambda: engine.MANUAL_ACTIONS["craft_final"].pop("excluded_from_autocraft", None))
+        recipe = engine.resource_recipe(GameState())
+        self.assertNotIn("final", recipe)
+
+    def test_autocraft_does_not_backfill_an_action_flagged_excluded_from_autocraft(self):
+        # excluded_from_autocraft делает "final" неотличимым для автокрафта от ресурса
+        # без рецепта вообще, даже когда mid/raw_b в достатке и craft_final полностью
+        # детерминировано и разблокировано (прямое пожелание: некоторые действия нельзя
+        # доверять автоматике - например, убийство босса).
+        engine.MANUAL_ACTIONS["craft_final"]["excluded_from_autocraft"] = True
+        self.addCleanup(lambda: engine.MANUAL_ACTIONS["craft_final"].pop("excluded_from_autocraft", None))
+        s = GameState(resources={"mid": 100, "raw_b": 100}, buildings={"automation_hub": 1})
+        before = dict(s.resources)
+        failure = engine.ensure_and_pay(s, {"final": 1})
+        self.assertIsNotNone(failure)
+        self.assertEqual(s.resources, before)
+
     def test_locked_action_requires_tech(self):
         s = GameState(resources={"raw_b": 10})
         result = engine.do_manual_action(s, "locked_action")
@@ -738,7 +760,7 @@ class ManualJobTests(FixtureTestCase):
         self.assertEqual(s.turn, turn_before)  # клик заблокирован ДО advance_turn
         self.assertEqual(s.resources, resources_before)  # cost не списан второй раз
 
-    def test_cancel_manual_job_does_not_refund_already_paid_cost(self):
+    def test_cancel_manual_job_refunds_already_paid_cost(self):
         s = GameState(resources={"raw_a": 10})
         engine.do_manual_action(s, "craft_delayed")
         self.assertEqual(s.resources["raw_a"], 8)
@@ -746,11 +768,37 @@ class ManualJobTests(FixtureTestCase):
         result = engine.cancel_manual_job(s, "craft_delayed")
         self.assertTrue(result.ok, result.message)
         self.assertNotIn("craft_delayed", s.manual_jobs)
-        self.assertEqual(s.resources["raw_a"], 8)  # cost не возвращён
+        self.assertEqual(s.resources["raw_a"], 10)  # cost возвращён целиком
 
         for _ in range(3):
             engine.advance_turn(s)
         self.assertEqual(s.resources.get("delayed_output", 0), 0)  # gain так и не начислен
+
+    def test_cancel_manual_job_after_partial_progress_still_refunds_full_cost(self):
+        # Накопленные "бесплатные" тики (turns_done) не влияют на размер возврата -
+        # возвращается весь cost, списанный при старте, независимо от того, сколько
+        # ходов job уже отсчитал.
+        s = GameState(resources={"raw_a": 10})
+        engine.do_manual_action(s, "craft_delayed")
+        engine.advance_turn(s)
+        engine.advance_turn(s)
+        self.assertEqual(s.manual_jobs["craft_delayed"]["turns_done"], 2)
+
+        result = engine.cancel_manual_job(s, "craft_delayed")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.resources["raw_a"], 10)
+
+    def test_can_start_again_immediately_after_cancelling(self):
+        # Отмена немедленно освобождает action_id - новый клик стартует новый job,
+        # а не считается "уже выполняется".
+        s = GameState(resources={"raw_a": 10})
+        engine.do_manual_action(s, "craft_delayed")
+        engine.cancel_manual_job(s, "craft_delayed")
+
+        result = engine.do_manual_action(s, "craft_delayed")
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("craft_delayed", s.manual_jobs)
+        self.assertEqual(s.resources["raw_a"], 8)  # оплачено заново
 
     def test_cancel_unknown_manual_job_fails_cleanly(self):
         s = GameState()
@@ -1279,6 +1327,98 @@ class BuildResearchRepairTests(FixtureTestCase):
         result = engine.repair(s, "gen")
         self.assertTrue(result.ok)
         self.assertEqual(s.broken["gen"], 0)
+
+
+class TypedBreakdownAndToolDurabilityTests(FixtureTestCase):
+    """flaky_typed (breakdown_types=["worn_gear"], breakdown_chance=1.0) + TOOLS["wrench"]
+    (max_durability=2 на тире 2) - см. tests/fixtures.py."""
+
+    def _broken_flaky_typed(self, **state_kwargs):
+        s = GameState(resources={"raw_a": 100}, buildings={"flaky_typed": 1}, **state_kwargs)
+        engine.advance_turn(s)
+        self.assertEqual(s.broken.get("flaky_typed"), 1)  # breakdown_chance=1.0 - гарантировано
+        self.assertEqual(s.broken_types.get("flaky_typed"), ["worn_gear"])
+        return s
+
+    def test_repair_blocked_without_the_required_tool(self):
+        s = self._broken_flaky_typed()  # wrench не куплен (тир 1 - "без ключа")
+        self.assertEqual(engine.repairable_count(s, "flaky_typed"), 0)
+        result = engine.repair(s, "flaky_typed")
+        self.assertFalse(result.ok)
+        self.assertEqual(s.broken["flaky_typed"], 1)  # ничего не починилось
+
+    def test_repair_succeeds_with_the_tool_and_consumes_one_durability(self):
+        s = self._broken_flaky_typed(tool_tiers={"wrench": 2})
+        self.assertEqual(engine.repairable_count(s, "flaky_typed"), 1)
+        self.assertEqual(engine.tool_durability_remaining(s, "wrench"), 2)  # полная прочность тира
+        result = engine.repair(s, "flaky_typed")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.broken.get("flaky_typed", 0), 0)
+        self.assertEqual(engine.tool_durability_remaining(s, "wrench"), 1)  # -1 за эту починку
+        self.assertFalse(engine.tool_is_broken(s, "wrench"))
+
+    def test_tool_breaks_after_durability_exhausted_and_repair_tool_restores_it(self):
+        s = GameState(resources={"raw_a": 100}, buildings={"flaky_typed": 1}, tool_tiers={"wrench": 2})
+        # max_durability=2 - две починки проходят нормально...
+        for _ in range(2):
+            engine.advance_turn(s)
+            self.assertTrue(engine.repair(s, "flaky_typed").ok)
+        self.assertTrue(engine.tool_is_broken(s, "wrench"))
+        self.assertEqual(engine.tool_durability_remaining(s, "wrench"), 0)
+        # ...а третья поломка чинится не может - ключ сам сломан, тир не потерян.
+        engine.advance_turn(s)
+        self.assertEqual(engine.repairable_count(s, "flaky_typed"), 0)
+        result = engine.repair(s, "flaky_typed")
+        self.assertFalse(result.ok)
+        self.assertEqual(engine.tool_tier(s, "wrench"), 2)  # тир НЕ теряется
+
+        fix = engine.repair_tool(s, "wrench")
+        self.assertTrue(fix.ok, fix.message)
+        self.assertEqual(s.resources["raw_a"], 100 - 2 * 1 - 1)  # 2 починки постройки (raw_a:1 каждая) + 1 ремонт ключа (raw_a:1)
+        self.assertFalse(engine.tool_is_broken(s, "wrench"))
+        self.assertEqual(engine.tool_durability_remaining(s, "wrench"), 2)  # снова полная прочность
+        self.assertTrue(engine.repair(s, "flaky_typed").ok)  # теперь чинится как обычно
+
+    def test_repair_tool_refuses_when_not_broken(self):
+        s = GameState(tool_tiers={"wrench": 2})
+        result = engine.repair_tool(s, "wrench")
+        self.assertFalse(result.ok)
+
+    def test_breakdown_immunity_upgrade_disables_breakdown_entirely(self):
+        s = GameState(resources={"raw_a": 100}, buildings={"flaky_typed": 1})
+        result = engine.purchase_building_upgrade(s, "flaky_typed", "flaky_typed_immune")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(engine.effective_breakdown_chance("flaky_typed", s.techs, purchased=["flaky_typed_immune"]), 0.0)
+        for _ in range(5):
+            engine.advance_turn(s)
+        self.assertEqual(s.broken.get("flaky_typed", 0), 0)  # без апгрейда было бы гарантированно сломано
+
+
+class ActionDurationReductionTests(FixtureTestCase):
+    """mechanism_a_delayed_action (requires_building="mechanism_a", duration_turns=4) +
+    апгрейд mech_a_duration_cut (value=0.5) - см. tests/fixtures.py."""
+
+    def test_manual_action_duration_without_upgrade_is_unchanged(self):
+        s = GameState(buildings={"mechanism_a": 1})
+        self.assertEqual(engine.manual_action_duration("mechanism_a_delayed_action", s), 4)
+
+    def test_manual_action_duration_with_upgrade_is_reduced_and_rounds_up(self):
+        s = GameState(resources={"raw_a": 100}, buildings={"mechanism_a": 1})
+        engine.purchase_building_upgrade(s, "mechanism_a", "mech_a_duration_cut")
+        self.assertEqual(engine.manual_action_duration("mechanism_a_delayed_action", s), 2)  # ceil(4*0.5)
+
+    def test_do_manual_action_creates_a_job_with_the_reduced_duration(self):
+        s = GameState(resources={"raw_a": 100}, buildings={"mechanism_a": 1})
+        engine.purchase_building_upgrade(s, "mechanism_a", "mech_a_duration_cut")
+        result = engine.do_manual_action(s, "mechanism_a_delayed_action")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.manual_jobs["mechanism_a_delayed_action"]["turns_total"], 2)
+
+    def test_action_unrelated_to_a_building_is_never_affected(self):
+        # craft_delayed не имеет requires_building - апгрейды механизмов не имеют,
+        # чем на него подействовать (нет building_id, от которого брать purchased).
+        s = GameState(resources={"raw_a": 100})
+        self.assertEqual(engine.manual_action_duration("craft_delayed", s), 3)
 
 
 class ProductionTests(FixtureTestCase):
@@ -1870,6 +2010,29 @@ class MechanismLocationAndActionUpgradeTests(FixtureTestCase):
         self.assertEqual(gain, {"mid": 1})
 
 
+class ToolScalingManualActionTests(FixtureTestCase):
+    """manual_actions.*.tool_scaling (см. fixtures.MANUAL_ACTIONS["gather_tool_scaled"]) -
+    домножает gain действия на ТЕКУЩИЙ тир указанного инструмента, cost не трогает."""
+
+    def test_base_tier_is_a_neutral_multiplier(self):
+        s = GameState()
+        cost, gain = engine.effective_manual_action_stats("gather_tool_scaled", s)
+        self.assertEqual(cost, {})
+        self.assertEqual(gain, {"raw_a": 2})
+
+    def test_higher_tool_tier_scales_gain_but_not_cost(self):
+        s = GameState(tool_tiers={"pickaxe": 3})
+        cost, gain = engine.effective_manual_action_stats("gather_tool_scaled", s)
+        self.assertEqual(cost, {})
+        self.assertEqual(gain, {"raw_a": 6})
+
+    def test_do_manual_action_grants_the_tool_scaled_amount(self):
+        s = GameState(tool_tiers={"pickaxe": 2})
+        result = engine.do_manual_action(s, "gather_tool_scaled")
+        self.assertTrue(result.ok)
+        self.assertEqual(s.resources.get("raw_a"), 4)
+
+
 class MechanismScaleSliderTests(FixtureTestCase):
     """"Ползунок масштаба ручного действия" (см. CLAUDE.md) - купленный scale-
     апгрейд теперь задаёт только ВЕРХНЮЮ ГРАНИЦУ, а конкретный масштаб КАЖДОГО
@@ -2257,8 +2420,8 @@ class MiningQualityTests(FixtureTestCase):
 
     def test_pool_excludes_tiers_above_current_tool_tier(self):
         quality_tiers = [
-            {"name": "Бедная", "weight": 5, "yield_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 1, "yield_multiplier": 2, "min_tool_tier": 2},
+            {"name": "Бедная", "weight": 5, "size_multiplier": 0.5, "min_tool_tier": 1},
+            {"name": "Богатая", "weight": 1, "size_multiplier": 2, "min_tool_tier": 2},
         ]
         s = GameState()  # тир кирки 1, единственный кандидат руды - mineral
         with self._with_quality_tiers(quality_tiers), \
@@ -2273,8 +2436,8 @@ class MiningQualityTests(FixtureTestCase):
         # вызове (резолвится в резолюцию руды), а второй (розыгрыш качества) отдаём
         # реальной random.choices, чтобы честно проверить пул кандидатов.
         quality_tiers = [
-            {"name": "Бедная", "weight": 5, "yield_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 1, "yield_multiplier": 2, "min_tool_tier": 2},
+            {"name": "Бедная", "weight": 5, "size_multiplier": 0.5, "min_tool_tier": 1},
+            {"name": "Богатая", "weight": 1, "size_multiplier": 2, "min_tool_tier": 2},
         ]
         real_choices = engine.random.choices
         call_count = {"n": 0}
@@ -2292,29 +2455,45 @@ class MiningQualityTests(FixtureTestCase):
         eligible = choices_mock.call_args_list[1][0][0]
         self.assertEqual({q["name"] for _, q in eligible}, {"Бедная", "Богатая"})
 
-    def test_search_stores_chosen_quality_index_and_yield_uses_its_multiplier(self):
+    def test_search_stores_chosen_quality_index_and_size_uses_its_multiplier(self):
         quality_tiers = [
-            {"name": "Бедная", "weight": 1, "yield_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 0, "yield_multiplier": 2, "min_tool_tier": 1},
+            {"name": "Бедная", "weight": 1, "size_multiplier": 0.5, "min_tool_tier": 1},
+            {"name": "Богатая", "weight": 0, "size_multiplier": 2, "min_tool_tier": 1},
         ]
         s = GameState()
         with self._with_quality_tiers(quality_tiers), \
-                mock.patch.object(engine.random, "choices", side_effect=[["mineral"], [(0, quality_tiers[0])]]):
+                mock.patch.object(engine.random, "choices", side_effect=[["mineral"], [(0, quality_tiers[0])]]), \
+                mock.patch.object(engine.random, "randint", return_value=20):
             found = engine.search_vein_any(s)
             self.assertTrue(found.ok)
             self.assertEqual(s.vein_quality, {"mineral": 0})
-            # base_yield=4 на тире 1 (tier_bonus=1) * 0.5 = 2.0, целое - без округления не
-            # проверить, поэтому дальше отдельно проверяем именно округление вверх на
-            # нецелом произведении. Проверка ЗДЕСЬ, внутри with - вне него MINING_INFO
-            # уже откатился к исходному "mineral" без quality_tiers.
-            self.assertEqual(engine.mining_yield_per_turn("mineral", s), 2)
+            # базовый случайный запас 20 * 0.5 (Бедная) = 10 - качество влияет
+            # на итоговый запас жилы, а не на скорость добычи за ход.
+            self.assertEqual(s.veins, {"mineral": 10})
+            # base_yield=4 на тире 1 (tier_bonus=1), качество на скорость не влияет.
+            self.assertEqual(engine.mining_yield_per_turn("mineral", s), 4)
 
-    def test_yield_multiplier_rounds_up_for_non_integer_result(self):
-        quality_tiers = [{"name": "Своеобразная", "weight": 1, "yield_multiplier": 0.6, "min_tool_tier": 1}]
-        s = GameState(veins={"mineral": 100}, vein_quality={"mineral": 0})
-        with self._with_quality_tiers(quality_tiers):
-            # base_yield=4 * 0.6 = 2.4 -> ceil = 3
-            self.assertEqual(engine.mining_yield_per_turn("mineral", s), 3)
+    def test_size_multiplier_rounds_up_for_non_integer_result(self):
+        quality_tiers = [{"name": "Своеобразная", "weight": 1, "size_multiplier": 0.6, "min_tool_tier": 1}]
+        s = GameState()
+        with self._with_quality_tiers(quality_tiers), \
+                mock.patch.object(engine.random, "choices", side_effect=[["mineral"], [(0, quality_tiers[0])]]), \
+                mock.patch.object(engine.random, "randint", return_value=20):
+            found = engine.search_vein_any(s)
+            self.assertTrue(found.ok)
+            # 20 * 0.6 = 12.0 -> целое; проверим отдельно нецелый случай ниже.
+            self.assertEqual(s.veins, {"mineral": 12})
+
+    def test_size_multiplier_rounds_up_on_fractional_result(self):
+        quality_tiers = [{"name": "Своеобразная", "weight": 1, "size_multiplier": 0.6, "min_tool_tier": 1}]
+        s = GameState()
+        with self._with_quality_tiers(quality_tiers), \
+                mock.patch.object(engine.random, "choices", side_effect=[["mineral"], [(0, quality_tiers[0])]]), \
+                mock.patch.object(engine.random, "randint", return_value=21):
+            found = engine.search_vein_any(s)
+            self.assertTrue(found.ok)
+            # 21 * 0.6 = 12.6 -> ceil = 13
+            self.assertEqual(s.veins, {"mineral": 13})
 
     def test_vein_quality_is_cleared_when_new_search_has_no_quality_tiers(self):
         s = GameState(vein_quality={"mineral": 0})
@@ -2353,10 +2532,12 @@ class ToolsAndPinTests(FixtureTestCase):
     def test_upgradable_tools_excludes_tech_locked_and_maxed_tools(self):
         # sword тир 2 не требует технологии - он всегда в списке (не завязан на
         # tech1), в отличие от pickaxe/drill, ради которых написан этот тест.
+        # wrench тир 2 тоже не требует технологии - он всегда в списке, как sword,
+        # по той же причине (см. TOOLS в fixtures.py).
         s = GameState(tool_tiers={"pickaxe": 2, "drill": 2})  # pickaxe тир3 нужен tech1, drill уже макс
-        self.assertEqual(engine.upgradable_tools(s), ["sword"])
+        self.assertEqual(engine.upgradable_tools(s), ["wrench", "sword"])
         s.techs = {"tech1"}
-        self.assertEqual(engine.upgradable_tools(s), ["pickaxe", "sword"])
+        self.assertEqual(engine.upgradable_tools(s), ["pickaxe", "wrench", "sword"])
 
     def test_requires_tool_tiers_gates_by_exact_membership_not_threshold(self):
         # ключевая проверка новой механики: два действия, одинаковые по смыслу, но
@@ -2752,6 +2933,47 @@ class GeneticsTests(FixtureTestCase):
         instance_id = self._farm_instance(s, "apiary")
         engine.house_creature(s, cid, instance_id)
         self.assertFalse(engine.house_creature(s, cid, instance_id).ok)
+
+    def test_house_creature_rejects_a_species_outside_the_farms_breeding_accepts_family(self):
+        # breeding_accepts_family - необязательное ограничение (buildings.*.
+        # breeding_accepts_family, см. game/engine.py:breeding_accepts_family/
+        # species_family) - без него любой вид годится (см. тесты выше, apiary
+        # фикстуры его не задаёт). Тут временно даём critter_a/critter_b РАЗНЫЕ
+        # семейства и сужаем apiary до семейства critter_a, чтобы проверить отказ.
+        engine.SPECIES["critter_a"]["family"] = "alpha"
+        engine.SPECIES["critter_b"]["family"] = "beta"
+        engine.BUILDINGS["apiary"]["breeding_accepts_family"] = "alpha"
+
+        def cleanup():
+            engine.SPECIES["critter_a"].pop("family", None)
+            engine.SPECIES["critter_b"].pop("family", None)
+            engine.BUILDINGS["apiary"].pop("breeding_accepts_family", None)
+
+        self.addCleanup(cleanup)
+        s = GameState(buildings={"apiary": 1})
+        instance_id = self._farm_instance(s, "apiary")
+        allowed = self._spawn(s, "critter_a")
+        rejected = self._spawn(s, "critter_b")
+        self.assertTrue(engine.house_creature(s, allowed, instance_id).ok)
+        result = engine.house_creature(s, rejected, instance_id)
+        self.assertFalse(result.ok)
+        self.assertIsNone(s.creatures[rejected]["farm_instance_id"])
+
+    def test_farms_view_exposes_breeding_accepts_family_or_none_when_unrestricted(self):
+        engine.BUILDINGS["apiary"]["breeding_accepts_family"] = "alpha"
+        self.addCleanup(lambda: engine.BUILDINGS["apiary"].pop("breeding_accepts_family", None))
+        s = GameState(buildings={"apiary": 1, "electric_apiary": 1})
+        views = {f["building_id"]: f for f in engine.farms_view(s)}
+        self.assertEqual(views["apiary"]["accepts_family"], "alpha")
+        self.assertIsNone(views["electric_apiary"]["accepts_family"])
+
+    def test_creature_view_exposes_species_family(self):
+        engine.SPECIES["critter_a"]["family"] = "alpha"
+        self.addCleanup(lambda: engine.SPECIES["critter_a"].pop("family", None))
+        s = GameState()
+        cid = self._spawn(s, "critter_a")
+        entry = engine.creature_view(s, cid)
+        self.assertEqual(entry["family"], "alpha")
 
     def test_release_creature_returns_to_the_bank(self):
         s = GameState(buildings={"apiary": 1})

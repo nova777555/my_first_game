@@ -1,13 +1,24 @@
 """
-Локальный редактор контента игры - GUI в браузере, без установки зависимостей
-(только стандартная библиотека Python).
+Локальный редактор контента игры - HTTP API (стандартная библиотека) поверх
+content_validation.py + окно pywebview вместо системного браузера (см.
+tools/web_ui.py - тот же приём, чтобы выглядело отдельным приложением, а не
+вкладкой браузера). Единственная внешняя зависимость - pywebview (см.
+requirements.txt).
+
+В exe-сборке (см. build_exe.ps1/content_editor.spec) - это ПОРТАТИВНЫЙ
+dev-инструмент: он живёт прямо в корне репозитория (рядом с main.py) и
+редактирует РЕАЛЬНЫЙ game/content.json этого репозитория, а не какую-то
+запечённую в сборку копию - в отличие от Igra.exe (там наоборот, копия
+content.json нарочно вморожена внутрь, чтобы exe был самодостаточным и
+переносимым другу). Поэтому content_editor.spec НЕ упаковывает content.json
+как data - только сам код и content_editor.html.
 
 Запуск:
     python tools/content_editor.py
 
-Откроет http://127.0.0.1:8765 в браузере. Любое сохранение проверяется на
-битые ссылки (несуществующие технологии/постройки/ресурсы и т.п.) - если
-что-то не сходится, запись в файл не происходит и редактор покажет список
+Откроет редактор в отдельном окне. Любое сохранение проверяется на битые
+ссылки (несуществующие технологии/постройки/ресурсы и т.п.) - если что-то
+не сходится, запись в файл не происходит и редактор покажет список
 конкретных ошибок. Перед каждой успешной записью старая версия content.json
 копируется в game/content_backups/ - если что-то пошло не так по смыслу
 (не по структуре, так что редактор не поймал), можно откатиться руками.
@@ -16,26 +27,63 @@ from __future__ import annotations
 
 import base64
 import binascii
+import ctypes
 import json
+import os
 import re
 import shutil
 import sys
-import webbrowser
+import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+import webview
+
+# В exe-сборке (PyInstaller, --windowed) sys.stdout/sys.stderr бывают None -
+# голый print() уронил бы процесс ещё до того, как он успеет что-то показать.
+if getattr(sys, "frozen", False):
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
+# В exe-сборке редактор - портативный инструмент, живущий прямо в репозитории
+# (см. докстринг выше) - ROOT должен указывать на папку, где лежит сам exe
+# (ожидается корень репозитория), а НЕ внутрь распакованной PyInstaller-сборки.
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from content_validation import validate  # noqa: E402
 
 CONTENT_PATH = ROOT / "game" / "content.json"
 BACKUP_DIR = ROOT / "game" / "content_backups"
+# Шаблоны повторяющихся "лестниц" карточек (тиры склада/инструмента, улучшения
+# построек) - см. content_editor.html: TEMPLATES/templateListButtons. Это данные
+# САМОГО РЕДАКТОРА (черновик удобства ввода), не игровой баланс - живёт рядом с
+# content_editor.html (не в game/), не валидируется через content_validation.py
+# и не бэкапится при записи (в отличие от content.json).
+TEMPLATES_PATH = ROOT / "tools" / "content_editor_templates.json"
+# content_editor.html - часть кода редактора, а не проекта - его ищем рядом с
+# самим файлом (bundle-relative, PyInstaller кладёт его туда же, см. datas в
+# content_editor.spec), в отличие от путей выше, которые всегда смотрят на
+# реальный репозиторий.
 HTML_PATH = Path(__file__).with_name("content_editor.html")
 # Кастомные звуки ручных действий (manual_actions.*.sound) - см. tools/web_ui.py:
 # SOUNDS_DIR, одна и та же папка обслуживает и превью в редакторе, и саму игру.
-SOUNDS_DIR = Path(__file__).with_name("sounds")
+# Это данные ПРОЕКТА (общие с игрой), поэтому путь считается от ROOT, как
+# CONTENT_PATH, а не bundle-relative, как HTML_PATH.
+SOUNDS_DIR = ROOT / "tools" / "sounds"
+
+
+def _show_error(text: str) -> None:
+    if getattr(sys, "frozen", False):
+        ctypes.windll.user32.MessageBoxW(None, text, "Редактор контента", 0x10)
+    else:
+        print(text)
 _ACTION_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _SOUND_EXTENSIONS = {"wav": "audio/wav", "mp3": "audio/mpeg", "ogg": "audio/ogg"}
 _SOUND_FILENAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.(wav|mp3|ogg)$")
@@ -53,6 +101,13 @@ PORT = 8765
 
 def load_content() -> dict:
     with open(CONTENT_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_templates() -> dict:
+    if not TEMPLATES_PATH.exists():
+        return {}
+    with open(TEMPLATES_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -78,6 +133,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(HTML_PATH.read_text(encoding="utf-8"))
         elif self.path == "/api/content":
             self._send_json(200, load_content())
+        elif self.path == "/api/templates":
+            self._send_json(200, load_templates())
         elif self.path.startswith("/sounds/"):
             self._serve_sound(self.path[len("/sounds/"):])
         else:
@@ -110,6 +167,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/upload_sound":
             self._handle_upload_sound()
+            return
+
+        if self.path == "/api/templates":
+            self._handle_save_templates()
             return
 
         if self.path != "/api/content":
@@ -180,8 +241,35 @@ class Handler(BaseHTTPRequestHandler):
         (SOUNDS_DIR / filename).write_bytes(audio_bytes)
         self._send_json(200, {"ok": True, "filename": filename})
 
+    def _handle_save_templates(self) -> None:
+        """Перезаписывает content_editor_templates.json целиком - клиент сам ведёт
+        структуру {kind: [{name, items}, ...]} и шлёт её всю при любом изменении
+        (как /api/content, только без validate()/бэкапа - это не игровой баланс)."""
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b""
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as e:
+            self._send_json(400, {"error": f"Некорректный JSON: {e}"})
+            return
+        if not isinstance(data, dict):
+            self._send_json(400, {"error": "ожидался объект"})
+            return
+
+        with open(TEMPLATES_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        self._send_json(200, {"ok": True})
+
     def log_message(self, format: str, *args) -> None:
         pass  # тише в консоли - не засоряем вывод обычными запросами
+
+
+def _serve(server: HTTPServer) -> None:
+    try:
+        server.serve_forever()
+    except Exception as e:
+        _show_error(f"Редактор неожиданно остановился:\n{e}")
 
 
 def main() -> None:
@@ -189,17 +277,22 @@ def main() -> None:
     try:
         server = HTTPServer(("127.0.0.1", PORT), Handler)
     except OSError:
-        print(f"Не получилось занять порт {PORT} - возможно, редактор уже запущен в другом окне.")
-        print(f"Если так, просто открой {url} в браузере.")
+        _show_error(
+            f"Не получилось занять порт {PORT} - возможно, редактор уже запущен в другом окне.\n"
+            f"Если так, просто открой {url} в браузере."
+        )
         return
 
     print(f"Редактор контента запущен: {url}")
-    print("Открываю браузер... Останови сервер (Ctrl+C), когда закончишь редактировать.")
-    webbrowser.open(url)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nОстановлено.")
+    print("Закрой окно редактора, когда закончишь.")
+    # serve_forever() уходит в фоновый поток - webview.start() ниже занимает
+    # главный поток сам (см. tools/web_ui.py: main() - тот же приём).
+    threading.Thread(target=_serve, args=(server,), daemon=True).start()
+
+    webview.create_window("Редактор контента игры", url, width=1400, height=900, min_size=(1024, 700))
+    webview.start()
+    server.shutdown()
+    print("Остановлено.")
 
 
 if __name__ == "__main__":

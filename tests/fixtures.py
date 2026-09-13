@@ -146,16 +146,19 @@ RESOURCES = [
     {"id": "upgraded_matter", "name": "Улучшенная материя"},
     # Для тестов боя/душ (см. MOBS/SKILLS/SOUL_RECIPES ниже) - "вечная" душа
     # тестового моба, вставляемая в синтезатор (BUILDINGS["soul_synth"]).
-    {"id": "test_soul", "name": "Тестовая душа"},
+    {"id": "test_soul", "name": "Тестовая душа", "soul_kind": "test"},
     # Вторая душа - с диапазоном produces (см. SOUL_RECIPES["variable_soul"]
     # ниже) - для теста "каждая вставленная душа бросает диапазон НЕЗАВИСИМО".
-    {"id": "variable_soul", "name": "Переменная душа"},
+    # ТОТ ЖЕ soul_kind, что у test_soul - soul_synth (см. BUILDINGS ниже)
+    # принимает обе одним тегом, как и раньше принимал обе явным списком.
+    {"id": "variable_soul", "name": "Переменная душа", "soul_kind": "test"},
 ]
 RESOURCE_NAMES = {r["id"]: r["name"] for r in RESOURCES}
 RESOURCE_ORDER = [r["id"] for r in RESOURCES]
 RESOURCE_ICONS: dict = {}
 RESOURCE_FRACTIONAL = {r["id"]: bool(r.get("fractional", False)) for r in RESOURCES}
 RESOURCE_STORAGE = {r["id"]: r["storage"] for r in RESOURCES if r.get("storage")}
+RESOURCE_SOUL_KIND = {r["id"]: r["soul_kind"] for r in RESOURCES if r.get("soul_kind")}
 
 LOCATIONS = {
     "yard": {"name": "Двор", "requires_tech": None},
@@ -235,6 +238,14 @@ MANUAL_ACTIONS = {
         "name": "Сверлить (продвинутая дрель)", "requires_tech": None, "location": "workshop_loc",
         "cost": {}, "gain": {"raw_a": 3}, "requires_tool_tiers": {"drill": [2]},
     },
+    # tool_scaling - для тестов effective_manual_action_stats: gain домножается на
+    # ТЕКУЩИЙ тир "pickaxe" (переиспользует TOOLS["pickaxe"] ниже, тир 1 по умолчанию
+    # = множитель x1, не отдельная "нейтральная" ветка кода). cost НЕ домножается -
+    # тут пусто, но это в любом случае не тот механизм (см. engine.py).
+    "gather_tool_scaled": {
+        "name": "Добыть A киркой", "requires_tech": None, "location": "workshop_loc",
+        "cost": {}, "gain": {"raw_a": 2}, "tool_scaling": {"tool": "pickaxe"},
+    },
     # location отсутствует вовсе (не просто null) - действие лежит в КОРНЕ дерева
     # локаций, наравне с локациями верхнего уровня - см. manual_actions_at(None, ...).
     "loose_action": {
@@ -261,6 +272,13 @@ MANUAL_ACTIONS = {
     "mechanism_a_action": {
         "name": "Провернуть механизм А", "requires_tech": None, "location": "mechanism_a_loc",
         "requires_building": "mechanism_a", "cost": {"raw_a": 2}, "gain": {"mech_output": 3},
+    },
+    # Многоходовое действие, ЗАВИСЯЩЕЕ от постройки-механизма (requires_building) -
+    # для теста апгрейда "mech_a_duration_cut" (game/engine.py:manual_action_duration).
+    "mechanism_a_delayed_action": {
+        "name": "Долгий прогон механизма А", "requires_tech": None, "location": "mechanism_a_loc",
+        "requires_building": "mechanism_a", "cost": {"raw_a": 3}, "gain": {"mech_output": 5},
+        "duration_turns": 4,
     },
     # "Шанс потребления/получения" (game/engine.py:is_manual_action_deterministic/
     # _roll_chance_amounts) - cost непустой (значит формально мог бы попасть в
@@ -303,6 +321,16 @@ MANUAL_ACTIONS = {
     },
 }
 
+# Виды поломки (см. BUILDINGS["flaky_typed"] ниже) - "worn_gear" требует
+# владения инструментом "wrench" (тир 2+, см. TOOLS выше) для починки.
+BREAKDOWN_TYPES = {
+    "worn_gear": {
+        "name": "Изношенная шестерня",
+        "description": "Тестовый вид поломки, требующий гаечный ключ для починки.",
+        "required_tools": ["wrench"],
+    },
+}
+
 BUILDINGS = {
     "gen": {
         "name": "Генератор", "description": "Тестовый источник энергии.",
@@ -321,6 +349,25 @@ BUILDINGS = {
         "requires_tech": None, "cost": {"raw_a": 1},
         "produces": {"raw_b": 1}, "consumes": {}, "breakdown_chance": 1.0,
         "repair_cost": {"raw_a": 1},
+    },
+    # Как "flaky" (гарантированная поломка каждый ход), но поломка ТИПИЗИРОВАНА
+    # (breakdown_types -> BREAKDOWN_TYPES["worn_gear"], требует TOOLS["wrench"]
+    # тира 2+) - для тестов repair()/repairable_count() с недостающим/владеемым
+    # инструментом, а не привычного "чинится всегда без вопросов" у "flaky".
+    # Апгрейд breakdown_immunity - для теста "апгрейд отключает поломку вовсе".
+    "flaky_typed": {
+        "name": "Нестабильный станок (типизированный)",
+        "description": "Тестовая постройка с гарантированной поломкой каждый ход и типизированной поломкой.",
+        "requires_tech": None, "cost": {"raw_a": 1},
+        "produces": {"raw_b": 1}, "consumes": {}, "breakdown_chance": 1.0,
+        "repair_cost": {"raw_a": 1}, "breakdown_types": ["worn_gear"],
+        "upgrades": [
+            {
+                "id": "flaky_typed_immune", "name": "Неломкость",
+                "description": "Полностью отключает поломку этой постройки.",
+                "type": "breakdown_immunity", "value": 1, "requires_tech": None, "cost": {"raw_a": 5},
+            },
+        ],
     },
     "battery": {
         "name": "Батарея", "description": "Тестовое хранилище энергии.",
@@ -390,6 +437,14 @@ BUILDINGS = {
             {
                 "id": "mech_a_scale", "name": "Масштаб", "description": "x2 к зависимому действию.",
                 "type": "scale", "value": 2, "requires_tech": None, "cost": {"raw_a": 3},
+            },
+            # Для теста manual_action_duration()/do_manual_action() - см.
+            # MANUAL_ACTIONS["mechanism_a_delayed_action"] ниже (duration_turns=4,
+            # requires_building="mechanism_a"): value=0.5 сокращает 4 хода до
+            # ceil(4*0.5)=2.
+            {
+                "id": "mech_a_duration_cut", "name": "Ускорение", "description": "-50% к сроку зависимого многоходового действия.",
+                "type": "action_duration_reduction", "value": 0.5, "requires_tech": None, "cost": {"raw_a": 4},
             },
         ],
     },
@@ -532,7 +587,7 @@ BUILDINGS = {
         "name": "Синтезатор душ (тест)", "description": "Тестовый синтезатор душ (soul_collector) с repeatable-апгрейдом слотов и обычным апгрейдом эффективности.",
         "requires_tech": None, "cost": {"raw_a": 3},
         "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {"raw_a": 1},
-        "soul_collector": {"slots": 1, "accepts": ["test_soul", "variable_soul"]},
+        "soul_collector": {"slots": 1, "accepts_kind": "test"},
         "upgrades": [
             {
                 "id": "soul_synth_slot", "name": "Доп. слот", "description": "+1 слот, покупается многократно.",
@@ -542,6 +597,19 @@ BUILDINGS = {
             {
                 "id": "soul_synth_eff", "name": "Эффективность", "description": "x2 продукция синтезатора.",
                 "type": "soul_generation_efficiency", "value": 2, "requires_tech": None, "cost": {"raw_a": 5},
+            },
+        ],
+    },
+    "automator": {
+        "name": "Автоматизатор (тест)", "description": "Тестовая постройка с automation_hub и repeatable-апгрейдом слотов.",
+        "requires_tech": None, "cost": {"raw_a": 3},
+        "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {"raw_a": 1},
+        "automation_hub": {"slots": 1},
+        "upgrades": [
+            {
+                "id": "automator_slot", "name": "Доп. слот", "description": "+1 слот, покупается многократно.",
+                "type": "automation_slots", "value": 1, "requires_tech": None,
+                "cost": {"raw_a": 2}, "repeatable": True, "cost_growth": 2,
             },
         ],
     },
@@ -825,6 +893,20 @@ TOOLS = {
             {"name": "Электродрель", "cost": {"raw_a": 5}, "requires_tech": None},
         ],
     },
+    # Инструмент ремонта с прочностью (см. BREAKDOWN_TYPES/BUILDINGS["flaky_typed"]
+    # ниже) - тир 2 держит 2 починки (max_durability=2), затем требует своего
+    # платного ремонта (repair_cost) - для тестов tool_is_broken/repair_tool/
+    # repairable_count.
+    "wrench": {
+        "name": "Гаечный ключ",
+        "tiers": [
+            {"name": "Без ключа", "cost": None, "requires_tech": None},
+            {
+                "name": "Гаечный ключ", "cost": {"raw_a": 2}, "requires_tech": None,
+                "max_durability": 2, "repair_cost": {"raw_a": 1},
+            },
+        ],
+    },
     # Оружие (weapon=true) - для тестов _weapon_bonuses/attack_encounter. Тир 2
     # несёт все 4 боевых поля разом: damage_multiplier/instant_kill_max_hp/
     # loot_multiplier/soul_chance_multiplier (instant_kill_max_hp=5 покрывает
@@ -843,7 +925,41 @@ TOOLS = {
                 "damage_multiplier": 2, "instant_kill_max_hp": 8,
                 "loot_multiplier": 2, "soul_chance_multiplier": 2,
             },
+            # Тир 3 - только для тестов unlocked_attack_moves/attack_encounter(move_id=...):
+            # unlocks_moves кумулятивен (см. CLAUDE.md), поэтому тир 3 держит меч
+            # тира 2 "живым" боевым тиром (instant_kill_max_hp и т.п. этого тира
+            # больше НЕ действуют - _weapon_bonuses смотрит только ТЕКУЩИЙ тир),
+            # но добавляет доступ к приёму "power_strike".
+            {
+                "name": "Меч+", "cost": {"raw_a": 8}, "requires_tech": None,
+                "damage_multiplier": 3,
+                "unlocks_moves": ["power_strike", "pct_max_move", "pct_remaining_move", "execute_move"],
+            },
         ],
+    },
+}
+
+# Приёмы боя (content.json["combat_moves"]) - для тестов unlocked_attack_moves/
+# attack_encounter(move_id=...)/advance_turn-тика кулдауна и всех 4 режимов расчёта
+# урона (см. game/engine.py:_move_damage). power_strike - mode по умолчанию
+# ("multiplier", не указан явно - тест на обратную совместимость со старым контентом
+# без поля mode вовсе); остальные три - по одному на каждый ДРУГОЙ режим.
+COMBAT_MOVES = {
+    "power_strike": {
+        "name": "Тестовый приём", "description": "Тестовый мощный удар.",
+        "damage_multiplier": 2, "cooldown_turns": 2,
+    },
+    "pct_max_move": {
+        "name": "Тестовый % от макс. HP", "description": "Тестовый приём.",
+        "mode": "percent_max_hp", "percent": 0.2, "cooldown_turns": 0,
+    },
+    "pct_remaining_move": {
+        "name": "Тестовый % от остатка HP", "description": "Тестовый приём.",
+        "mode": "percent_remaining_hp", "percent": 0.5, "cooldown_turns": 0,
+    },
+    "execute_move": {
+        "name": "Тестовый добивающий удар", "description": "Тестовый приём.",
+        "mode": "execute", "execute_threshold_percent": 0.2, "cooldown_turns": 0,
     },
 }
 
@@ -968,6 +1084,8 @@ def as_content_dict() -> dict:
         "soul_recipes": copy.deepcopy(SOUL_RECIPES),
         "loot_cases": copy.deepcopy(LOOT_CASES),
         "quests": copy.deepcopy(QUESTS),
+        "combat_moves": copy.deepcopy(COMBAT_MOVES),
+        "breakdown_types": copy.deepcopy(BREAKDOWN_TYPES),
     }
 
 
@@ -994,12 +1112,12 @@ def build_mutations_by_pair(mutations: list) -> dict:
 _ENGINE_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "GENETICS_SETTINGS",
                  "LOCATIONS", "MANUAL_ACTIONS", "MINING_INFO", "MUTATIONS", "SPECIES", "TOOLS",
                  "RESOURCE_NAMES", "TECHS", "TIME", "ENERGY_RECIPE_FOR_RESOURCE", "MUTATIONS_BY_PAIR",
-                 "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "MOBS", "SKILLS", "SOUL_RECIPES",
-                 "LOOT_CASES", "QUESTS"]
+                 "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "RESOURCE_SOUL_KIND", "MOBS", "SKILLS", "SOUL_RECIPES",
+                 "LOOT_CASES", "QUESTS", "COMBAT_MOVES", "BREAKDOWN_TYPES"]
 _WEB_UI_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "LOCATIONS",
                  "MANUAL_ACTIONS", "MINING_INFO", "TOOLS", "RESOURCE_ICONS", "RESOURCE_NAMES",
                  "RESOURCE_ORDER", "TECHS", "RESOURCE_STORAGE", "MOBS", "SKILLS", "SOUL_RECIPES",
-                 "LOOT_CASES", "QUESTS"]
+                 "LOOT_CASES", "QUESTS", "BREAKDOWN_TYPES"]
 
 
 def _fixture_values() -> dict:
@@ -1023,11 +1141,14 @@ def _fixture_values() -> dict:
         "MUTATIONS_BY_PAIR": build_mutations_by_pair(MUTATIONS),
         "RESOURCE_FRACTIONAL": RESOURCE_FRACTIONAL,
         "RESOURCE_STORAGE": RESOURCE_STORAGE,
+        "RESOURCE_SOUL_KIND": RESOURCE_SOUL_KIND,
         "MOBS": MOBS,
         "SKILLS": SKILLS,
         "SOUL_RECIPES": SOUL_RECIPES,
         "LOOT_CASES": LOOT_CASES,
         "QUESTS": QUESTS,
+        "COMBAT_MOVES": COMBAT_MOVES,
+        "BREAKDOWN_TYPES": BREAKDOWN_TYPES,
     }
 
 

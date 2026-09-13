@@ -4,6 +4,7 @@ save.json
 saves/
 dist/
 build/
+/ContentEditor.exe
 out.txt
 out2.txt
 out3.txt

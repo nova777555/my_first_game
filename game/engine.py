@@ -8,10 +8,10 @@ import random
 from dataclasses import dataclass, field
 
 from .content import (
-    BUILDINGS, ENERGY_RECIPES, GENETIC_TRAITS, GENETICS_SETTINGS, LOCATIONS,
-    LOOT_CASES, MANUAL_ACTIONS, MINING_INFO, MOBS, MUTATIONS, QUESTS,
-    RESOURCE_FRACTIONAL, RESOURCE_NAMES, RESOURCE_STORAGE, SKILLS, SOUL_RECIPES,
-    SPECIES, TECHS, TIME, TOOLS,
+    BREAKDOWN_TYPES, BUILDINGS, COMBAT_MOVES, ENERGY_RECIPES, GENETIC_TRAITS,
+    GENETICS_SETTINGS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS, MINING_INFO, MOBS,
+    MUTATIONS, QUESTS, RESOURCE_FRACTIONAL, RESOURCE_NAMES, RESOURCE_SOUL_KIND,
+    RESOURCE_STORAGE, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TIME, TOOLS,
 )
 from .state import HISTORY_MAX_ENTRIES, GameState
 
@@ -230,6 +230,13 @@ def _roll_range_amounts(amounts: dict[str, int | float | dict]) -> dict[str, int
 # исключены - их "прокрутка" физически растянута на несколько ходов и не укладывается
 # в бухгалтерию fires/autocraft_speed_capacity (рассчитанную на мгновенный результат
 # каждой попытки), а на action_id уже и так допустима только ОДНА активная задача.
+# manual_actions.*.excluded_from_autocraft: true - явный ручной запрет автору контента,
+# НЕ связанный с детерминизмом/длительностью выше: действие может быть полностью
+# гарантированным и мгновенным и всё равно не годиться для автокрафта (например, "убить
+# босса" не должно происходить само по себе фоновой задачей) - автокрафт ведёт себя так,
+# будто рецепта для этого ресурса вообще нет (as no_recipe), кнопка "Перейти к рецепту"
+# (recipe_board_target) этим НЕ гейтится - игрок всё ещё может найти и выполнить действие
+# сам, просто автокрафт никогда не выберет его сам.
 # Если РЕСУРС производят НЕСКОЛЬКО таких действий (несколько рецептов на один и тот же
 # ресурс), выбирается действие с НАИБОЛЬШИМ action_priority(state, ...) - у игрока
 # (state.action_priority) приоритет НАД значением по умолчанию из content.json. При
@@ -245,6 +252,8 @@ def resource_recipe(state: GameState) -> dict[str, str]:
     best_priority: dict[str, int] = {}
     for action_id, action in MANUAL_ACTIONS.items():
         if not action["cost"]:
+            continue
+        if action.get("excluded_from_autocraft"):
             continue
         if not is_manual_action_deterministic(action_id):
             continue
@@ -339,6 +348,12 @@ class ActionResult:
     # уже содержит тот же приз текстом), чтобы анимировать прокрутку барабана до
     # РЕАЛЬНОГО результата броска, а не подделывать его заново на клиенте.
     prize: dict | None = None
+    # Данные удара attack_encounter для анимации в UI (летящий урон, тряска
+    # портрета моба, вспышка на ваншот) - {"damage", "killed", "instant_kill",
+    # "remaining_hp", "max_hp"} или None у ЛЮБОГО другого действия. Тот же
+    # принцип, что prize: сообщение message уже содержит то же самое текстом,
+    # но фронтенду нужны отдельные машиночитаемые числа, а не парсинг строки.
+    combat: dict | None = None
 
 
 @dataclass
@@ -461,6 +476,10 @@ def _ensure_farm_instances(state: GameState) -> None:
     GameState.from_dict) - расселяется по свободным слотам только что созданных
     экземпляров этого типа (round-robin); если свободного слота не нашлось,
     считается невыселенной (None), без падения."""
+    # Миграция старых записей (сохранение старше введения типов поломки) - у них
+    # просто нет ключа "broken_type" вовсе, а не None явно.
+    for inst in state.farm_instances.values():
+        inst.setdefault("broken_type", None)
     for building_id in BUILDINGS:
         if not _is_farm_building(building_id):
             continue
@@ -480,6 +499,7 @@ def _ensure_farm_instances(state: GameState) -> None:
             state.farm_instances[instance_id] = {
                 "building_id": building_id,
                 "broken": i < need_broken,
+                "broken_type": _roll_breakdown_type(building_id) if i < need_broken else None,
                 "upgrades": list(upgrades_copy),
             }
             new_ids.append(instance_id)
@@ -1363,17 +1383,62 @@ def effective_manual_action_stats(
     его в [1, mechanism_scale_cap(...)] ДО вызова, здесь никакой проверки границ
     нет). gain может содержать диапазон {"min","max"} (см.
     effective_building_stats) - роняет бросок на do_manual_action, не сюда, по
-    той же причине."""
+    той же причине. tool_scaling - необязательное generic-поле {"tool": id}
+    (см. CLAUDE.md): домножает ТОЛЬКО gain (cost не трогает, по аналогии с тем,
+    как тир инструмента в шахте домножает base_yield, а не cost добычи) на
+    ТЕКУЩИЙ тир указанного инструмента (tool_tier, дефолт тира без инструмента
+    = 1, то есть без какого-либо инструмента множитель нейтрален) - применяется
+    ДО апгрейдов постройки, но т.к. оба шага чисто мультипликативные, порядок
+    между ними математически не важен."""
     if building_upgrades is None:
         building_upgrades = state.building_upgrades
     action = MANUAL_ACTIONS[action_id]
     gain = dict(action["gain"])
     cost = dict(action["cost"])
+    tool_scaling = action.get("tool_scaling")
+    if tool_scaling:
+        multiplier = tool_tier(state, tool_scaling["tool"])
+        if multiplier != 1:
+            gain = {r: _scale_amount(v, multiplier) for r, v in gain.items()}
     building_id = action.get("requires_building")
     if building_id:
         purchased = building_upgrades.get(building_id, [])
         gain, cost = _apply_building_upgrades(building_id, purchased, gain, cost, scale_override=chosen_scale)
     return _round_amounts(cost), _round_amounts(gain)
+
+
+def manual_action_duration(
+    action_id: str, state: GameState, building_upgrades: dict[str, list[str]] | None = None,
+) -> int:
+    """Реальная длительность (в ходах) многоходового действия
+    (manual_actions.*.duration_turns) с учётом купленных апгрейдов типа
+    "action_duration_reduction" постройки, от которой действие зависит
+    (requires_building) - тот же принцип, что effective_manual_action_stats
+    (действие без requires_building или с duration_turns <= 1 возвращается как
+    есть, апгрейд такого действия не касается). Среди нескольких купленных
+    апгрейдов этого типа действует только САМОЕ СИЛЬНОЕ (наибольшая доля
+    сокращения) - как у scale/generation_efficiency, не перемножаются.
+    Округление - ceil (та же логика, что _round_amounts: дробный остаток
+    работает НЕ в пользу игрока), минимум 1 ход."""
+    duration = MANUAL_ACTIONS[action_id].get("duration_turns") or 1
+    if duration <= 1:
+        return duration
+    building_id = MANUAL_ACTIONS[action_id].get("requires_building")
+    if not building_id:
+        return duration
+    if building_upgrades is None:
+        building_upgrades = state.building_upgrades
+    purchased = building_upgrades.get(building_id, [])
+    reduction = 0.0
+    for upgrade in building_upgrade_defs(building_id):
+        if upgrade["type"] != "action_duration_reduction":
+            continue
+        value = _purchased_upgrade_value(purchased, upgrade)
+        if value is not None:
+            reduction = max(reduction, value)
+    if reduction <= 0:
+        return duration
+    return max(1, math.ceil(duration * (1 - reduction)))
 
 
 def mechanism_scale_cap(building_id: str, state: GameState) -> int:
@@ -1408,9 +1473,19 @@ def mechanism_scale_cap(building_id: str, state: GameState) -> int:
 
 def effective_breakdown_chance(
     building_id: str, techs: set[str], matching_effects: list[dict] | None = None,
+    purchased: list[str] | None = None,
 ) -> float:
     """matching_effects - см. effective_building_stats: тот же переиспользуемый
-    результат _matching_effects, если вызывающий уже посчитал его сам."""
+    результат _matching_effects, если вызывающий уже посчитал его сам.
+    purchased - купленные улучшения ЭТОЙ постройки (state.building_upgrades[bid]) -
+    если среди них есть тип "breakdown_immunity", поломка отключена ПОЛНОСТЬЮ
+    (0.0), независимо от базового значения и тех-эффектов - апгрейд абсолютен,
+    а не ещё один аддитивный/мультипликативный модификатор."""
+    if purchased and any(
+        u["id"] in purchased and u["type"] == "breakdown_immunity"
+        for u in BUILDINGS[building_id].get("upgrades", [])
+    ):
+        return 0.0
     chance = BUILDINGS[building_id].get("breakdown_chance", 0.0)
     if matching_effects is None:
         matching_effects = _matching_effects(building_id, techs)
@@ -1636,18 +1711,13 @@ def available_mining(state: GameState) -> list[str]:
 
 
 def mining_yield_per_turn(resource_id: str, state: GameState) -> int:
+    """Скорость добычи руды из активной жилы за один клик - зависит ТОЛЬКО от
+    тира требуемого инструмента (в будущем сюда может добавиться навык копания).
+    Качество жилы на скорость НЕ влияет - оно домножает только итоговый размер
+    жилы в момент находки, см. _pick_vein_quality_tier/search_vein_any."""
     info = MINING_INFO[resource_id]
     tier_bonus = tool_tier(state, info["required_tool"]) - info["required_tier"] + 1
-    amount = info["base_yield"] * max(1, tier_bonus)
-    quality_tiers = info.get("quality_tiers")
-    if quality_tiers:
-        idx = state.vein_quality.get(resource_id)
-        if idx is not None and 0 <= idx < len(quality_tiers):
-            # Руда - всегда целочисленный ресурс (в отличие от энергии), поэтому
-            # множитель качества всегда округляется вверх, тем же принципом, что и
-            # _round_amounts для нефракционных ресурсов - см. CLAUDE.md.
-            amount = math.ceil(amount * quality_tiers[idx]["yield_multiplier"])
-    return amount
+    return info["base_yield"] * max(1, tier_bonus)
 
 
 def _pick_vein_quality_tier(resource_id: str, state: GameState) -> int | None:
@@ -1657,8 +1727,8 @@ def _pick_vein_quality_tier(resource_id: str, state: GameState) -> int | None:
     только тиры, чей min_tool_tier не выше ТЕКУЩЕГО тира требуемого инструмента -
     чем лучше инструмент, тем больше хороших тиров качества участвует в розыгрыше
     (и тем выше их относительный вес после нормализации). Возвращает None, если у
-    ресурса вообще нет quality_tiers - тогда mining_yield_per_turn использует
-    множитель 1 (старое поведение)."""
+    ресурса вообще нет quality_tiers - тогда search_vein_any не трогает базовый
+    случайный размер жилы (множитель 1, старое поведение)."""
     quality_tiers = MINING_INFO[resource_id].get("quality_tiers")
     if not quality_tiers:
         return None
@@ -1691,20 +1761,26 @@ def search_vein_any(state: GameState) -> ActionResult:
     (как раньше), редкая руда гарантированно находилась бы, как только все более
     частые руды уже были найдены хотя бы по разу - шанс наткнуться на неё должен
     оставаться прежним при любом отдельном поиске, а не расти по мере "исчерпания"
-    остальных вариантов."""
+    остальных вариантов. Качество жилы (если у руды заданы quality_tiers)
+    домножает БАЗОВЫЙ случайный запас (size_multiplier, округление вверх - руда
+    целочисленный ресурс) - на скорость добычи за ход качество не влияет,
+    только на итоговый запас."""
     candidates = available_mining(state)
     if not candidates:
         return ActionResult(False, "Искать пока нечего: ни одна руда ещё не разведана.")
     weights = [1 / MINING_INFO[rid]["rarity"] for rid in candidates]
     resource_id = random.choices(candidates, weights=weights, k=1)[0]
     size = random.randint(*MINING_INFO[resource_id]["vein_size_range"])
-    state.veins = {resource_id: size}
     quality_index = _pick_vein_quality_tier(resource_id, state)
     if quality_index is None:
+        state.veins = {resource_id: size}
         state.vein_quality = {}
         return ActionResult(True, f"Найдена жила: {RESOURCE_NAMES[resource_id]} (запас: {size}).")
+    quality_tiers = MINING_INFO[resource_id]["quality_tiers"]
+    size = math.ceil(size * quality_tiers[quality_index]["size_multiplier"])
+    state.veins = {resource_id: size}
     state.vein_quality = {resource_id: quality_index}
-    quality_name = MINING_INFO[resource_id]["quality_tiers"][quality_index]["name"]
+    quality_name = quality_tiers[quality_index]["name"]
     return ActionResult(
         True, f"Найдена жила: {RESOURCE_NAMES[resource_id]} ({quality_name}, запас: {size})."
     )
@@ -1770,7 +1846,64 @@ def upgrade_tool(state: GameState, tool_id: str) -> ActionResult:
     if deferred is not None:
         return deferred
     state.tool_tiers[tool_id] = tool_tier(state, tool_id) + 1
+    # Новый тир - новая полная прочность (см. tool_durability_remaining): ключ
+    # просто убирается, а не выставляется в max_durability явно, чтобы функция
+    # ниже сама резолвила его лениво (тот же принцип, что и сам tool_tiers).
+    state.tool_durability.pop(tool_id, None)
     return ActionResult(True, f"«{tool_name}» улучшен: {next_info['name']} (тир {state.tool_tiers[tool_id]}).")
+
+
+def _current_tool_tier_def(state: GameState, tool_id: str) -> dict:
+    return TOOLS[tool_id]["tiers"][tool_tier(state, tool_id) - 1]
+
+
+def tool_durability_remaining(state: GameState, tool_id: str) -> int | None:
+    """Остаток прочности инструмента на ТЕКУЩЕМ тире - None, если у тира вовсе
+    нет max_durability (инструмент не изнашивается, как топор/кирка/меч без
+    этого поля). См. content.json tools.*.tiers[].max_durability."""
+    max_durability = _current_tool_tier_def(state, tool_id).get("max_durability")
+    if max_durability is None:
+        return None
+    return state.tool_durability.get(tool_id, max_durability)
+
+
+def tool_is_broken(state: GameState, tool_id: str) -> bool:
+    """Инструмент исчерпал прочность (нужен repair_tool, прежде чем его снова
+    можно использовать для ремонта поломки, требующей этот инструмент) -
+    ЛОЖЬ у инструментов без max_durability вовсе (см. tool_durability_remaining)."""
+    remaining = tool_durability_remaining(state, tool_id)
+    return remaining is not None and remaining <= 0
+
+
+def tool_usable_for_repair(state: GameState, tool_id: str) -> bool:
+    """"Нужен инструмент X" (breakdown_types.*.required_tools) = игрок им
+    просто ВЛАДЕЕТ (тир >= 2, т.е. не "кулаки"/стартовый тир) И этот
+    конкретный инструмент сейчас не сломан сам (см. tool_is_broken)."""
+    return tool_tier(state, tool_id) >= 2 and not tool_is_broken(state, tool_id)
+
+
+def _consume_tool_durability(state: GameState, tool_id: str) -> None:
+    remaining = tool_durability_remaining(state, tool_id)
+    if remaining is None:
+        return  # инструмент не изнашивается вовсе
+    state.tool_durability[tool_id] = max(0, remaining - 1)
+
+
+def repair_tool(state: GameState, tool_id: str) -> ActionResult:
+    """Платный ремонт инструмента, исчерпавшего прочность (см. tool_is_broken) -
+    тир НЕ теряется (в отличие от построек, тут нечего "разбирать" - см.
+    CLAUDE.md/договорённость с игроком), прочность просто сбрасывается на
+    максимум текущего тира. Цена - tiers[тир-1]["repair_cost"] (обязателен в
+    контенте, если у тира задан max_durability - см. content_validation.py)."""
+    tool_name = TOOLS[tool_id]["name"]
+    if not tool_is_broken(state, tool_id):
+        return ActionResult(False, f"«{tool_name}» не нуждается в ремонте.")
+    cost = _current_tool_tier_def(state, tool_id).get("repair_cost", {})
+    deferred = _pay_or_defer(state, cost, f"ремонт инструмента «{tool_name}»", "repair_tool", tool_id)
+    if deferred is not None:
+        return deferred
+    state.tool_durability.pop(tool_id, None)
+    return ActionResult(True, f"«{tool_name}» отремонтирован.")
 
 
 def skill_level(state: GameState, skill_id: str) -> int:
@@ -1878,6 +2011,51 @@ def _weapon_bonuses(state: GameState) -> dict:
     }
 
 
+def unlocked_attack_moves(state: GameState) -> set[str]:
+    """Приёмы боя (content.json["combat_moves"]), доступные игроку ПРЯМО СЕЙЧАС -
+    в отличие от _weapon_bonuses (где считается только числовое поле САМОГО
+    текущего тира, без накопления), разблокировка приёма КУМУЛЯТИВНА по тирам
+    одной линейки: дойдя до тира N, игрок сохраняет все unlocks_moves тиров
+    1..N этой линейки (естественная семантика "выучил и не разучился"), плюс,
+    как и остальные боевые бонусы, объединение по ВСЕМ владеемым линейкам
+    оружия сразу."""
+    moves: set[str] = set()
+    for tool_id, tool in TOOLS.items():
+        if not tool.get("weapon"):
+            continue
+        tiers = tool.get("tiers", [])
+        current = tool_tier(state, tool_id)
+        for tier in tiers[:current]:
+            moves.update(tier.get("unlocks_moves", []))
+    return moves
+
+
+def combat_moves_view(state: GameState) -> list[dict]:
+    """Приёмы боя с текущим статусом относительно игрока - разблокирован ли
+    (unlocked_attack_moves) и сколько ходов осталось до восстановления
+    (state.move_cooldowns) - для кнопок приёмов в панели схватки. Поля режима
+    (mode/damage_multiplier/percent/execute_threshold_percent) отдаются как есть
+    (могут отсутствовать в зависимости от mode, см. _move_damage) - фронтенд сам
+    решает, как показать конкретную формулу в подсказке (см. tools/web_ui.html:
+    makeAttackButton)."""
+    unlocked = unlocked_attack_moves(state)
+    return [
+        {
+            "id": mid,
+            "name": move["name"],
+            "description": move.get("description", ""),
+            "mode": move.get("mode", "multiplier"),
+            "damage_multiplier": move.get("damage_multiplier"),
+            "percent": move.get("percent"),
+            "execute_threshold_percent": move.get("execute_threshold_percent"),
+            "cooldown_turns": move.get("cooldown_turns", 0),
+            "unlocked": mid in unlocked,
+            "cooldown_remaining": state.move_cooldowns.get(mid, 0),
+        }
+        for mid, move in COMBAT_MOVES.items()
+    ]
+
+
 def is_mob_unlocked(mob_id: str, state: GameState) -> bool:
     mob = MOBS[mob_id]
     req_tech = mob.get("requires_tech")
@@ -1926,7 +2104,11 @@ def search_mob_any(state: GameState, location_id: str) -> ActionResult:
 def summon_boss(state: GameState, boss_id: str) -> ActionResult:
     """Призыв босса - тратит summon_cost (обычная цена ресурсами, через
     _pay_or_defer - как и любая другая цена, может докрафтиться автокрафтом/уйти
-    в очередь). Заменяет активную схватку целиком, как и search_mob_any."""
+    в очередь). Заменяет активную схватку целиком, как и search_mob_any.
+    mobs.*.turn_limit (необязателен, есть только у боссов - см.
+    content_validation.py) даёт схватке дедлайн: если общий счётчик хода
+    (state.turn) перевалит за него раньше, чем босс убит, схватка обрывается
+    сама (см. _process_combat в advance_turn) - "не добил вовремя, босс сбежал"."""
     mob = MOBS.get(boss_id)
     if mob is None or not mob.get("is_boss"):
         return ActionResult(False, "Такого босса не существует.")
@@ -1937,6 +2119,9 @@ def summon_boss(state: GameState, boss_id: str) -> ActionResult:
         return deferred
     hp = mob["hp"]
     state.active_encounter = {"mob_id": boss_id, "remaining_hp": hp}
+    turn_limit = mob.get("turn_limit")
+    if turn_limit:
+        state.active_encounter["deadline_turn"] = state.turn + turn_limit
     return ActionResult(True, f"Призван: {mob['name']} (HP: {hp}).")
 
 
@@ -1951,25 +2136,82 @@ def abandon_encounter(state: GameState) -> ActionResult:
     return ActionResult(True, "Схватка прекращена.")
 
 
-def attack_encounter(state: GameState) -> ActionResult:
+def _move_damage(state: GameState, mob: dict, remaining_hp: int, move: dict | None) -> tuple[int, bool]:
+    """Считает урон одного удара - move=None это обычная атака (mode "multiplier"
+    с коэффициентом 1.0, т.е. чистый расчёт по навыку/оружию). Каждый mode - свой,
+    полностью независимый способ посчитать число, при этом ЛЮБОЙ из них всё ещё
+    может быть перебит instant_kill_max_hp оружия (это проверяется отдельно в
+    attack_encounter, не здесь):
+      - "multiplier" (по умолчанию, если move не задан) - обычный расчёт (навык *
+        лучший damage_multiplier оружия), домноженный на move["damage_multiplier"].
+      - "percent_max_hp" - move["percent"] от МАКСИМАЛЬНОГО HP цели (mob["hp"]) -
+        не зависит ни от навыка, ни от оружия: одинаково страшен что мелкой добыче,
+        что огромному боссу, в постоянных числах.
+      - "percent_remaining_hp" - move["percent"] от ОСТАВШЕГОСЯ прямо сейчас HP -
+        подряд применённый несколько раз даёт убывающий урон (снимает долю от уже
+        уменьшившегося остатка, не от исходного максимума).
+      - "execute" - если remaining_hp уже не выше move["execute_threshold_percent"]
+        от максимума, добивает цель ЦЕЛИКОМ (второй элемент кортежа - forced_kill=True,
+        трактуется вызывающим как мгновенное убийство, наравне с оружейным
+        instant_kill_max_hp); иначе - обычный расчёт по навыку/оружию, домноженный на
+        необязательный move["damage_multiplier"] (по умолчанию 1.0, т.е. как без приёма).
+    Возвращает (damage, forced_kill) - damage всегда >= 1 (кроме forced_kill, где damage
+    - весь remaining_hp, чтобы вызов "снял remaining - damage" тоже давал 0 без спецкейса)."""
+    bonuses = _weapon_bonuses(state)
+    base_damage = skill_level_effects(state, COMBAT_SKILL_ID).get("damage", 1)
+    mode = move.get("mode", "multiplier") if move else "multiplier"
+    if mode == "percent_max_hp":
+        return max(1, math.ceil(move["percent"] * mob["hp"])), False
+    if mode == "percent_remaining_hp":
+        return max(1, math.ceil(move["percent"] * remaining_hp)), False
+    if mode == "execute" and remaining_hp <= move["execute_threshold_percent"] * mob["hp"]:
+        return remaining_hp, True
+    move_multiplier = 1.0
+    if move is not None:
+        move_multiplier = move.get("damage_multiplier", 1.0) if mode == "execute" else move["damage_multiplier"]
+    return max(1, math.ceil(base_damage * bonuses["damage_multiplier"] * move_multiplier)), False
+
+
+def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResult:
     """Атака активной цели (state.active_encounter) - урон снимает HP, лут/опыт/
     душа выдаются ОДНИМ пакетом при финальном убийстве, не по частям за удар (см.
-    CLAUDE.md). Урон = базовое значение уровня боевого навыка (skill_level_effects,
-    ключ "damage") * лучший damage_multiplier среди владеемого оружия
-    (_weapon_bonuses) - ЛЮБОЕ владеемое оружие с instant_kill_max_hp >=
-    remaining_hp убивает цель мгновенно, независимо от расчётного урона."""
+    CLAUDE.md). Расчёт урона одного удара - см. _move_damage (несколько независимых
+    "режимов" приёма, не только домножение обычного урона). ЛЮБОЕ владеемое оружие с
+    instant_kill_max_hp >= remaining_hp убивает цель мгновенно, независимо от
+    расчётного урона ЛЮБОГО режима (в т.ч. добивающего приёма - тут они просто не
+    нужны одновременно, но не мешают друг другу). Приём, которого ещё нет (не открыт
+    тиром оружия) или который ещё не восстановился (state.move_cooldowns), отклоняется
+    без применения (без траты хода, как любая другая непрошедшая валидация) - кулдаун
+    приёма проставляется ТОЛЬКО при реально состоявшемся ударе, после чего тикает в
+    advance_turn/_process_combat вместе с дедлайном босса, каждый ход, а не только в бою."""
     encounter = state.active_encounter
     if encounter is None:
         return ActionResult(False, "Нет активной цели - сначала найди моба или призови босса.")
+    move = None
+    if move_id is not None:
+        move = COMBAT_MOVES.get(move_id)
+        if move is None or move_id not in unlocked_attack_moves(state):
+            return ActionResult(False, "Этот приём ещё не изучен.")
+        cooldown_left = state.move_cooldowns.get(move_id, 0)
+        if cooldown_left > 0:
+            return ActionResult(False, f"«{move['name']}» ещё не восстановился: {cooldown_left} х.")
     mob = MOBS[encounter["mob_id"]]
     bonuses = _weapon_bonuses(state)
-    base_damage = skill_level_effects(state, COMBAT_SKILL_ID).get("damage", 1)
-    damage = max(1, math.ceil(base_damage * bonuses["damage_multiplier"]))
     remaining = encounter["remaining_hp"]
-    killed = remaining <= bonuses["instant_kill_max_hp"] or damage >= remaining
+    damage, forced_kill = _move_damage(state, mob, remaining, move)
+    instant = forced_kill or remaining <= bonuses["instant_kill_max_hp"]
+    killed = instant or damage >= remaining
+    if move is not None:
+        cooldown_turns = move.get("cooldown_turns", 0)
+        if cooldown_turns > 0:
+            state.move_cooldowns[move_id] = cooldown_turns
     if not killed:
         encounter["remaining_hp"] = remaining - damage
-        return ActionResult(True, f"Урон: -{damage} HP. Осталось: {encounter['remaining_hp']}/{mob['hp']}.")
+        return ActionResult(
+            True, f"Урон: -{damage} HP. Осталось: {encounter['remaining_hp']}/{mob['hp']}.",
+            combat={"damage": damage, "killed": False, "instant_kill": False,
+                    "remaining_hp": encounter["remaining_hp"], "max_hp": mob["hp"]},
+        )
 
     loot = dict(mob.get("loot", {}))
     loot_chance = mob.get("loot_chance")
@@ -1992,7 +2234,10 @@ def attack_encounter(state: GameState) -> ActionResult:
     message = f"Убит: {mob['name']}."
     if got_soul:
         message += f" Выбита душа: {RESOURCE_NAMES.get(soul_id, soul_id)}!"
-    return ActionResult(True, message)
+    return ActionResult(
+        True, message,
+        combat={"damage": damage, "killed": True, "instant_kill": instant, "remaining_hp": 0, "max_hp": mob["hp"]},
+    )
 
 
 def soul_collector_capacity(state: GameState, building_id: str) -> int:
@@ -2013,8 +2258,29 @@ def soul_collector_capacity(state: GameState, building_id: str) -> int:
     return int(base + bonus)
 
 
-def soul_collector_accepts(building_id: str) -> list[str]:
-    return BUILDINGS.get(building_id, {}).get("soul_collector", {}).get("accepts", [])
+def soul_kind(resource_id: str) -> str | None:
+    """Тег вида души (resources.*.soul_kind, например "моб"/"босс") - тот же
+    generic-принцип тега, что species_family: группирует души независимо от
+    их числа, а не перечисляет id по одному - см. soul_collector_accepts_kind."""
+    return RESOURCE_SOUL_KIND.get(resource_id)
+
+
+def soul_collector_accepts_kind(building_id: str) -> str | None:
+    """Тег, который принимает синтезатор building_id (buildings.*.soul_collector.
+    accepts_kind) - зеркало breeding_accepts_family: синтезатор принимает ЛЮБУЮ
+    душу с совпадающим soul_kind, а не перечисленный вручную список id."""
+    return BUILDINGS.get(building_id, {}).get("soul_collector", {}).get("accepts_kind")
+
+
+def souls_bank_view(state: GameState) -> list[dict]:
+    """Все ресурсы-души (ключи SOUL_RECIPES) с их тегом kind и наличием в
+    инвентаре - источник банка душ для UI-модалки конкретного синтезатора
+    (фронтенд сам фильтрует по soul_collector_accepts_kind нужной постройки,
+    тот же приём, что creature_bank + breeding_accepts_family)."""
+    return [
+        {"id": rid, "kind": soul_kind(rid), "amount": state.resources.get(rid, 0)}
+        for rid in SOUL_RECIPES
+    ]
 
 
 def insert_soul(state: GameState, building_id: str, soul_id: str) -> ActionResult:
@@ -2022,7 +2288,8 @@ def insert_soul(state: GameState, building_id: str, soul_id: str) -> ActionResul
     if not config:
         return ActionResult(False, "Это не синтезатор душ.")
     name = RESOURCE_NAMES.get(soul_id, soul_id)
-    if soul_id not in config.get("accepts", []):
+    accepts_kind = config.get("accepts_kind")
+    if accepts_kind is None or soul_kind(soul_id) != accepts_kind:
         return ActionResult(False, f"«{name}» не подходит для этого синтезатора.")
     installed = state.soul_slots.setdefault(building_id, [])
     if len(installed) >= soul_collector_capacity(state, building_id):
@@ -2046,24 +2313,240 @@ def remove_soul(state: GameState, building_id: str, index: int) -> ActionResult:
     return ActionResult(True, f"«{RESOURCE_NAMES.get(soul_id, soul_id)}» возвращена в инвентарь.")
 
 
-def soul_collectors_view(state: GameState) -> list[dict]:
-    """Все построенные синтезаторы душ разом (по типу постройки, не по
-    экземпляру - см. state.py:soul_slots) - для UI."""
-    result = []
-    for building_id, building in BUILDINGS.items():
-        if not building.get("soul_collector"):
+# Операторы условий автоматизации (state.automation_rules) - держать в паре с
+# CLAUDE.md/UI (web_ui.html, content_editor.html не участвует - правила это
+# state, не content).
+AUTOMATION_CONDITION_OPS = (">=", "<=")
+
+
+def automation_slots_capacity(state: GameState, building_id: str) -> int:
+    """Сколько правил автоматизации можно разом держать в building_id - тот же
+    принцип, что soul_collector_capacity: per-copy база (buildings.*.
+    automation_hub.slots) * число РАБОТАЮЩИХ копий, плюс АБСОЛЮТНАЯ добавка от
+    сильнейшего купленного апгрейда типа automation_slots (см.
+    _farm_upgrade_multiplier). 0, если постройка не автоматизатор вовсе, или
+    если ВСЕ копии сломаны - бонус от апгрейда гейтится тем же working_count,
+    что и база, иначе сломанная постройка продолжала бы держать настроенные
+    правила "живыми". process_automation_rules сам поломку не проверяет и
+    полагается на capacity == 0, ровно как _process_soul_collectors."""
+    config = BUILDINGS.get(building_id, {}).get("automation_hub")
+    if not config or working_count(state, building_id) <= 0:
+        return 0
+    base = config.get("slots", 0) * working_count(state, building_id)
+    bonus = _farm_upgrade_multiplier(state, building_id, "automation_slots", default=0)
+    return int(base + bonus)
+
+
+def is_automation_eligible_action(action_id: str) -> bool:
+    """Действие можно поставить в правило автоматизации, только если оно
+    детерминировано (см. is_manual_action_deterministic - та же граница, что у
+    автокрафта: без вероятностного cost_chance/gain_chance и без диапазона в
+    gain). Многоходовые действия (duration_turns > 1) РАЗРЕШЕНЫ - do_manual_action
+    сам не даст запустить вторую копию одного и того же action_id, пока первая не
+    завершилась (state.manual_jobs - одна активная задача НА действие ГЛОБАЛЬНО,
+    не на правило/постройку), так что process_automation_rules просто получит
+    ActionResult(False, "уже выполняется") и молча пропустит ход для этого
+    правила - без крашей и без постановки в очередь. По прямому решению это
+    ЦЕНА автоматизации многоходового действия: если слот занят (в т.ч. занят
+    самим игроком вручную), освободить его для повторного авто-запуска можно
+    только явной отменой (cancel_manual_job) - автоматизация сама ничего не
+    отменяет и не форсирует."""
+    action = MANUAL_ACTIONS.get(action_id)
+    if action is None:
+        return False
+    return is_manual_action_deterministic(action_id)
+
+
+def is_energy_recipe_unlocked(recipe_id: str, state: GameState) -> bool:
+    recipe = ENERGY_RECIPES[recipe_id]
+    req_tech = recipe.get("requires_tech")
+    return not req_tech or req_tech in state.techs
+
+
+def is_automation_eligible_energy_recipe(recipe_id: str) -> bool:
+    """Рецепт крафта за энергию можно поставить в правило автоматизации без
+    каких-либо доп. ограничений - в отличие от ручных действий, тут нет
+    cost_chance/gain_chance (шанс потребления/получения ресурса вообще не
+    существует у energy_recipes); диапазон в produces (см. _is_range_amount)
+    НЕ исключает рецепт - process_automation_rules не занимается плановой
+    бухгалтерией автокрафта, просто вызывает start_energy_recipe РОВНО ОДИН
+    раз за срабатывание, а бросок диапазона происходит уже ВНУТРИ
+    _process_energy_jobs при завершении job'а, как и для любого другого
+    способа запуска этого рецепта (клик игрока/автокрафт)."""
+    return recipe_id in ENERGY_RECIPES
+
+
+AUTOMATION_TARGET_KINDS = ("manual_action", "energy_recipe")
+
+
+def _is_automation_target_eligible(kind: str, target_id: str) -> bool:
+    if kind == "manual_action":
+        return is_automation_eligible_action(target_id)
+    if kind == "energy_recipe":
+        return is_automation_eligible_energy_recipe(target_id)
+    return False
+
+
+def _automation_target_name(kind: str, target_id: str) -> str:
+    return MANUAL_ACTIONS[target_id]["name"] if kind == "manual_action" else ENERGY_RECIPES[target_id]["name"]
+
+
+def automation_eligible_targets() -> list[dict]:
+    """Все цели (ручное действие ИЛИ рецепт крафта за энергию), которые в
+    принципе можно поставить в правило (см. is_automation_eligible_action/
+    is_automation_eligible_energy_recipe) - НЕ требует, чтобы цель уже была
+    открыта (правило можно настроить заранее, см. process_automation_rules).
+    Для UI-пикера выбора цели правила."""
+    targets = [
+        {"kind": "manual_action", "id": action_id, "name": action["name"]}
+        for action_id, action in MANUAL_ACTIONS.items()
+        if is_automation_eligible_action(action_id)
+    ]
+    targets += [
+        {"kind": "energy_recipe", "id": recipe_id, "name": recipe["name"]}
+        for recipe_id, recipe in ENERGY_RECIPES.items()
+    ]
+    return targets
+
+
+def _automation_condition_met(condition: dict, state: GameState) -> bool:
+    amount = state.resources.get(condition["resource"], 0)
+    if condition["op"] == ">=":
+        return amount >= condition["amount"]
+    return amount <= condition["amount"]
+
+
+def _validate_automation_conditions(conditions: list[dict]) -> str | None:
+    for condition in conditions:
+        resource_id = condition.get("resource")
+        # SPECIES исключены - id вида переиспользует id ресурса только ради
+        # имени/иконки (см. content.py:SPECIES), особи живут в state.creatures,
+        # не копятся стопкой в state.resources - условие на такой id никогда
+        # не могло бы стать истинным по-настоящему.
+        if resource_id not in RESOURCE_NAMES or resource_id in SPECIES:
+            return "Неизвестный ресурс в условии."
+        if condition.get("op") not in AUTOMATION_CONDITION_OPS:
+            return "Неверный оператор условия."
+        amount = condition.get("amount")
+        if not isinstance(amount, (int, float)) or isinstance(amount, bool) or amount < 0:
+            return "Неверное количество в условии."
+    return None
+
+
+def add_automation_rule(
+    state: GameState, building_id: str, kind: str, target_id: str, conditions: list[dict],
+) -> ActionResult:
+    """Не тратит ход - настройка правила, как insert_soul. kind - "manual_action"
+    или "energy_recipe" (AUTOMATION_TARGET_KINDS), target_id - id действия/рецепта
+    внутри этого kind. conditions - список {"resource","op","amount"}, проверяемых
+    через И (пустой список = правило срабатывает всегда, см.
+    process_automation_rules)."""
+    if not BUILDINGS.get(building_id, {}).get("automation_hub"):
+        return ActionResult(False, "У этой постройки нет автоматизатора.")
+    if kind not in AUTOMATION_TARGET_KINDS or not _is_automation_target_eligible(kind, target_id):
+        return ActionResult(False, "Это нельзя поставить в автоматизацию.")
+    error = _validate_automation_conditions(conditions)
+    if error:
+        return ActionResult(False, error)
+    rules = state.automation_rules.setdefault(building_id, [])
+    if len(rules) >= automation_slots_capacity(state, building_id):
+        return ActionResult(False, "Нет свободных слотов автоматизации.")
+    rules.append({"kind": kind, "target_id": target_id, "conditions": [dict(c) for c in conditions]})
+    return ActionResult(True, f"Правило добавлено: «{_automation_target_name(kind, target_id)}».")
+
+
+def update_automation_rule(
+    state: GameState, building_id: str, index: int, kind: str, target_id: str, conditions: list[dict],
+) -> ActionResult:
+    """Правит правило НА МЕСТЕ (не меняя его позицию в списке) - не тратит ход."""
+    rules = state.automation_rules.get(building_id, [])
+    if not isinstance(index, int) or not (0 <= index < len(rules)):
+        return ActionResult(False, "Такого правила тут нет.")
+    if kind not in AUTOMATION_TARGET_KINDS or not _is_automation_target_eligible(kind, target_id):
+        return ActionResult(False, "Это нельзя поставить в автоматизацию.")
+    error = _validate_automation_conditions(conditions)
+    if error:
+        return ActionResult(False, error)
+    rules[index] = {"kind": kind, "target_id": target_id, "conditions": [dict(c) for c in conditions]}
+    return ActionResult(True, f"Правило обновлено: «{_automation_target_name(kind, target_id)}».")
+
+
+def remove_automation_rule(state: GameState, building_id: str, index: int) -> ActionResult:
+    """Не тратит ход, как remove_soul."""
+    rules = state.automation_rules.get(building_id, [])
+    if not isinstance(index, int) or not (0 <= index < len(rules)):
+        return ActionResult(False, "Такого правила тут нет.")
+    rules.pop(index)
+    return ActionResult(True, "Правило удалено.")
+
+
+def process_automation_rules(state: GameState, report: ProductionReport, daytime: bool) -> None:
+    """Каждый ход, ПОСЛЕ _process_manual_jobs и ДО _process_pending_actions (см.
+    advance_turn), чтобы правило видело уже готовую продукцию этого хода
+    (постройки/фермы/синтезаторы/энергокрафт), но срабатывало до финального
+    клэмпа энергии/склада. Для каждой постройки с настроенными правилами -
+    первые automation_slots_capacity(...) правил её списка (лишние, если
+    слотов не хватает, просто не участвуют, тот же принцип, что soul_slots),
+    если постройка сейчас активна (active_period) и ВСЕ условия правила
+    истинны (И, пустой список условий = всегда, см. _automation_condition_met).
+    Правило на ещё не открытое действие молча пропускается - можно настроить
+    заранее, сработает само после открытия. Несколько правил делят общий
+    ресурс в порядке списка - тот же осознанный компромисс "кто раньше встал,
+    тот раньше взял", что и везде в advance_turn для разделяемых ресурсов.
+    Нехватка стороннего ресурса (не входящего в условие) просто не даёт
+    правилу сработать в этот ход - do_manual_action/start_energy_recipe сами
+    вернут ok=False, без ошибок и без записи в report. Многоходовое действие
+    (duration_turns > 1, см. is_automation_eligible_action) при срабатывании
+    только СТАРТУЕТ job в state.manual_jobs (report.automation_fired получит
+    "Начато: ...") - само начисление gain произойдёт позже, в
+    _process_manual_jobs, уже без пометки, что job запустила именно
+    автоматизация. Пока job активен, do_manual_action отказывает ЛЮБОЙ попытке
+    запустить это же action_id повторно (в т.ч. следующим тикам этого же
+    правила) - правило просто не срабатывает, пока слот не освободится сам (по
+    завершении) или явной cancel_manual_job.
+
+    Рецепт крафта за энергию (kind == "energy_recipe") работает СИММЕТРИЧНО:
+    start_energy_recipe сам ищет свободный преобразователь подходящего типа
+    (recipe.machine, если задан) и отказывает (ok=False), если все заняты -
+    правило в этом случае просто не срабатывает, освободить слот раньше
+    завершения можно только явной cancel_energy_job. В отличие от manual_action,
+    ограничение "один активный джоб на весь action_id" тут вообще не действует -
+    несколько job'ов ОДНОГО recipe_id могут идти параллельно в разных
+    преобразователях (см. start_energy_recipe/_pick_converter_building_with_free_slot),
+    а один вызов start_energy_recipe занимает РОВНО ОДИН свободный
+    преобразователь за раз. Поэтому правило без условий на рецепт с несколькими
+    свободными преобразователями заполнит их ВСЕ, но по одному за ход
+    (следующий свободный слот подхватится на следующем срабатывании правила,
+    не в тот же ход)."""
+    for building_id, rules in state.automation_rules.items():
+        if not rules:
             continue
-        if state.buildings.get(building_id, 0) <= 0:
+        capacity = automation_slots_capacity(state, building_id)
+        if capacity <= 0:
             continue
-        installed = state.soul_slots.get(building_id, [])
-        result.append({
-            "building_id": building_id,
-            "name": building["name"],
-            "capacity": soul_collector_capacity(state, building_id),
-            "accepts": soul_collector_accepts(building_id),
-            "installed": list(installed),
-        })
-    return result
+        if not is_building_active_now(building_id, daytime):
+            continue
+        for rule in rules[:capacity]:
+            kind = rule["kind"]
+            target_id = rule["target_id"]
+            if kind == "manual_action":
+                if target_id not in MANUAL_ACTIONS or not is_manual_action_unlocked(target_id, state):
+                    continue
+            elif kind == "energy_recipe":
+                if target_id not in ENERGY_RECIPES or not is_energy_recipe_unlocked(target_id, state):
+                    continue
+            else:
+                continue
+            if not all(_automation_condition_met(c, state) for c in rule["conditions"]):
+                continue
+            result = (
+                do_manual_action(state, target_id) if kind == "manual_action"
+                else start_energy_recipe(state, target_id)
+            )
+            if result.ok:
+                report.automation_fired.append({
+                    "building_id": building_id, "kind": kind, "target_id": target_id, "message": result.message,
+                })
 
 
 def storage_capacity(state: GameState, resource_id: str) -> int | None:
@@ -2136,6 +2619,16 @@ def building_upgrade_defs(building_id: str) -> list[dict]:
 
 def is_building_upgrade_purchased(state: GameState, building_id: str, upgrade_id: str) -> bool:
     return upgrade_id in state.building_upgrades.get(building_id, [])
+
+
+def _instance_has_upgrade_type(building_id: str, instance: dict, upgrade_type: str) -> bool:
+    """Куплен ли у ЭТОГО экземпляра фермы (instance["upgrades"]) хоть один
+    апгрейд заданного типа - используется для per-instance-эффектов, которые
+    у ферм всегда индивидуальны (breeding_immortality и, теперь,
+    breakdown_immunity - см. advance_turn), в отличие от type-wide
+    state.building_upgrades обычных построек."""
+    types_by_id = {u["id"]: u["type"] for u in building_upgrade_defs(building_id)}
+    return any(types_by_id.get(uid) == upgrade_type for uid in instance["upgrades"])
 
 
 def building_upgrade_purchase_count(state: GameState, building_id: str, upgrade_id: str) -> int:
@@ -2270,10 +2763,83 @@ def broken_buildings(state: GameState) -> list[str]:
     return [b for b, count in state.broken.items() if count > 0]
 
 
+def _roll_breakdown_type(building_id: str) -> str | None:
+    """Вид поломки, случайно выбранный из buildings.*.breakdown_types этой
+    постройки (равновероятно) - None, если список не задан/пуст (старое
+    поведение: поломка без типа, ремонт не требует никакого инструмента)."""
+    types = BUILDINGS[building_id].get("breakdown_types")
+    return random.choice(types) if types else None
+
+
+def breakdown_type_required_tools(type_id: str | None) -> list[str]:
+    if type_id is None:
+        return []
+    return BREAKDOWN_TYPES.get(type_id, {}).get("required_tools", [])
+
+
+def _is_breakdown_type_fixable(state: GameState, type_id: str | None) -> bool:
+    """Можно ли ПРЯМО СЕЙЧАС починить поломку этого вида - True для None (без
+    типа, инструмент не нужен), иначе требует владения (и исправности) ВСЕХ
+    инструментов из required_tools сразу (см. tool_usable_for_repair)."""
+    return all(tool_usable_for_repair(state, t) for t in breakdown_type_required_tools(type_id))
+
+
+def _broken_type_entries(state: GameState, building_id: str) -> list[str | None]:
+    """Список видов поломки на каждую СЕЙЧАС сломанную копию building_id (не
+    для ферм - см. repairable_count/repair) - state.broken_types[bid],
+    добитый/обрезанный до длины state.broken[bid] значениями None (защита от
+    старых сохранений и от контента, у которого breakdown_types появился
+    только что - в обоих случаях считаем недостающие поломки "без типа")."""
+    count = state.broken.get(building_id, 0)
+    types = state.broken_types.get(building_id, [])
+    if len(types) < count:
+        types = types + [None] * (count - len(types))
+    else:
+        types = types[:count]
+    return types
+
+
+def repairable_count(state: GameState, building_id: str) -> int:
+    """Сколько из СЕЙЧАС сломанных копий этой постройки можно починить прямо
+    сейчас (хватает нужных инструментов на их вид поломки) - используется и
+    ценой ремонта (repair_cost_total), и самим repair()."""
+    if _is_farm_building(building_id):
+        _ensure_farm_instances(state)
+        return sum(
+            1 for inst in state.farm_instances.values()
+            if inst["building_id"] == building_id and inst["broken"]
+            and _is_breakdown_type_fixable(state, inst.get("broken_type"))
+        )
+    return sum(1 for t in _broken_type_entries(state, building_id) if _is_breakdown_type_fixable(state, t))
+
+
 def repair_cost_total(state: GameState, building_id: str) -> dict[str, int]:
-    broken = state.broken.get(building_id, 0)
+    """Цена ремонта ПРЯМО СЕЙЧАС - только за копии, которые реально можно
+    починить (см. repairable_count), не за все сломанные - копии, чей вид
+    поломки требует недостающий инструмент, в эту цену не входят вовсе."""
+    fixable = repairable_count(state, building_id)
     per_unit = BUILDINGS[building_id]["repair_cost"]
-    return {r: amount * broken for r, amount in per_unit.items()}
+    return {r: amount * fixable for r, amount in per_unit.items()}
+
+
+def repair_blocked_types(state: GameState, building_id: str) -> list[tuple[str | None, int]]:
+    """Виды поломки СЕЙЧАС сломанной постройки, которые repair() не может
+    починить (не хватает инструмента) - список (type_id, сколько сломанных
+    копий этого вида) для подсказки в UI рядом с кнопкой ремонта (см.
+    tools/web_ui.py:repair_blocked_view). Порядок - по первому появлению вида."""
+    if _is_farm_building(building_id):
+        _ensure_farm_instances(state)
+        types = [
+            inst.get("broken_type") for inst in state.farm_instances.values()
+            if inst["building_id"] == building_id and inst["broken"]
+        ]
+    else:
+        types = _broken_type_entries(state, building_id)
+    counts: dict[str | None, int] = {}
+    for t in types:
+        if not _is_breakdown_type_fixable(state, t):
+            counts[t] = counts.get(t, 0) + 1
+    return list(counts.items())
 
 
 def energy_breakdown(state: GameState) -> tuple[int, int, int]:
@@ -2384,10 +2950,7 @@ def energy_converter_max_energy_per_turn(state: GameState, building_id: str) -> 
 def available_energy_recipes(state: GameState) -> list[str]:
     """Рецепты крафта за энергию, доступные для запуска игроком/автокрафтом прямо
     сейчас - открытые технологией (requires_tech рецепта, если он указан)."""
-    return [
-        rid for rid, recipe in ENERGY_RECIPES.items()
-        if not recipe.get("requires_tech") or recipe["requires_tech"] in state.techs
-    ]
+    return [rid for rid in ENERGY_RECIPES if is_energy_recipe_unlocked(rid, state)]
 
 
 def energy_jobs_view(state: GameState) -> list[dict]:
@@ -2627,6 +3190,29 @@ def genetics_lab_available(state: GameState) -> bool:
     return any(BUILDINGS[b].get("genetics_lab") and working_count(state, b) > 0 for b in state.buildings)
 
 
+def species_family(species_id: str) -> str | None:
+    """Тег "семейства" вида (species.*.family, например "bee"/"flower") -
+    свободная строка, не фиксированный enum (тот же принцип, что id сред у
+    environment_emulation): новый вид того же семейства ничего не требует от
+    построек - достаточно проставить ему тот же family, чтобы он стал
+    поселяем в уже существующих фермах этого семейства."""
+    return SPECIES.get(species_id, {}).get("family")
+
+
+def breeding_accepts_family(building_id: str) -> str | None:
+    """Семейство видов, которое можно поселить в ферме этого типа
+    (buildings.*.breeding_accepts_family) - необязательное generic-
+    ограничение: поле отсутствует значит без ограничений (любой вид можно
+    поселить, старое поведение) - иначе пришлось бы задним числом трогать
+    любой старый контент/сохранение с фермой без этого поля. Сравнение идёт
+    по ОДНОМУ общему тегу семейства (species_family), а не по списку id видов -
+    так добавление нового вида того же семейства (например, ещё одной породы
+    пчёл) не требует правки уже существующих построек. Тот же приём (тег на
+    ресурсе + тег на постройке вместо списка id) использует soul_collector -
+    см. soul_kind/soul_collector_accepts_kind."""
+    return BUILDINGS.get(building_id, {}).get("breeding_accepts_family")
+
+
 def house_creature(state: GameState, creature_id: str, farm_instance_id: str) -> ActionResult:
     """Переселяет особь из банка в свободный слот КОНКРЕТНОГО ЭКЗЕМПЛЯРА фермы -
     БЕЗ траты хода (управление уже своим имуществом, как cancel_energy_job/
@@ -2640,12 +3226,16 @@ def house_creature(state: GameState, creature_id: str, farm_instance_id: str) ->
     instance = state.farm_instances.get(farm_instance_id)
     if instance is None or instance["broken"]:
         return ActionResult(False, "Это не ферма.")
+    building_id = instance["building_id"]
+    accepts_family = breeding_accepts_family(building_id)
+    name = RESOURCE_NAMES.get(creature["species_id"], creature["species_id"])
+    if accepts_family is not None and species_family(creature["species_id"]) != accepts_family:
+        return ActionResult(False, f"«{name}» не подходит для «{BUILDINGS[building_id]['name']}».")
     if farm_instance_slots_used(state, farm_instance_id) >= farm_instance_slot_capacity(state, farm_instance_id):
         return ActionResult(False, "Все слоты этой фермы заняты.")
     creature["farm_instance_id"] = farm_instance_id
     creature["turns_alive"] = 0
-    name = RESOURCE_NAMES.get(creature["species_id"], creature["species_id"])
-    return ActionResult(True, f"«{name}» поселён(а) в «{BUILDINGS[instance['building_id']]['name']}».")
+    return ActionResult(True, f"«{name}» поселён(а) в «{BUILDINGS[building_id]['name']}».")
 
 
 def release_creature(state: GameState, creature_id: str) -> ActionResult:
@@ -2850,6 +3440,7 @@ def creature_view(state: GameState, creature_id: str) -> dict:
     entry = {
         "id": creature_id,
         "species_id": species_id,
+        "family": species_family(species_id),
         "name": RESOURCE_NAMES.get(species_id, species_id),
         "identified": creature["identified"],
         "farm_instance_id": creature["farm_instance_id"],
@@ -2918,6 +3509,7 @@ def farms_view(state: GameState) -> list[dict]:
             "working": not instance["broken"],
             "slot_capacity": farm_instance_slot_capacity(state, instance_id),
             "slots_used": farm_instance_slots_used(state, instance_id),
+            "accepts_family": breeding_accepts_family(building_id),
             "creatures": creatures_view(state, farm_instance_id=instance_id),
         })
     return result
@@ -3035,7 +3627,10 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
     action = MANUAL_ACTIONS[action_id]
     if not is_manual_action_unlocked(action_id, state):
         return ActionResult(False, "Это действие ещё не открыто.")
-    duration = action.get("duration_turns") or 1
+    # manual_action_duration уже учитывает купленный апгрейд типа
+    # action_duration_reduction (см. CLAUDE.md) - настолько сильное сокращение,
+    # что итог <= 1, делает действие фактически мгновенным (ветка ниже).
+    duration = manual_action_duration(action_id, state)
     if duration > 1 and action_id in state.manual_jobs:
         return ActionResult(False, f"«{action['name']}» уже выполняется.")
     resolved_scale = None
@@ -3058,6 +3653,7 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
             "turns_total": duration, "turns_done": 0,
             "gain": gain, "gain_chance": action.get("gain_chance"),
             "spawn_species": action.get("spawn_species"),
+            "cost": cost,  # для возврата при досрочной отмене, см. cancel_manual_job
         }
         return ActionResult(True, f"Начато: {action['name']} (займётся {duration} х.).")
     gain_chance = action.get("gain_chance")
@@ -3163,21 +3759,57 @@ def research(state: GameState, tech_id: str) -> ActionResult:
 
 
 def repair(state: GameState, building_id: str) -> ActionResult:
+    """Чинит СРАЗУ все сломанные копии building_id, ЧЬЁ ТЕКУЩЕЕ required_tools
+    полностью удовлетворено (см. repairable_count) - копии с недостающим
+    инструментом остаются сломанными, оплата и сообщение отражают только
+    реально починенную часть. За каждый РАЗЛИЧНЫЙ инструмент, использованный
+    хотя бы одной починенной копией в этом вызове, списывается ровно 1
+    прочность (см. _consume_tool_durability) - не за каждую копию отдельно."""
     broken = state.broken.get(building_id, 0)
     if broken <= 0:
         return ActionResult(False, "Тут нечего чинить.")
+    fixable = repairable_count(state, building_id)
+    if fixable <= 0:
+        return ActionResult(False, "Не хватает инструмента для этого вида поломки.")
     cost = repair_cost_total(state, building_id)
     name = BUILDINGS[building_id]["name"]
     deferred = _pay_or_defer(state, cost, f"ремонт «{name}»", "repair", building_id)
     if deferred is not None:
         return deferred
-    state.broken[building_id] = 0
+    used_tools: set[str] = set()
     if _is_farm_building(building_id):
         _ensure_farm_instances(state)
+        fixed = 0
         for instance in state.farm_instances.values():
-            if instance["building_id"] == building_id:
-                instance["broken"] = False
-    return ActionResult(True, f"Отремонтировано: {name} ({broken} шт.).")
+            if instance["building_id"] != building_id or not instance["broken"]:
+                continue
+            broken_type = instance.get("broken_type")
+            if not _is_breakdown_type_fixable(state, broken_type):
+                continue
+            used_tools.update(breakdown_type_required_tools(broken_type))
+            instance["broken"] = False
+            instance["broken_type"] = None
+            fixed += 1
+        state.broken[building_id] = sum(
+            1 for inst in state.farm_instances.values()
+            if inst["building_id"] == building_id and inst["broken"]
+        )
+    else:
+        remaining_types = []
+        fixed = 0
+        for t in _broken_type_entries(state, building_id):
+            if _is_breakdown_type_fixable(state, t):
+                used_tools.update(breakdown_type_required_tools(t))
+                fixed += 1
+            else:
+                remaining_types.append(t)
+        state.broken_types[building_id] = remaining_types
+        state.broken[building_id] = len(remaining_types)
+    for tool_id in used_tools:
+        _consume_tool_durability(state, tool_id)
+    remaining_broken = state.broken.get(building_id, 0)
+    suffix = f" Осталось сломано: {remaining_broken} шт. (не хватает инструмента)." if remaining_broken else ""
+    return ActionResult(True, f"Отремонтировано: {name} ({fixed} шт.).{suffix}")
 
 
 def resolve_action_cost(state: GameState, action_type: str, action_id: str, scale: int | None = None) -> dict[str, int] | None:
@@ -3212,6 +3844,10 @@ def resolve_action_cost(state: GameState, action_type: str, action_id: str, scal
     if action_type == "upgrade_tool":
         next_info = next_tool_tier_info(state, action_id) if action_id in TOOLS else None
         return dict(next_info["cost"]) if next_info else None
+    if action_type == "repair_tool":
+        if action_id not in TOOLS or not tool_is_broken(state, action_id):
+            return None
+        return dict(_current_tool_tier_def(state, action_id).get("repair_cost", {}))
     if action_type == "building_upgrade":
         building_id, _, upgrade_id = action_id.partition(":")
         upgrade = next((u for u in building_upgrade_defs(building_id) if u["id"] == upgrade_id), None)
@@ -3261,6 +3897,18 @@ class ProductionReport:
     # пропускной способности" - не сохраняется в save.json, ProductionReport
     # существует только в пределах одного advance_turn.
     energy_shortfall: dict[str, int | float] = field(default_factory=dict)
+    # Имя босса, чья схватка оборвалась сама - босс "сбежал", потому что игрок не
+    # уложился в mobs.*.turn_limit (см. summon_boss/_process_combat) - None в
+    # любой другой ход. Ход, на котором игрок САМ добивает/бросает схватку
+    # (attack_encounter/abandon_encounter), сюда не попадает - это только про
+    # автоматический обрыв по таймеру.
+    boss_fled: str | None = None
+    # Правила автоматизации (state.automation_rules), сработавшие в этот ход -
+    # см. process_automation_rules. Каждый элемент - {"building_id", "kind"
+    # ("manual_action"|"energy_recipe"), "target_id", "message"} (message - то
+    # же ActionResult.message, что получил бы игрок за обычный клик/запуск
+    # рецепта) - для UI-обратной связи в логе хода.
+    automation_fired: list[dict] = field(default_factory=list)
 
 
 def _is_active_period_now(active_period: str, daytime: bool) -> bool:
@@ -3522,13 +4170,18 @@ def manual_jobs_view(state: GameState) -> list[dict]:
 
 def cancel_manual_job(state: GameState, action_id: str) -> ActionResult:
     """Снимает многоходовую ручную задачу немедленно, БЕЗ траты хода - как
-    cancel_autocraft_job/cancel_energy_job. Уже списанный при старте cost возврату не
-    подлежит (см. state.manual_jobs), т.к. progress копится "бесплатно" ровно по той же
-    логике, что и у energy_jobs."""
+    cancel_autocraft_job/cancel_energy_job. В отличие от energy_jobs (где прогресс
+    "потрачен по-настоящему" и не привязан к одной конкретной оплате), у manual_jobs
+    cost списан ОДНИМ платежом целиком в момент старта именно ЭТОГО job'а (см.
+    do_manual_action) - поэтому отмена до завершения возвращает его игроку через _gain
+    (с тем же потолком MAX_RESOURCE_AMOUNT, что и любое начисление). Прокрутки/тики,
+    которые job уже сделал (turns_done), возврату не подлежат сами по себе - просто
+    потому что тикали "бесплатно" и ничего не расходовали, тут нечего возвращать."""
     if action_id not in state.manual_jobs:
         return ActionResult(False, "Такой задачи уже нет.")
-    del state.manual_jobs[action_id]
-    return ActionResult(True, f"«{MANUAL_ACTIONS[action_id]['name']}» отменено.")
+    job = state.manual_jobs.pop(action_id)
+    _gain(state.resources, job["cost"])
+    return ActionResult(True, f"«{MANUAL_ACTIONS[action_id]['name']}» отменено, затраты возвращены.")
 
 
 # Каждый retry принимает ВЕСЬ pending-словарь (не только target_id) - так у него
@@ -3566,6 +4219,28 @@ def _process_pending_actions(state: GameState, report: ProductionReport) -> None
     state.pending_actions = still_pending
 
 
+def _process_combat(state: GameState, report: ProductionReport) -> None:
+    """Тикает кулдауны приёмов боя (state.move_cooldowns, см. attack_encounter) и
+    проверяет дедлайн активного босса (mobs.*.turn_limit, см. summon_boss) - вызывается
+    из advance_turn ПОСЛЕ state.turn += 1, чтобы сверяться уже с НОВЫМ номером хода.
+    Кулдауны тикают КАЖДЫЙ ход, а не только во время боя - тот же принцип, что и
+    остальные счётчики хода в advance_turn."""
+    for move_id in list(state.move_cooldowns):
+        remaining = state.move_cooldowns[move_id] - 1
+        if remaining <= 0:
+            del state.move_cooldowns[move_id]
+        else:
+            state.move_cooldowns[move_id] = remaining
+
+    encounter = state.active_encounter
+    if encounter is None:
+        return
+    deadline = encounter.get("deadline_turn")
+    if deadline is not None and state.turn > deadline:
+        report.boss_fled = MOBS[encounter["mob_id"]]["name"]
+        state.active_encounter = None
+
+
 def advance_turn(state: GameState) -> ProductionReport:
     """Применяет автопроизводство работающих построек, катает шанс поломки, увеличивает счётчик хода.
 
@@ -3597,7 +4272,11 @@ def advance_turn(state: GameState) -> ProductionReport:
     дождались, сами завершаются в этот же ход, без участия игрока.
 
     В конце запас энергии обрезается до ёмкости построенных хранилищ (energy_capacity) -
-    без них она равна 0, и всё, что не потратили за ход, на следующий не переносится."""
+    без них она равна 0, и всё, что не потратили за ход, на следующий не переносится.
+
+    Последним, уже ПОСЛЕ state.turn += 1 - _process_combat: тикают кулдауны приёмов
+    боя (независимо от того, идёт ли бой прямо сейчас) и проверяется дедлайн активного
+    босса (mobs.*.turn_limit) - не уложились вовремя, босс сбегает сам (report.boss_fled)."""
     report = ProductionReport()
 
     _ensure_farm_instances(state)
@@ -3647,7 +4326,9 @@ def advance_turn(state: GameState) -> ProductionReport:
         if runnable > 0 or idle > 0:
             report.ran[building_id] = (runnable, idle)
 
-        chance = effective_breakdown_chance(building_id, state.techs, effects_cache[building_id])
+        chance = effective_breakdown_chance(
+            building_id, state.techs, effects_cache[building_id], state.building_upgrades.get(building_id, []),
+        )
         if chance <= 0:
             return
         if _is_farm_building(building_id):
@@ -3656,12 +4337,18 @@ def advance_turn(state: GameState) -> ProductionReport:
             # состояние экземпляра (broken) обязано совпадать с агрегатом
             # state.broken[bid] (см. _ensure_farm_instances). Пересчёт агрегата
             # ТОЧНЫЙ (не инкремент), т.к. этот проход - единственное место, где он
-            # вообще может вырасти для фермы.
+            # вообще может вырасти для фермы. breakdown_immunity у ферм - ВСЕГДА
+            # per-instance (см. _instance_has_upgrade_type, purchase_farm_instance_upgrade) -
+            # иммунный экземпляр просто не участвует в ролле вовсе, независимо от
+            # общего chance этого типа построек.
             instances = [inst for inst in state.farm_instances.values() if inst["building_id"] == building_id]
             newly_broken = 0
             for instance in instances:
-                if not instance["broken"] and random.random() < chance:
+                if instance["broken"] or _instance_has_upgrade_type(building_id, instance, "breakdown_immunity"):
+                    continue
+                if random.random() < chance:
                     instance["broken"] = True
+                    instance["broken_type"] = _roll_breakdown_type(building_id)
                     newly_broken += 1
             if newly_broken:
                 report.newly_broken[building_id] = newly_broken
@@ -3671,6 +4358,8 @@ def advance_turn(state: GameState) -> ProductionReport:
             if newly_broken:
                 state.broken[building_id] = state.broken.get(building_id, 0) + newly_broken
                 report.newly_broken[building_id] = newly_broken
+                types_list = state.broken_types.setdefault(building_id, [])
+                types_list.extend(_roll_breakdown_type(building_id) for _ in range(newly_broken))
 
     energy_consumers = []
     others = []
@@ -3699,6 +4388,7 @@ def advance_turn(state: GameState) -> ProductionReport:
     _process_energy_jobs(state, report)
     _process_autocraft_jobs(state, report)
     _process_manual_jobs(state, report)
+    process_automation_rules(state, report, daytime)
     _process_pending_actions(state, report)
 
     cap = energy_capacity(state)
@@ -3715,6 +4405,7 @@ def advance_turn(state: GameState) -> ProductionReport:
             state.resources[resource_id] = cap
 
     state.turn += 1
+    _process_combat(state, report)
     return report
 
 

@@ -142,7 +142,7 @@ class WebUiHttpTests(unittest.TestCase):
         status, state = self._get("/api/state")
         self.assertIn("tools", state)
         tool_ids = {t["id"] for t in state["tools"]}
-        self.assertEqual(tool_ids, {"pickaxe", "drill", "sword"})
+        self.assertEqual(tool_ids, {"pickaxe", "drill", "wrench", "sword"})
         pickaxe = next(t for t in state["tools"] if t["id"] == "pickaxe")
         self.assertEqual(pickaxe["tier"], 1)
         self.assertEqual(pickaxe["max_tier"], len(fixtures.TOOLS["pickaxe"]["tiers"]))
@@ -356,6 +356,73 @@ class WebUiHttpTests(unittest.TestCase):
         gen_catalog = next(b for b in state["categories"]["build"] if b["id"] == "gen")
         self.assertIsNone(gen_catalog["upgrades"])
 
+    def test_repair_is_no_longer_a_separate_category_and_is_driven_from_the_buildings_panel(self):
+        # "gen" ломается без типа (breakdown_types не задан, breakdown_chance=0.0 -
+        # ломаем вручную через state, чтобы не зависеть от advance_turn, который
+        # repair() всё равно вызывает следом сам) - чинится, как раньше, без
+        # всякого инструмента, только теперь кнопка живёт на самой карточке
+        # постройки (state["buildings"]), а не в отдельной категории "repair".
+        web_ui.STATE.resources["raw_a"] = 100
+        web_ui.STATE.resources["raw_b"] = 100
+        self._post("/api/action", {"type": "build", "id": "gen"})
+        web_ui.STATE.broken["gen"] = 1
+        status, state = self._get("/api/state")
+        self.assertNotIn("repair", state["categories"])
+        gen = next(b for b in state["buildings"] if b["id"] == "gen")
+        self.assertEqual(gen["broken"], 1)
+        self.assertEqual(gen["repairable"], 1)
+        self.assertEqual(gen["repair_blocked"], [])
+        self.assertTrue(gen["repair_cost"])
+
+        status, resp = self._post("/api/action", {"type": "repair", "id": "gen"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        status, state = self._get("/api/state")
+        gen = next(b for b in state["buildings"] if b["id"] == "gen")
+        self.assertEqual(gen["broken"], 0)
+
+    def test_repair_reports_blocked_types_and_repair_tool_fixes_the_tool(self):
+        # flaky_typed ломается ВСЕГДА с типом "worn_gear" (требует TOOLS["wrench"]
+        # тира 2+, см. tests/fixtures.py) - без ключа ремонт постройки блокирован,
+        # и это должно быть видно прямо в state["buildings"] (repairable=0,
+        # repair_blocked непусто), не только в провале самого действия repair.
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/action", {"type": "build", "id": "flaky_typed"})
+        self._post("/api/action", {"type": "skip", "id": None})
+        status, state = self._get("/api/state")
+        flaky = next(b for b in state["buildings"] if b["id"] == "flaky_typed")
+        self.assertEqual(flaky["broken"], 1)
+        self.assertEqual(flaky["repairable"], 0)
+        self.assertEqual(len(flaky["repair_blocked"]), 1)
+        self.assertIn("Гаечный ключ", flaky["repair_blocked"][0]["missing_tools"])
+
+        status, resp = self._post("/api/action", {"type": "repair", "id": "flaky_typed"})
+        self.assertFalse(resp["log"]["ok"])
+
+        # Покупаем ключ (тир 2) и чиним - теперь получается, а прочность ключа тратится.
+        status, resp = self._post("/api/action", {"type": "upgrade_tool", "id": "wrench"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        status, resp = self._post("/api/action", {"type": "repair", "id": "flaky_typed"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        status, state = self._get("/api/state")
+        wrench = next(t for t in state["tools"] if t["id"] == "wrench")
+        self.assertEqual(wrench["durability_remaining"], 1)  # max_durability=2, минус эту починку
+        self.assertFalse(wrench["is_broken"])
+
+        # Вторая починка исчерпывает прочность ключа - repair_tool восстанавливает её.
+        self._post("/api/action", {"type": "skip", "id": None})
+        self._post("/api/action", {"type": "repair", "id": "flaky_typed"})
+        status, state = self._get("/api/state")
+        wrench = next(t for t in state["tools"] if t["id"] == "wrench")
+        self.assertTrue(wrench["is_broken"])
+        self.assertEqual(wrench["durability_remaining"], 0)
+
+        status, resp = self._post("/api/action", {"type": "repair_tool", "id": "wrench"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        status, state = self._get("/api/state")
+        wrench = next(t for t in state["tools"] if t["id"] == "wrench")
+        self.assertFalse(wrench["is_broken"])
+        self.assertEqual(wrench["durability_remaining"], 2)
+
     def test_mechanism_upgrade_preview_shows_before_and_after_for_dependent_action(self):
         # mechanism_a сам ничего не производит - весь эффект его улучшения виден
         # только через зависимое ручное действие mechanism_a_action (requires_building).
@@ -367,7 +434,10 @@ class WebUiHttpTests(unittest.TestCase):
         status, state = self._get("/api/state")
         mech = next(b for b in state["categories"]["build"] if b["id"] == "mechanism_a")
         self.assertIsNotNone(mech["upgrades"])
-        self.assertEqual(mech["upgrades"]["dependent_action_names"], ["Провернуть механизм А"])
+        self.assertEqual(
+            mech["upgrades"]["dependent_action_names"],
+            ["Провернуть механизм А", "Долгий прогон механизма А"],
+        )
         current_action = mech["upgrades"]["current"]["example_action"]
         self.assertEqual(current_action["id"], "mechanism_a_action")
         self.assertEqual({c["id"]: c["amount"] for c in current_action["cost"]}, {"raw_a": 2})
@@ -620,6 +690,44 @@ class WebUiHttpTests(unittest.TestCase):
     def test_cancel_job_with_unknown_kind_returns_400(self):
         status, resp = self._post("/api/cancel_job", {"kind": "nonsense"})
         self.assertEqual(status, 400)
+
+    def test_manual_action_card_exposes_running_progress_and_blocks_second_start(self):
+        web_ui.STATE.resources["raw_a"] = 10
+        status, resp = self._post("/api/action", {"type": "manual", "id": "craft_delayed"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+
+        craft_delayed = next(m for m in resp["state"]["categories"]["manual"] if m["id"] == "craft_delayed")
+        self.assertTrue(craft_delayed["already_running"])
+        # /api/action уже провёл advance_turn ВНУТРИ этого же запроса (см. web_ui.py:1180) -
+        # к моменту ответа job успел тикнуть один раз, поэтому 1, не 0.
+        self.assertEqual(craft_delayed["turns_done"], 1)
+        self.assertEqual(craft_delayed["turns_total"], 3)
+
+        # Повторный клик - обычный провалившийся ActionResult (ok=False), ход при
+        # этом не тратится (см. test_repeat_click_while_running_is_blocked_without_spending_a_turn).
+        turn_before = web_ui.STATE.turn
+        status, resp = self._post("/api/action", {"type": "manual", "id": "craft_delayed"})
+        self.assertFalse(resp["log"]["ok"])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+
+    def test_cancel_manual_job_refunds_cost_and_frees_the_action_immediately(self):
+        web_ui.STATE.resources["raw_a"] = 10
+        self._post("/api/action", {"type": "manual", "id": "craft_delayed"})
+        self.assertEqual(web_ui.STATE.resources["raw_a"], 8)
+        turn_before = web_ui.STATE.turn
+
+        status, resp = self._post("/api/cancel_job", {"kind": "manual", "action_id": "craft_delayed"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(resp["state"]["resources"]["raw_a"], 10)  # cost возвращён
+        self.assertEqual(web_ui.STATE.turn, turn_before)  # отмена не тратит ход
+
+        craft_delayed = next(m for m in resp["state"]["categories"]["manual"] if m["id"] == "craft_delayed")
+        self.assertFalse(craft_delayed["already_running"])
+
+        # действие сразу можно запустить заново
+        status, resp = self._post("/api/action", {"type": "manual", "id": "craft_delayed"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
 
     def test_farms_and_creature_bank_are_empty_before_any_farm_is_built(self):
         status, state = self._get("/api/state")

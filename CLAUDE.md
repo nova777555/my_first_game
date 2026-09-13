@@ -12,9 +12,15 @@ Guidance for Claude Code в этом репозитории. **Держи это
 Три интерфейса поверх одного `save.json`:
 - `python tools/web_ui.py` (http://127.0.0.1:8790) — **единственный интерфейс,
   которым реально пользуется игрок.** Логика в `tools/web_ui.py` +
-  `tools/web_ui.html`.
+  `tools/web_ui.html`. Открывается в отдельном окне (pywebview), не в
+  системном браузере — HTTP-сервер при этом всё равно поднят и на том же
+  адресе, страницу можно открыть и вручную в браузере.
 - `python tools/content_editor.py` (http://127.0.0.1:8765) — GUI-редактор
-  `content.json`.
+  `content.json`. Тоже отдельное окно pywebview, тот же приём, что у web_ui.
+  Есть переносимая exe-сборка (`build_content_editor.ps1` →
+  `ContentEditor.exe` в корне репозитория, в git не коммитится) — портативный
+  dev-инструмент ДЛЯ ЭТОГО репозитория (редактирует реальный
+  `game/content.json`), не то, что отправляется другу.
 - `python main.py` — консольная версия. **С 2026-09-02 официально НЕ
   поддерживается как играбельная** (прямое пожелание, не гипотеза): не нужно
   синхронизировать её с web_ui, не нужно гонять её руками для проверки фич,
@@ -26,8 +32,11 @@ Guidance for Claude Code в этом репозитории. **Держи это
 Кроме автосохранения `save.json` есть `saves/` — именованные сохранения
 ("Сохранить как"/"Открыть", явный выбор игрока в обоих интерфейсах).
 
-**Тесты**: `python -m unittest discover tests -v` — все зелёные, гоняй перед
-тем как считать задачу законченной.
+**Тесты**: `python -m unittest discover tests -v` — все зелёные. Хук
+(`.claude/hooks/run_tests_on_core_edit.py`) гоняет их автоматически после
+каждой правки `engine.py`/`state.py` — вручную дублировать не нужно. Для
+остальных файлов и как финальная страховка перед тем как считать задачу
+законченной — гоняй сам.
 
 ## Архитектура
 
@@ -38,7 +47,9 @@ game/content.py     - грузит content.json в module-level констант
 game/state.py       - GameState: dataclass + to_dict/from_dict + save/load
 game/engine.py       - вся игровая логика. Не печатает, не читает stdin, не знает про UI.
 main.py              - консольный UI поверх engine.py (не поддерживается как играбельный)
-tools/web_ui.py      - HTTP API (stdlib, без Flask) поверх engine.py + web_ui.html
+tools/web_ui.py      - HTTP API (stdlib, без Flask) поверх engine.py + web_ui.html;
+                       окно приложения - pywebview (requirements.txt, единственная
+                       внешняя зависимость проекта)
 tools/content_editor.py/.html - редактор content.json, НЕ импортирует game/*
 tools/content_validation.py    - validate(dict) -> [errors]; тоже НЕ импортирует game/*
 ```
@@ -64,13 +75,14 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 `autocraft_slots` (доп. одновременные фоновые задачи), `max_count`,
 `unlocks_autocraft` (список resource_id), `energy_converter`
 (`{max_energy_per_turn}` — делает постройку слотом крафта за энергию),
-`soul_collector` (`{slots, accepts}` — делает постройку синтезатором душ, см.
-ниже), `construction_stages` (непустой список этапов вместо разового `cost`),
-`upgrades` (список улучшений — тип `scale`/`energy_efficiency`/
-`generation_efficiency`/`energy_converter_capacity`/`breeding_*`/
-`soul_collector_slots`/`soul_generation_efficiency`, плюс необязательные
-`repeatable`/`cost_growth`/`max_purchases` — см. "Repeatable-апгрейды" ниже),
-`click_delay_ms`, `lab_tier`.
+`soul_collector` (`{slots, accepts_kind}` — делает постройку синтезатором душ, см.
+ниже), `automation_hub` (`{slots}` — делает постройку автоматизатором, см.
+"Автоматизатор" ниже), `construction_stages` (непустой список этапов вместо
+разового `cost`), `upgrades` (список улучшений — тип `scale`/
+`energy_efficiency`/`generation_efficiency`/`energy_converter_capacity`/
+`breeding_*`/`soul_collector_slots`/`soul_generation_efficiency`/
+`automation_slots`, плюс необязательные `repeatable`/`cost_growth`/
+`max_purchases` — см. "Repeatable-апгрейды" ниже), `click_delay_ms`, `lab_tier`.
 
 `requires_tech` + `requires_building` — гейт через И (не ИЛИ), есть у построек,
 локаций и ручных действий: `requires_building` требует хотя бы одну РАБОТАЮЩУЮ
@@ -93,7 +105,8 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 | Охота: мобы/боссы, схватка, боевой навык | `engine.py`: `MOBS`, `COMBAT_SKILL_ID`, `search_mob_any`, `summon_boss`, `attack_encounter`, `abandon_encounter`, `_weapon_bonuses`; `state.active_encounter`; `web_ui.py: hunting_view`; `web_ui.html: renderActiveEncounterBlock` |
 | Разведение существ: фермы, скрещивание, генетика, синтез | `engine.py`: `GENOTYPE_TRAIT_IDS`, `MUTATIONS_BY_PAIR`, `trait_alleles`, `_cross_genotype`, `breed_creatures`, `spawn_creature`, `analyze_creature`, `synthesize_creature`, `_ensure_farm_instances`, `_process_habitat`; `state.creatures`/`state.farm_instances`/`state.known_alleles`; контент `species`/`genetic_traits`/`mutations`/`genetics`; `web_ui.html: renderFarmSection`, `renderCreatureBankSection`, `openSpeciesBookModal`, `openBreedingModal`, `openGeneticsLabModal` |
 | Навыки (generic-прокачка, любое число линеек) | `engine.py`: `skill_level`, `skill_level_effects`, `add_skill_xp`, `skills_view`; `state.skill_xp`; контент `skills`; `web_ui.html: openSkillsModal` |
-| Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: renderSoulCollector` |
+| Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_kind`, `soul_collector_accepts_kind`, `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `resources.*.soul_kind` + `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: openSoulSynthesizerModal` |
+| Автоматизатор (правила "если ресурс — тогда действие/рецепт энергокрафта", проверяются каждый ход) | `engine.py`: `automation_slots_capacity`, `is_automation_eligible_action`/`is_automation_eligible_energy_recipe`, `automation_eligible_targets`, `add_automation_rule`/`update_automation_rule`/`remove_automation_rule` (принимают `kind`+`target_id`), `process_automation_rules`; `state.automation_rules`; контент `buildings.*.automation_hub` + апгрейд типа `automation_slots`; `web_ui.py: automation_view`; `web_ui.html: openAutomationModal`/`openAutomationRuleEditorModal` |
 | Квестбук (вкладка-граф на каждую эру, requires между эрами гейтит без явного ребра) и лутбоксы (кейс = один приз из барабана) | `engine.py`: `is_quest_available`, `_condition_met`, `check_quests`, `_roll_loot_case_prize`, `claim_quest_reward`; `state.completed_quests`/`claimed_quests`; контент `quests` (`era`/`requires`) + `loot_cases`; `web_ui.html: openQuestsModal`/`renderQuestGraph`/`openLootBoxModal`; `content_editor.html: renderQuestGraphView` |
 | Repeatable-апгрейды (покупка N раз, цена растёт геометрически) | `engine.py`: `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `building_upgrade_purchase_count`, `farm_instance_upgrade_purchase_count`; контент `upgrades[].repeatable`/`cost_growth`/`max_purchases` |
 | Ползунок масштаба ручного действия | `engine.py`: `mechanism_scale_cap`, `effective_manual_action_stats(chosen_scale=...)`; `POST /api/action {scale}` |
@@ -109,6 +122,7 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 | Крафт из энергии (преобразователь) | контент `energy_recipes` (+ необязательные `machine`/`consumes`) + `buildings.*.energy_converter`; `engine.py`: `CONVERTER_LOCATION_ID`, `start_energy_recipe`, `_process_energy_jobs`, `energy_converter_capacity`/`_max_energy_per_turn(state, building_id)` |
 | Энергосистема: несколько типов машин + приоритеты | `engine.py`: `energy_converter_building_types`, `energy_priority`/`set_energy_priority`, `ProductionReport.energy_shortfall`; контент `buildings.*.energy_priority`; `web_ui.html: openPrioritiesModal` (вкладка "Энергосистема") |
 | Многоэтапное строительство | контент `buildings.*.construction_stages`; `engine.py`: `current_construction_stage`, `state.construction_progress` |
+| Многоходовые ручные действия | контент `manual_actions.*.duration_turns`; `engine.py`: `do_manual_action`, `_process_manual_jobs`, `cancel_manual_job`; `state.manual_jobs`; `web_ui.html: manualJobProgressRow` (прогресс + отмена и на карточке действия, и в панели «Долгие действия») |
 | Задержка после клика (антиавтокликер, клиент-онли) | контент `ui.default_action_delay_ms` + `click_delay_ms`; `web_ui.html`: `tryRunAction`/`applyCooldownVisual` |
 | Звук: пресеты, кастомные файлы (действия + 3 глобальных слота), громкость | контент `manual_actions.*.sound` + `ui.sounds` (`background_music`/`lootbox_open`/`button_click`); `web_ui.html`: `SOUND_PRESETS`, `playSound`/`playCustomSound`/`playGlobalSound`, `_sfxVolume`/`_musicVolume`; `web_ui.py`: `sound_url`, `SOUNDS_DIR`; `content_editor.html`: `soundRow`, вкладка «Настройки» |
 | Отмена фоновой задачи | `engine.py`: `cancel_autocraft_job`/`cancel_energy_job`; `web_ui.html: jobCancelButton` |
@@ -178,6 +192,21 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
   `energy_priority`/`set_energy_priority` (больше → тянет первым). Автокрафт
   для рецепта с материальной ценой (`energy_recipes.*.consumes`) НЕ докрафчивает
   её рекурсивно — только ждёт, пока сырьё появится в наличии само.
+- **Многоходовое ручное действие** (`manual_actions.*.duration_turns >= 2`) списывает
+  `cost` ОДНИМ платежом целиком в момент клика (как `energy_jobs`), затем просто
+  тикает (`state.manual_jobs`, одна активная задача НА action_id) `+1 ход` каждый
+  `advance_turn` без учёта пропускной способности — `gain`/`gain_chance` разворачиваются
+  РОВНО ОДИН РАЗ в момент завершения. Повторный клик, пока задача не закончилась,
+  ЗАБЛОКИРОВАН (`ActionResult(False, ...)`, хода не тратит). `cancel_manual_job`
+  снимает задачу немедленно (без хода) И ВОЗВРАЩАЕТ игроку весь списанный `cost` —
+  в этом её поведение НАМЕРЕННО отличается от `cancel_energy_job`/`cancel_autocraft_job`
+  (у тех прогресс/прокрутки потрачены по-настоящему на предыдущих ходах, возврату не
+  подлежат); накопленные тики (`turns_done`) при отмене всё равно теряются без следа —
+  просто потому что сами по себе ничего не стоили. Прогресс виден в двух местах сразу:
+  на самой карточке действия (`already_running`/`turns_done`/`turns_total` в
+  `build_view`) и в отдельной панели «Долгие действия» (нужна, т.к. действие может
+  сейчас идти в другой локации, не видной на экране) — обе точки рендерят один и тот
+  же `web_ui.html: manualJobProgressRow`, чтобы не разойтись.
 - **Автокрафт выключен по умолчанию** для КАЖДОГО ресурса, включается через
   `unlocks_autocraft` работающей постройки; ограничен `compute_power`
   (размер), `autocraft_speed` (скорость/ход), `autocraft_slots` (параллелизм
@@ -222,6 +251,58 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
   клиента, а защита от собственного автокликера игрока в одиночной игре.
 - **Windows**: `main.py` принудительно переключает stdin/stdout в UTF-8 —
   без этого кириллица бьётся при неинтерактивном stdin (Git Bash/MSYS).
+- **Автоматизатор** (`buildings.*.automation_hub` + `state.automation_rules`) —
+  правило ссылается на цель ДВУХ возможных видов (`rule["kind"]` +
+  `rule["target_id"]`, см. `engine.AUTOMATION_TARGET_KINDS`): `"manual_action"`
+  (id из `manual_actions`) или `"energy_recipe"` (id из `energy_recipes`) —
+  архитектурно разные системы (`state.manual_jobs` vs `state.energy_jobs`), но
+  правило и его условия работают с обеими СИММЕТРИЧНО, см.
+  `process_automation_rules`.
+  - `manual_action`: допускает только детерминированные действия (та же
+    граница, что у автокрафта: без вероятностного `cost_chance`/`gain_chance` и
+    без диапазона в `gain`, см. `is_automation_eligible_action`), но
+    ДЛИТЕЛЬНОСТЬ (`duration_turns`) значения не имеет — многоходовые действия
+    РАЗРЕШЕНЫ. `state.manual_jobs` по-прежнему держит только ОДНУ активную
+    задачу НА `action_id` ГЛОБАЛЬНО (не на правило/постройку) —
+    `do_manual_action` сам отказывает повторному запуску, пока job не
+    завершится, `process_automation_rules` в этом случае просто получает
+    `ok=False` и молча пропускает ход для этого правила, без очереди и без
+    форсированной отмены. Это осознанная ЦЕНА автоматизации многоходового
+    действия: если слот занят (в т.ч. занят самим игроком вручную), освободить
+    его для повторного авто-запуска можно только явной `cancel_manual_job` —
+    автоматика сама ничего не отменяет. Отчёт `report.automation_fired` в этом
+    случае содержит сообщение о СТАРТЕ ("Начато: ... (займётся N х.)"), а не о
+    реальном получении ресурса — сам `gain` начислится позже, в
+    `_process_manual_jobs`, уже без пометки, что job запустила именно
+    автоматизация.
+  - `energy_recipe`: любой существующий рецепт допустим без доп. ограничений
+    (у `energy_recipes` вообще нет `cost_chance`/`gain_chance`, а диапазон в
+    `produces` не мешает — бросок происходит уже ВНУТРИ `_process_energy_jobs`
+    при завершении, автоматизация просто вызывает `start_energy_recipe` один
+    раз за срабатывание). Тот же принцип цены: если все преобразователи
+    подходящего типа заняты (в т.ч. рецептом, запущенным вручную),
+    `start_energy_recipe` вернёт `ok=False`, правило молча не сработает —
+    освободить слот раньше срока можно только `cancel_energy_job`. В отличие
+    от `manual_action`, ограничения "один активный job на весь id" тут нет —
+    несколько job'ов ОДНОГО `recipe_id` могут идти параллельно в разных
+    преобразователях, но один вызов `start_energy_recipe` занимает РОВНО ОДИН
+    свободный слот за раз.
+  - ОБЩЕЕ для обоих видов: правило на ещё не открытую цель (тех для действия
+    ИЛИ для рецепта) можно настроить заранее — `process_automation_rules`
+    молча пропускает его, пока цель не откроется, сработает само после этого.
+    `_process_manual_jobs`/`_process_energy_jobs` идут РАНЬШЕ
+    `process_automation_rules` в `advance_turn` — поэтому правило без условий
+    на завершившийся в этот же ход job (действие или рецепт) видит свободный
+    слот и перезапускает его СРАЗУ, без простоя в один ход ("бесшовный
+    конвейер"). Несколько правил на одну постройку (или на разные постройки)
+    делят общий ресурс ПОСЛЕДОВАТЕЛЬНО, в порядке списка — тот же осознанный
+    компромисс "кто раньше встал, тот раньше взял", что и везде в
+    `advance_turn` для разделяемых ресурсов. Правило НЕ привязано к локации
+    постройки-автоматизатора и не обязано быть постройкой того же типа, что
+    цель (например, `energy_recipe`-правило не обязано стоять НА
+    преобразователе) — можно поставить ЛЮБОЕ подходящее действие/рецепт игры
+    целиком — это сознательный выбор в пользу универсальности, а не
+    "автоматизация только своей мастерской".
 
 ## Охота, навыки, синтезаторы душ
 
@@ -247,13 +328,24 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
   владеемых (`_weapon_bonuses`), не только одной "экипированной". Меч-ваншот —
   обычно отдельная линейка из 2 тиров: тир 1 "не выковано" (без полей), тир 2
   сам меч с `instant_kill_max_hp`.
-- Синтезатор душ (`buildings.*.soul_collector: {slots, accepts}`) — душа,
+- Синтезатор душ (`buildings.*.soul_collector: {slots, accepts_kind}`) — душа,
   вставленная в слот (`state.soul_slots`), ВЕЧНАЯ (не расходуется), пока
   копия постройки не сломана/не разобрана или игрок сам её не вынул.
   Продукция — `soul_recipes[soul_id]`, та же форма (`produces`/
-  `produces_chance`), что `gain`/`gain_chance` ручного действия. `accepts` —
-  просто список id ресурсов; "разные типы синтезаторов под разные души" —
-  не отдельная механика, а просто две постройки с непересекающимися `accepts`.
+  `produces_chance`), что `gain`/`gain_chance` ручного действия. Вставка/выемка
+  живёт в СВОЕЙ модалке (кнопка "Души" на карточке постройки, см.
+  `web_ui.html: openSoulSynthesizerModal`), не прямо в панели построек —
+  тот же приём, что "Особи" у ферм.
+  `soul_kind` (`resources.*.soul_kind`, например `"моб"`/`"босс"`) — тег вида
+  души (`engine.soul_kind`), тот же generic-принцип, что `species.*.family`.
+  `accepts_kind` (`engine.soul_collector_accepts_kind`) — ЕДИНЫЙ тег, который
+  принимает ЭТА постройка (зеркало `breeding_accepts_family`): синтезатор
+  примет ЛЮБУЮ душу с совпадающим `soul_kind`, а не перечисленный вручную
+  список id — "разные типы синтезаторов под разные души" получается просто
+  разными непересекающимися тегами, без правки построек при добавлении нового
+  моба/босса того же тега. Банк подходящих душ в модалке (`VIEW.soul_bank`,
+  отфильтрован по `accepts_kind` на клиенте) — полная аналогия с банком особей
+  ферм (`creature_bank` + `breeding_accepts_family`).
 
 ## Разведение существ (фермы, генетика)
 
@@ -558,8 +650,10 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
   токенов без риска сломать инварианты. Если контент вырастет НАМНОГО (не
   просто "стало неудобно читать") — можно пересмотреть, но это отдельный
   осознанный разговор с пользователем, не мелкая правка по пути.
-- Тесты быстрые (620+, ~3 сек, `python -m unittest discover tests -v`) —
-  гоняй их после КАЖДОЙ правки `engine.py`/`state.py`, отговорок пропустить
+- Тесты быстрые (620+, ~3 сек). После правки `engine.py`/`state.py` их
+  автоматически гоняет хук (см. выше) — не дублируй руками. Для остальных
+  файлов, и в любом случае как финальная проверка перед завершением задачи —
+  `python -m unittest discover tests -v` обязателен, отговорок пропустить
   нет.
 - При правке горячих путей (`advance_turn`, автокрафт-резолюшн) замеряй ДО и
   ПОСЛЕ (`cProfile`/`time.perf_counter` на синтетическом контенте через

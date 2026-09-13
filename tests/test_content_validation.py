@@ -711,6 +711,20 @@ class LocationsTimeAndTechDescriptionTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertEqual(errors, [])
 
+    def test_rejects_non_boolean_excluded_from_autocraft(self):
+        d = copy.deepcopy(self.data)
+        any_action = next(iter(d["manual_actions"]))
+        d["manual_actions"][any_action]["excluded_from_autocraft"] = "yes"
+        errors = cv.validate(d)
+        self.assertTrue(any("excluded_from_autocraft" in e for e in errors))
+
+    def test_accepts_manual_action_with_excluded_from_autocraft(self):
+        d = copy.deepcopy(self.data)
+        any_action = next(iter(d["manual_actions"]))
+        d["manual_actions"][any_action]["excluded_from_autocraft"] = True
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
     def test_rejects_out_of_range_time_settings(self):
         d = copy.deepcopy(self.data)
         d["time"] = {"hours_per_turn": 30, "day_start_hour": 20, "day_end_hour": 5}
@@ -1158,22 +1172,23 @@ class RandomProduceRangeValidationTests(unittest.TestCase):
 
 
 class MiningQualityValidationTests(unittest.TestCase):
-    """quality_tiers (mining_info[...].quality_tiers) - веса/множители/min_tool_tier
-    для качества найденной жилы, зависящего от тира инструмента."""
+    """quality_tiers (mining_info[...].quality_tiers) - веса/множители запаса
+    (size_multiplier)/min_tool_tier для качества найденной жилы, зависящего от
+    тира инструмента."""
 
     def setUp(self):
         self.data = fixtures.as_content_dict()
 
     def _quality_tiers(self, **overrides):
-        tier = {"name": "Бедная", "weight": 1, "yield_multiplier": 0.5, "min_tool_tier": 1}
+        tier = {"name": "Бедная", "weight": 1, "size_multiplier": 0.5, "min_tool_tier": 1}
         tier.update(overrides)
         return [tier]
 
     def test_accepts_valid_quality_tiers(self):
         d = copy.deepcopy(self.data)
         d["mining_info"]["mineral"]["quality_tiers"] = [
-            {"name": "Бедная", "weight": 1, "yield_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 1, "yield_multiplier": 2, "min_tool_tier": 2},
+            {"name": "Бедная", "weight": 1, "size_multiplier": 0.5, "min_tool_tier": 1},
+            {"name": "Богатая", "weight": 1, "size_multiplier": 2, "min_tool_tier": 2},
         ]
         errors = cv.validate(d)
         self.assertEqual(errors, [])
@@ -1196,11 +1211,11 @@ class MiningQualityValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("weight" in e for e in errors))
 
-    def test_rejects_non_positive_yield_multiplier(self):
+    def test_rejects_non_positive_size_multiplier(self):
         d = copy.deepcopy(self.data)
-        d["mining_info"]["mineral"]["quality_tiers"] = self._quality_tiers(yield_multiplier=0)
+        d["mining_info"]["mineral"]["quality_tiers"] = self._quality_tiers(size_multiplier=0)
         errors = cv.validate(d)
-        self.assertTrue(any("yield_multiplier" in e for e in errors))
+        self.assertTrue(any("size_multiplier" in e for e in errors))
 
     def test_rejects_min_tool_tier_out_of_range(self):
         d = copy.deepcopy(self.data)
@@ -1359,6 +1374,38 @@ class SpeciesAndBreedingValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("breeding_slots" in e for e in errors))
 
+    def test_rejects_non_string_species_family(self):
+        d = copy.deepcopy(self.data)
+        d["species"]["critter_a"]["family"] = 123
+        errors = cv.validate(d)
+        self.assertTrue(any("family" in e for e in errors))
+
+    def test_rejects_breeding_accepts_family_with_no_matching_species(self):
+        d = copy.deepcopy(self.data)
+        d["buildings"]["apiary"]["breeding_accepts_family"] = "no_such_family"
+        errors = cv.validate(d)
+        self.assertTrue(any("breeding_accepts_family" in e for e in errors))
+
+    def test_rejects_empty_breeding_accepts_family_string(self):
+        d = copy.deepcopy(self.data)
+        d["buildings"]["apiary"]["breeding_accepts_family"] = ""
+        errors = cv.validate(d)
+        self.assertTrue(any("breeding_accepts_family" in e for e in errors))
+
+    def test_rejects_breeding_accepts_family_on_a_non_farm_building(self):
+        d = copy.deepcopy(self.data)
+        d["species"]["critter_a"]["family"] = "alpha"
+        d["buildings"]["genetics_lab_building"]["breeding_accepts_family"] = "alpha"
+        errors = cv.validate(d)
+        self.assertTrue(any("breeding_accepts_family" in e and "breeding_slots" in e for e in errors))
+
+    def test_accepts_valid_breeding_accepts_family(self):
+        d = copy.deepcopy(self.data)
+        d["species"]["critter_a"]["family"] = "alpha"
+        d["buildings"]["apiary"]["breeding_accepts_family"] = "alpha"
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
     def test_rejects_non_boolean_genetics_lab(self):
         d = copy.deepcopy(self.data)
         d["buildings"]["genetics_lab_building"]["genetics_lab"] = "yes"
@@ -1461,6 +1508,252 @@ class IconFieldTests(unittest.TestCase):
         d["buildings"][any_building].pop("icon", None)
         errors = cv.validate(d)
         self.assertEqual(errors, [])
+
+    def test_mob_icon_reuses_same_check_as_resources(self):
+        d = copy.deepcopy(self.data)
+        d["mobs"]["test_mob"]["icon"] = {"grid": ["AB", ".A"], "palette": {"A": "#123456"}}
+        errors = cv.validate(d)
+        self.assertTrue(any("icon" in e for e in errors))
+
+
+class BossTurnLimitValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    def test_turn_limit_on_boss_accepted(self):
+        d = copy.deepcopy(self.data)
+        d["mobs"]["test_boss"]["turn_limit"] = 10
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_turn_limit_on_non_boss_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["mobs"]["test_mob"]["turn_limit"] = 10
+        errors = cv.validate(d)
+        self.assertTrue(any("turn_limit" in e for e in errors))
+
+    def test_turn_limit_must_be_positive_int(self):
+        d = copy.deepcopy(self.data)
+        d["mobs"]["test_boss"]["turn_limit"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("turn_limit" in e for e in errors))
+        d["mobs"]["test_boss"]["turn_limit"] = 1.5
+        errors = cv.validate(d)
+        self.assertTrue(any("turn_limit" in e for e in errors))
+
+
+class CombatMovesValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    def test_fixture_combat_moves_and_unlocks_are_valid(self):
+        errors = cv.validate(copy.deepcopy(self.data))
+        self.assertEqual(errors, [])
+
+    def test_move_missing_name_or_description_rejected(self):
+        d = copy.deepcopy(self.data)
+        del d["combat_moves"]["power_strike"]["name"]
+        errors = cv.validate(d)
+        self.assertTrue(any("power_strike" in e for e in errors))
+
+    def test_move_non_positive_damage_multiplier_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["power_strike"]["damage_multiplier"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("damage_multiplier" in e for e in errors))
+
+    def test_move_negative_cooldown_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["power_strike"]["cooldown_turns"] = -1
+        errors = cv.validate(d)
+        self.assertTrue(any("cooldown_turns" in e for e in errors))
+
+    def test_unlocks_moves_unknown_id_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["sword"]["tiers"][2]["unlocks_moves"] = ["no_such_move"]
+        errors = cv.validate(d)
+        self.assertTrue(any("unlocks_moves" in e for e in errors))
+
+    def test_unlocks_moves_on_non_weapon_tool_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["pickaxe"]["tiers"][1]["unlocks_moves"] = ["power_strike"]
+        errors = cv.validate(d)
+        self.assertTrue(any("unlocks_moves" in e for e in errors))
+
+    def test_invalid_mode_value_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["power_strike"]["mode"] = "not_a_real_mode"
+        errors = cv.validate(d)
+        self.assertTrue(any("power_strike" in e and "mode" in e for e in errors))
+
+    def test_multiplier_mode_rejects_percent_fields(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["power_strike"]["percent"] = 0.5
+        errors = cv.validate(d)
+        self.assertTrue(any("percent" in e for e in errors))
+
+    def test_percent_max_hp_mode_requires_percent(self):
+        d = copy.deepcopy(self.data)
+        move = d["combat_moves"]["pct_max_move"]
+        del move["percent"]
+        errors = cv.validate(d)
+        self.assertTrue(any("pct_max_move" in e and "percent" in e for e in errors))
+
+    def test_percent_mode_percent_out_of_range_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["pct_max_move"]["percent"] = 1.5
+        errors = cv.validate(d)
+        self.assertTrue(any("percent" in e for e in errors))
+        d["combat_moves"]["pct_max_move"]["percent"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("percent" in e for e in errors))
+
+    def test_percent_mode_rejects_damage_multiplier_and_execute_threshold(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["pct_remaining_move"]["damage_multiplier"] = 2
+        errors = cv.validate(d)
+        self.assertTrue(any("damage_multiplier" in e for e in errors))
+        d2 = copy.deepcopy(self.data)
+        d2["combat_moves"]["pct_remaining_move"]["execute_threshold_percent"] = 0.5
+        errors2 = cv.validate(d2)
+        self.assertTrue(any("execute_threshold_percent" in e for e in errors2))
+
+    def test_execute_mode_requires_threshold(self):
+        d = copy.deepcopy(self.data)
+        del d["combat_moves"]["execute_move"]["execute_threshold_percent"]
+        errors = cv.validate(d)
+        self.assertTrue(any("execute_move" in e and "execute_threshold_percent" in e for e in errors))
+
+    def test_execute_mode_threshold_out_of_range_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["execute_move"]["execute_threshold_percent"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("execute_threshold_percent" in e for e in errors))
+
+    def test_execute_mode_rejects_percent_field(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["execute_move"]["percent"] = 0.5
+        errors = cv.validate(d)
+        self.assertTrue(any("percent" in e for e in errors))
+
+    def test_execute_mode_optional_fallback_multiplier_must_be_positive(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["execute_move"]["damage_multiplier"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("damage_multiplier" in e for e in errors))
+
+    def test_execute_mode_accepts_optional_fallback_multiplier(self):
+        d = copy.deepcopy(self.data)
+        d["combat_moves"]["execute_move"]["damage_multiplier"] = 1.5
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+
+class BreakdownTypesAndToolDurabilityValidationTests(unittest.TestCase):
+    """buildings.*.breakdown_types + верхнеуровневый breakdown_types (см.
+    tests/fixtures.py: BREAKDOWN_TYPES["worn_gear"], BUILDINGS["flaky_typed"]) +
+    tools.*.tiers[].max_durability/repair_cost (TOOLS["wrench"])."""
+
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    def test_fixture_breakdown_types_and_durable_tool_are_valid(self):
+        errors = cv.validate(copy.deepcopy(self.data))
+        self.assertEqual(errors, [])
+
+    def test_missing_breakdown_types_section_is_fine(self):
+        # Раздел необязателен - старый content.json без него (или контент, где
+        # ни у одной постройки breakdown_types не задан) должен проходить как раньше.
+        d = copy.deepcopy(self.data)
+        del d["breakdown_types"]
+        for b in d["buildings"].values():
+            b.pop("breakdown_types", None)
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_building_breakdown_types_rejects_unknown_id(self):
+        d = copy.deepcopy(self.data)
+        d["buildings"]["flaky_typed"]["breakdown_types"] = ["no_such_type"]
+        errors = cv.validate(d)
+        self.assertTrue(any("неизвестный вид поломки" in e for e in errors))
+
+    def test_building_breakdown_types_rejects_empty_list(self):
+        d = copy.deepcopy(self.data)
+        d["buildings"]["flaky_typed"]["breakdown_types"] = []
+        errors = cv.validate(d)
+        self.assertTrue(any("breakdown_types" in e for e in errors))
+
+    def test_breakdown_type_missing_name_or_description_rejected(self):
+        d = copy.deepcopy(self.data)
+        del d["breakdown_types"]["worn_gear"]["name"]
+        errors = cv.validate(d)
+        self.assertTrue(any("worn_gear" in e and "название" in e for e in errors))
+
+    def test_breakdown_type_requires_non_empty_required_tools(self):
+        d = copy.deepcopy(self.data)
+        d["breakdown_types"]["worn_gear"]["required_tools"] = []
+        errors = cv.validate(d)
+        self.assertTrue(any("required_tools" in e for e in errors))
+
+    def test_breakdown_type_rejects_unknown_tool_in_required_tools(self):
+        d = copy.deepcopy(self.data)
+        d["breakdown_types"]["worn_gear"]["required_tools"] = ["no_such_tool"]
+        errors = cv.validate(d)
+        self.assertTrue(any("неизвестный инструмент" in e for e in errors))
+
+    def test_tool_first_tier_cannot_have_max_durability(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["wrench"]["tiers"][0]["max_durability"] = 2
+        errors = cv.validate(d)
+        self.assertTrue(any("max_durability" in e for e in errors))
+
+    def test_max_durability_must_be_a_positive_integer(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["wrench"]["tiers"][1]["max_durability"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("max_durability" in e for e in errors))
+
+    def test_max_durability_requires_repair_cost(self):
+        d = copy.deepcopy(self.data)
+        del d["tools"]["wrench"]["tiers"][1]["repair_cost"]
+        errors = cv.validate(d)
+        self.assertTrue(any("repair_cost" in e and "обязателен" in e for e in errors))
+
+    def test_repair_cost_without_max_durability_rejected(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["pickaxe"]["tiers"][1]["repair_cost"] = {"raw_a": 1}
+        errors = cv.validate(d)
+        self.assertTrue(any("repair_cost" in e and "имеет смысл только вместе" in e for e in errors))
+
+    def test_repair_cost_rejects_unknown_resource(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["wrench"]["tiers"][1]["repair_cost"] = {"no_such_resource": 1}
+        errors = cv.validate(d)
+        self.assertTrue(any("неизвестный ресурс" in e for e in errors))
+
+    def test_breakdown_immunity_upgrade_allowed_on_any_building_not_just_farms(self):
+        # В отличие от breeding_*, breakdown_immunity НЕ ограничен breeding_slots -
+        # BUILDINGS["flaky_typed"] (обычная постройка) уже несёт его в фикстуре.
+        errors = cv.validate(copy.deepcopy(self.data))
+        self.assertEqual(errors, [])
+
+    def test_breakdown_immunity_value_must_be_a_positive_number(self):
+        d = copy.deepcopy(self.data)
+        d["buildings"]["flaky_typed"]["upgrades"][0]["value"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("breakdown_immunity" in e for e in errors))
+
+    def test_action_duration_reduction_value_must_be_between_zero_and_one(self):
+        d = copy.deepcopy(self.data)
+        d["buildings"]["mechanism_a"]["upgrades"][1]["value"] = 1
+        errors = cv.validate(d)
+        self.assertTrue(any("action_duration_reduction" in e for e in errors))
+
+    def test_action_duration_reduction_requires_a_dependent_multiturn_action(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["mechanism_a_delayed_action"]["requires_building"] = None
+        errors = cv.validate(d)
+        self.assertTrue(any("action_duration_reduction" in e and "многоходовое" in e for e in errors))
 
 
 if __name__ == "__main__":

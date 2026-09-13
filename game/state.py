@@ -17,6 +17,22 @@ class GameState:
     buildings: dict[str, int] = field(default_factory=dict)
     techs: set[str] = field(default_factory=set)
     broken: dict[str, int] = field(default_factory=dict)  # building_id -> сколько копий сломано
+    # building_id -> список id вида поломки (content.json["breakdown_types"])
+    # на КАЖДУЮ сломанную копию этого типа - длина держится равной broken[bid]
+    # (см. game/engine.py:_broken_type_entries, который сам добивает/обрезает
+    # список до нужной длины значениями None - защита от старых сохранений и
+    # контента без breakdown_types). None = поломка без типа (старое поведение,
+    # ремонт не требует никакого инструмента). Только для НЕ-ферменных построек -
+    # у ферм тип поломки хранится в самом farm_instances (см. ниже), т.к. там и
+    # так уже есть экземпляр, а не абстрактный счётчик.
+    broken_types: dict[str, list[str | None]] = field(default_factory=dict)
+    # tool_id -> остаток прочности инструмента НА ТЕКУЩЕМ тире (см.
+    # game/engine.py:tool_durability_remaining/tool_is_broken). Отсутствие ключа =
+    # полная прочность тира (tiers[tier-1]["max_durability"]), либо инструмент
+    # вовсе не изнашивается, если у тира нет max_durability. Сбрасывается (ключ
+    # удаляется) при смене тира (upgrade_tool) и при ремонте самого инструмента
+    # (repair_tool) - в обоих случаях инструмент снова "полностью исправен".
+    tool_durability: dict[str, int] = field(default_factory=dict)
     # building_id -> сколько РАБОТАЮЩИХ копий постройки игрок вручную выключил
     # ползунком "Механизмы" (только у построек с непустыми И produces, И consumes -
     # см. game/engine.py:is_disableable_building/set_building_active_count).
@@ -51,14 +67,15 @@ class GameState:
     # > 1) - см. game/engine.py:_process_manual_jobs/do_manual_action. Одна активная задача НА
     # ДЕЙСТВИЕ (ключ - action_id, как autocraft_jobs по resource_id) - повторный клик, пока
     # задача не закончилась, блокируется (ActionResult(False, ...), без траты хода). cost уже
-    # списан целиком В МОМЕНТ СТАРТА (как energy_jobs) - progress копится "бесплатно", отмена
-    # (cancel_manual_job) НЕ возвращает уже потраченное. gain (в исходном, ещё не
+    # списан целиком В МОМЕНТ СТАРТА и заодно сохранён в самом job'е - досрочная отмена
+    # (cancel_manual_job) возвращает его игроку целиком (потерян только уже накопленный
+    # "бесплатный" прогресс turns_done, но не ресурсы). gain (в исходном, ещё не
     # развёрнутом по chance/диапазону виде - см. _roll_chance_amounts/_roll_range_amounts)
     # и gain_chance СНИМАЮТСЯ effective_manual_action_stats ОДИН РАЗ в момент старта (тот же
     # принцип, что autocraft_jobs["fires_total"] - эффекты построек фиксируются на момент
     # запуска, не пересчитываются на каждый тик), а РАЗВОРАЧИВАЮТСЯ (бросок шанса/диапазона)
     # РОВНО ОДИН РАЗ, в конце, при начислении - как produces у energy_jobs.
-    manual_jobs: dict[str, dict] = field(default_factory=dict)  # action_id -> {"turns_total", "turns_done", "gain", "gain_chance", "spawn_species"}
+    manual_jobs: dict[str, dict] = field(default_factory=dict)  # action_id -> {"turns_total", "turns_done", "gain", "gain_chance", "spawn_species", "cost"}
     # Имя именованного сохранения (saves/<save_name>.json), из которого поднята текущая
     # партия, или None - не для логики игры, а только чтобы UI мог показать игроку/
     # разработчику, на каком сохранении он сейчас находится. Обновляется при открытии
@@ -147,6 +164,11 @@ class GameState:
     # "broken" - bool ОДНОГО экземпляра (не путать с state.broken[bid] - агрегатным
     # счётчиком копий). "upgrades" - список id купленных апгрейдов ИМЕННО этого
     # экземпляра (аналог state.building_upgrades[bid], но на одну копию).
+    # "broken_type" - id вида поломки (content.json["breakdown_types"]) ИМЕННО
+    # этого сломанного экземпляра, или None (поломка без типа/экземпляр не
+    # сломан) - зеркало state.broken_types, только на уровне экземпляра (см.
+    # game/engine.py:_ensure_farm_instances, которая доопределяет ключ у старых
+    # записей, и repair/_is_breakdown_type_fixable).
     farm_instances: dict[str, dict] = field(default_factory=dict)
     # Счётчик для генерации id новых экземпляров ферм ("farm_{n}") - см.
     # game/engine.py:_ensure_farm_instances.
@@ -180,6 +202,30 @@ class GameState:
     # моменты: игрок кликает "Забрать награду" сам, ход не тратится (см.
     # game/engine.py:claim_quest_reward, тот же принцип, что insert_soul/remove_soul).
     claimed_quests: set[str] = field(default_factory=set)
+    # move_id (content.json["combat_moves"]) -> сколько ходов осталось до
+    # восстановления приёма - убывает на 1 в КАЖДОМ advance_turn (не только в
+    # бою, как и остальные счётчики хода), ключ с 0 удаляется. Отсутствие ключа
+    # = приём готов. См. game/engine.py:attack_encounter/unlocked_attack_moves -
+    # какие приёмы вообще доступны игроку решает ТЕКУЩИЙ тир владеемого оружия
+    # (tools.*.tiers[].unlocks_moves), не этот словарь - он только про кулдаун
+    # уже открытых приёмов.
+    move_cooldowns: dict[str, int] = field(default_factory=dict)
+    # building_id (постройка с полем automation_hub) -> список правил
+    # автоматизации: [{"kind", "target_id", "conditions"}, ...]. "kind" -
+    # "manual_action" (target_id - id из content.json["manual_actions"]) или
+    # "energy_recipe" (target_id - id из content.json["energy_recipes"], см.
+    # game/engine.py:AUTOMATION_TARGET_KINDS). "conditions" -
+    # [{"resource", "op" (">=" | "<="), "amount"}, ...], проверяемые через И
+    # (пустой список условий = правило срабатывает всегда). Каждый ход
+    # (game/engine.py:process_automation_rules, между _process_manual_jobs и
+    # _process_pending_actions) для первых automation_slots_capacity(...)
+    # правил списка молча выполняется do_manual_action/start_energy_recipe,
+    # если ВСЕ условия истинны - недостающие слоты (поломка/непроданный
+    # апгрейд) просто обрезают список СПРАВА (порядок = порядок добавления
+    # игроком), лишние правила не выселяются принудительно - тот же принцип,
+    # что soul_slots. В правило можно поставить действие/рецепт, которые ещё
+    # не открыты - будет молча пропускаться, пока не откроется.
+    automation_rules: dict[str, list[dict]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -188,6 +234,8 @@ class GameState:
             "buildings": self.buildings,
             "techs": sorted(self.techs),
             "broken": self.broken,
+            "broken_types": self.broken_types,
+            "tool_durability": self.tool_durability,
             "building_disabled": self.building_disabled,
             "pinned": self.pinned,
             "tool_tiers": self.tool_tiers,
@@ -222,6 +270,10 @@ class GameState:
             "soul_slots": self.soul_slots,
             "completed_quests": self.completed_quests,
             "claimed_quests": sorted(self.claimed_quests),
+            "move_cooldowns": self.move_cooldowns,
+            "automation_rules": {
+                bid: [dict(r) for r in rules] for bid, rules in self.automation_rules.items()
+            },
         }
 
     @classmethod
@@ -232,6 +284,8 @@ class GameState:
             buildings=dict(data.get("buildings", {})),
             techs=set(data.get("techs", [])),
             broken=dict(data.get("broken", {})),
+            broken_types={k: list(v) for k, v in data.get("broken_types", {}).items()},
+            tool_durability=dict(data.get("tool_durability", {})),
             building_disabled=dict(data.get("building_disabled", {})),
             pinned=list(data.get("pinned", [])),
             tool_tiers=dict(data.get("tool_tiers", {})),
@@ -276,6 +330,11 @@ class GameState:
             soul_slots={k: list(v) for k, v in data.get("soul_slots", {}).items()},
             completed_quests=dict(data.get("completed_quests", {})),
             claimed_quests=set(data.get("claimed_quests", [])),
+            move_cooldowns=dict(data.get("move_cooldowns", {})),
+            automation_rules={
+                bid: [dict(r) for r in rules]
+                for bid, rules in data.get("automation_rules", {}).items()
+            },
         )
 
     def save(self, path: str) -> None:

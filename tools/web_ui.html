@@ -16,13 +16,25 @@
     --ok: #4ac9a0;
     --warn: #f0c030;
     --danger: #e0524a;
+    /* Акцент "Чертёж" для каркаса модалок (скобки/рёбра графов/подчёркивание
+       вкладок) - см. CLAUDE.md, редизайн менюшек. Не заменяет --accent, живёт
+       рядом с ним: голубой держит структуру/связи, янтарь - действие/цену. */
+    --blueprint: #5fd0e8;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    background: var(--bg);
     color: var(--text);
     font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    /* Едва заметная чертёжная сетка фона главного экрана - 1:1 из канваса
+       (MainScreen_B.dc.html: .screen), НЕ то же самое, что убранная по
+       прямому пожеланию сетка в фоне модалок (см. .modal-overlay ниже) -
+       там она перекрывала контент и была слишком заметна, тут - едва видна
+       под панелями и не мешает читать интерфейс. */
+    background:
+      linear-gradient(rgba(95,208,232,.05) 1px, transparent 1px) 0 0/22px 22px,
+      linear-gradient(90deg, rgba(95,208,232,.05) 1px, transparent 1px) 0 0/22px 22px,
+      var(--bg);
   }
   .mono { font-family: Consolas, "Courier New", monospace; }
   /* Общий стиль ЛЮБОЙ кнопки в приложении - раньше кнопка без класса и вне
@@ -31,34 +43,44 @@
      а контекстные классы (.small/.primary/.danger/...) только модифицируют его.
      position:relative+overflow:hidden - нужны ЛЮБОЙ кнопке с кулдауном
      (applyCooldownVisual вставляет .cooldown-fill как абсолютного потомка). */
+  /* Плоская "чертёжная" кнопка (см. CLAUDE.md, редизайн менюшек, канвас-вариант
+     B) - 1:1 принцип канваса: rgba-бордер без скругления, прозрачный фон,
+     голубой (--blueprint) hover ("это структурный элемент, с ним можно
+     взаимодействовать"); button.primary остаётся плотным янтарным
+     (--accent) - в языке канваса голубой держит структуру, янтарь - цену/
+     действие, см. комментарий у --blueprint выше. */
   button {
     font: inherit; cursor: pointer;
-    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 7px 12px; font-size: 12px;
+    background: transparent; color: var(--text); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 0; padding: 7px 12px; font-size: 12px;
     position: relative; overflow: hidden;
-    transition: border-color .15s ease, transform .08s ease, filter .08s ease;
+    transition: border-color .15s ease, transform .08s ease, filter .08s ease, background .15s ease;
   }
-  button:hover { border-color: var(--accent-dim); }
+  button:hover { border-color: var(--blueprint); background: rgba(95,208,232,.06); }
   button:active:not(:disabled) { transform: scale(0.97); filter: brightness(0.94); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   button.small { padding: 4px 10px; font-size: 11px; }
-  button.primary { background: var(--accent); color: #241a08; border-color: var(--accent); font-weight: 600; }
-  button.primary:hover { filter: brightness(1.08); }
+  button.primary {
+    background: var(--accent); color: #241a08; border-color: var(--accent); font-weight: 600;
+    clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
+  }
+  button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+  button.danger:hover { border-color: var(--danger); background: rgba(224,82,74,.08); }
 
   /* Тот же принцип, что у button выше: текстовые поля и select раньше оставались
      голым браузерным видом (белый фон) поверх тёмной темы - теперь общий базовый
      стиль под остальной интерфейс, вместо точечных .foo input { width: ... }. */
   select, input[type=text], input[type=number], input[type=search] {
     font: inherit;
-    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 7px 10px; font-size: 12px;
+    background: rgba(255,255,255,.03); color: var(--text); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 0; padding: 7px 10px; font-size: 12px;
     transition: border-color .15s ease;
   }
   select:hover, input[type=text]:hover, input[type=number]:hover, input[type=search]:hover {
-    border-color: var(--accent-dim);
+    border-color: var(--blueprint);
   }
   select:focus, input[type=text]:focus, input[type=number]:focus, input[type=search]:focus {
-    outline: none; border-color: var(--accent);
+    outline: none; border-color: var(--blueprint);
   }
   select:disabled, input:disabled { opacity: .5; cursor: not-allowed; }
   input[type=text]::placeholder, input[type=search]::placeholder { color: var(--muted); }
@@ -76,45 +98,37 @@
     background-size: 10px 7px;
   }
 
-  header.topbar {
-    background: var(--panel);
-    border-bottom: 2px solid var(--accent-dim);
-    padding: 12px 22px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    position: sticky;
-    top: 0;
-    z-index: 20;
+  /* HUD-шапка 1:1 из канваса (design-канвас, MainScreen_B.dc.html) - ряд
+     бордированных ячеек (заголовок/ход/время/технологии/энергия), а не
+     плашки-таблетки на прозрачном фоне, как раньше - см. CLAUDE.md. */
+  header.hud {
+    display: flex; align-items: stretch; flex-wrap: wrap;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+    position: sticky; top: 0; z-index: 20; background: var(--panel);
   }
-  header.topbar h1 {
-    font-size: 14px;
-    letter-spacing: .08em;
-    margin: 0;
-    color: var(--accent);
-    text-transform: uppercase;
+  .hud-title {
+    display: flex; align-items: center; padding: 8px 22px; white-space: nowrap;
+    font-family: Consolas, monospace; font-weight: 700; color: var(--accent);
+    font-size: 13px; letter-spacing: 1px; line-height: 1.35; text-transform: uppercase;
+    background: var(--panel); border-right: 1px solid rgba(255,255,255,.1);
   }
-  header.topbar .title-block { display: flex; flex-direction: column; gap: 2px; }
-  .save-name-label { font-size: 10px; color: var(--muted); letter-spacing: .02em; }
-  .badge {
-    background: var(--panel2);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 5px 10px;
-    font-size: 12px;
-    color: var(--muted);
+  .save-name-label { font-size: 9px; color: var(--muted); letter-spacing: .02em; text-transform: none; font-weight: 400; margin-top: 2px; }
+  .hud-cell {
+    display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 18px;
+    border-right: 1px solid rgba(255,255,255,.1); background: var(--panel);
   }
-  .badge b { color: var(--accent); font-family: Consolas, monospace; }
-  .badge .time-icon { display: inline-flex; vertical-align: -3px; margin-right: 4px; }
-  header.topbar .spacer { flex: 1; }
+  .hud-cell b { font-family: Consolas, monospace; font-size: 14px; font-weight: 400; color: var(--blueprint); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .hud-cell span { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .hud-cell .time-icon { display: inline-flex; }
+  .hud-nav { display: flex; gap: 6px; margin-left: auto; align-items: center; padding: 8px 16px; background: var(--panel); flex-wrap: wrap; }
+  .hud-nav button { background: var(--panel2); }
   /* Панель громкости (два независимых канала - музыка/звуки, не единый вкл/выкл) -
      всплывает под кнопкой-колонкой, закрывается кликом снаружи (см. soundControl
      в конце скрипта). */
   .sound-control { position: relative; }
   .sound-panel {
     position: absolute; top: calc(100% + 6px); right: 0;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    background: #161d24; border: 1px solid rgba(255,255,255,.12); border-radius: 0;
     padding: 12px; width: 190px; box-shadow: 0 10px 28px rgba(0,0,0,.45); z-index: 30;
     display: flex; flex-direction: column; gap: 12px;
   }
@@ -126,7 +140,10 @@
   button.danger { color: var(--danger); border-color: var(--danger); }
   button.danger:hover { background: var(--danger); color: #1a1207; }
 
-  main { max-width: 1180px; margin: 0 auto; padding: 18px; }
+  /* Раньше контент был центрирован в узкой колонке (max-width:1180px) -
+     канвас (MainScreen_B.dc.html) занимает экран во всю ширину, гриду отдана
+     фиксированная правая колонка 380px вместо резиновой 1fr - см. .dashboard. */
+  main { padding: 24px; }
 
   .win-banner {
     background: var(--accent);
@@ -138,42 +155,71 @@
     margin-bottom: 16px;
   }
 
-  .dashboard { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .dashboard { display: grid; grid-template-columns: 1fr; gap: 20px; }
   @media (min-width: 980px) {
-    .dashboard { grid-template-columns: 1.4fr 1fr; align-items: start; }
+    .dashboard { grid-template-columns: 1fr 380px; align-items: start; }
   }
-  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  /* "Модуль" 1:1 из канваса (MainScreen_B.dc.html: .module/.module::before) -
+     тонкая inset-рамка + голубые угловые скобки через один многослойный
+     background-градиент на ::before (тут, в отличие от модалок, канвас сам
+     рисует скобки именно так, не 4 реальных div'а - см. CLAUDE.md). */
+  .panel { position: relative; background: var(--panel); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+  .panel::before {
+    content: ""; position: absolute; inset: -1px; pointer-events: none;
+    background:
+      linear-gradient(to right, var(--blueprint) 3px, transparent 3px) no-repeat top left / 24px 3px,
+      linear-gradient(to bottom, var(--blueprint) 3px, transparent 3px) no-repeat top left / 3px 24px,
+      linear-gradient(to left, var(--blueprint) 3px, transparent 3px) no-repeat top right / 24px 3px,
+      linear-gradient(to bottom, var(--blueprint) 3px, transparent 3px) no-repeat top right / 3px 24px,
+      linear-gradient(to right, var(--blueprint) 3px, transparent 3px) no-repeat bottom left / 24px 3px,
+      linear-gradient(to top, var(--blueprint) 3px, transparent 3px) no-repeat bottom left / 3px 24px,
+      linear-gradient(to left, var(--blueprint) 3px, transparent 3px) no-repeat bottom right / 24px 3px,
+      linear-gradient(to top, var(--blueprint) 3px, transparent 3px) no-repeat bottom right / 3px 24px;
+  }
   .panel-head {
-    background: var(--panel2);
-    padding: 8px 14px;
-    font-size: 11px;
-    letter-spacing: .1em;
+    padding: 14px 18px;
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.3px;
     text-transform: uppercase;
-    color: var(--muted);
-    border-bottom: 1px solid var(--border);
+    color: var(--text);
   }
   .panel-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .module-tag { font-size: 9px; color: var(--muted); letter-spacing: 1px; font-weight: 400; text-transform: uppercase; }
+  /* Галочка "Автокрафт" - теперь живёт в шапке самой панели "Автокрафт"
+     (переехала туда по прямому пожеланию, 2026-09-13, была на "Пульте
+     действий" и там терялась) - переключатель в общем стиле остального
+     интерфейса (тот же приём "switch", что задуман в канвасе для правил
+     автоматизации), не голый браузерный чекбокс. */
   .autocraft-toggle {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; letter-spacing: normal; text-transform: none; color: var(--text);
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11px; letter-spacing: normal; text-transform: none; color: var(--muted);
     cursor: pointer;
   }
-  /* display:flex выше перебивает стандартное [hidden]{display:none} браузера
-     (авторский CSS всегда сильнее UA-стиля, даже при равной специфичности) -
-     без этого правила JS-флаг hidden ничего визуально не менял. */
-  .autocraft-toggle[hidden] { display: none; }
-  .autocraft-toggle input { cursor: pointer; }
-  .panel-body { padding: 14px; }
+  .autocraft-toggle input[type=checkbox] { position: absolute; opacity: 0; width: 0; height: 0; }
+  .autocraft-toggle .switch {
+    width: 28px; height: 15px; border: 1px solid rgba(255,255,255,.15); position: relative; flex-shrink: 0;
+    background: transparent; transition: background .15s, border-color .15s;
+  }
+  .autocraft-toggle .switch .knob {
+    position: absolute; top: 1px; left: 1px; width: 11px; height: 11px; background: #4d5762;
+    transition: left .15s, background .15s;
+  }
+  .autocraft-toggle input:checked + .switch { background: rgba(240,160,48,.15); border-color: rgba(240,160,48,.4); }
+  .autocraft-toggle input:checked + .switch .knob { left: 15px; background: var(--accent); }
+  .autocraft-toggle input:focus-visible + .switch { border-color: var(--blueprint); }
+  .panel-body { padding: 0 18px 18px; }
 
-  .energy-readout { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 12px; }
+  .energy-readout { display: flex; justify-content: space-between; margin-bottom: 12px; }
   .energy-stat { display: flex; flex-direction: column; }
-  .energy-stat .num { font-size: 22px; font-weight: 700; }
-  .energy-stat .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .energy-stat .num { font-size: 15px; font-weight: 700; font-family: Consolas, monospace; }
+  .energy-stat .lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
   .energy-stat.ok .num { color: var(--ok); }
   .energy-stat.bad .num { color: var(--danger); }
-  .energy-bar { height: 10px; border-radius: 5px; background: var(--panel2); border: 1px solid var(--border); overflow: hidden; }
+  .energy-bar { height: 9px; border-radius: 0; background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); overflow: hidden; }
   .energy-bar-fill { height: 100%; background: var(--ok); transition: width .3s; }
   .energy-bar-fill.danger { background: var(--danger); }
   .compute-line { margin-top: 10px; font-size: 11px; color: var(--muted); }
@@ -184,10 +230,15 @@
   .autocraft-job .job-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 3px; }
   .autocraft-job .job-eta { color: var(--muted); }
   .autocraft-job .job-right { display: flex; align-items: center; gap: 6px; }
-  .autocraft-job .job-bar { height: 8px; border-radius: 4px; background: var(--panel2); border: 1px solid var(--border); overflow: hidden; }
-  .autocraft-job .job-bar-fill { height: 100%; background: var(--accent); transition: width .3s; }
+  .autocraft-job .job-bar { height: 8px; border-radius: 0; background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); overflow: hidden; }
+  .autocraft-job .job-bar-fill {
+    height: 100%; transition: width .3s;
+    background-image: repeating-linear-gradient(45deg, var(--accent) 0 6px, var(--accent-dim) 6px 12px);
+    background-size: 17px 17px; animation: job-bar-stripes 1s linear infinite;
+  }
+  @keyframes job-bar-stripes { from { background-position: 0 0; } to { background-position: 17px 0; } }
   .job-cancel {
-    background: transparent; border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; border: 1px solid rgba(255,255,255,.15); border-radius: 0;
     color: var(--muted); font-size: 11px; line-height: 1; padding: 2px 6px; cursor: pointer;
   }
   .job-cancel:hover { border-color: var(--danger); color: var(--danger); }
@@ -199,7 +250,7 @@
   .habitat-house-btn:disabled { opacity: .4; cursor: not-allowed; }
 
   .res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; }
-  .res-tile { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; }
+  .res-tile { background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); border-radius: 0; padding: 6px 8px; display: flex; align-items: center; gap: 6px; }
   .res-tile.zero { opacity: .45; filter: grayscale(.7); }
   .res-tile svg { flex-shrink: 0; }
   .res-tile .info { display: flex; flex-direction: column; overflow: hidden; }
@@ -222,18 +273,16 @@
   .bld-led.broken { background: var(--danger); box-shadow: 0 0 6px var(--danger); animation: pulse 1.2s infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
-  /* Панель "Производственные мощности" - список строк с поиском (тот же приём,
-     что "Банк особей" в "Фермах": .search-match/.search-dim от
-     applyResourceHighlight), а не сетка тайлов - в строке помещается статус,
-     счётчик/лимит, описание, содержание за ход и кнопка "⚙ Улучшения". */
+  /* Панель "Производственные мощности" - список строк с поиском (makeResourceSearchBar
+     с hide=true - непопавшие строки прячутся целиком, как "Банк особей" в
+     "Фермах"), а не сетка тайлов - в строке помещается статус, счётчик/лимит,
+     описание, содержание за ход и кнопка "⚙ Улучшения". */
   .bld-list { display: flex; flex-direction: column; max-height: 420px; overflow-y: auto; padding-right: 2px; }
   .bld-row {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 9px 10px; margin-bottom: 8px; transition: border-color .15s, opacity .15s;
+    background: var(--bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); border-radius: 0;
+    padding: 10px 12px; margin-bottom: 8px; transition: box-shadow .15s, opacity .15s;
   }
   .bld-row:last-child { margin-bottom: 0; }
-  .bld-row.search-match { border-color: var(--accent); }
-  .bld-row.search-dim { opacity: .35; }
   .bld-row-head { display: flex; align-items: flex-start; gap: 10px; }
   .bld-row-icon { position: relative; width: 30px; height: 30px; flex-shrink: 0; margin-top: 1px; }
   .bld-row-icon svg { width: 100%; height: 100%; }
@@ -244,63 +293,95 @@
   .bld-row-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
   .bld-row-title .amt { color: var(--muted); font-weight: 400; }
   .bld-row-desc { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
-  .bld-badge { font-size: 9.5px; font-weight: 700; letter-spacing: .02em; padding: 2px 6px; border-radius: 10px; text-transform: uppercase; }
-  .bld-badge.limit { background: var(--panel2); border: 1px solid var(--border); color: var(--muted); }
+  .bld-badge { font-size: 9.5px; font-weight: 700; letter-spacing: .02em; padding: 2px 6px; border-radius: 0; text-transform: uppercase; }
+  .bld-badge.limit { background: var(--panel2); border: 1px solid rgba(255,255,255,.12); color: var(--muted); }
   .bld-badge.broken { background: rgba(224, 82, 74, .16); border: 1px solid rgba(224, 82, 74, .4); color: #ef8a83; }
-  .bld-repair-link { font-size: 10.5px; color: #ef8a83; margin-top: 4px; display: inline-block; cursor: pointer; }
-  .bld-repair-link:hover { text-decoration: underline; }
+  .bld-repair-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .bld-repair-row .cost-chip { margin: 0; }
+  .bld-repair-cost { display: flex; gap: 6px; flex-wrap: wrap; }
+  .bld-repair-blocked { font-size: 10.5px; color: #ef8a83; }
   .bld-row-actions { flex-shrink: 0; }
   /* Ползунок "включено/выключено" меню "Механизмы" (см. renderMechanismToggle) -
      та же вёрстка, что .scale-slider-row у ручных действий, но живёт прямо в
      строке постройки, не под отдельной кнопкой. */
   .bld-mechanism-toggle {
     display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 4px 10px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; font-size: 11px;
+    background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); border-radius: 0; font-size: 11px;
   }
   .bld-mechanism-toggle-label { color: var(--muted); white-space: nowrap; }
   .bld-mechanism-toggle input[type=range] { flex: 1; }
   .bld-mechanism-toggle-value { color: var(--accent); font-weight: 600; min-width: 5em; text-align: right; white-space: nowrap; }
 
-  .tools-list { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
-  .tool-row { display: flex; align-items: center; gap: 12px; }
-  .tool-row .info { flex: 1; min-width: 0; }
-  .tool-row .info b { display: block; font-size: 13px; }
-  .tool-row .info span { font-size: 11px; color: var(--muted); }
-  .tool-row button { padding: 6px 10px; font-size: 11px; white-space: nowrap; }
-  .tool-row button.on-cooldown { opacity: .55; cursor: not-allowed; pointer-events: none; }
-  .tool-row .locked-note { font-size: 11px; color: var(--muted); }
+  /* Строка инструмента - 1:1 из канваса (B_Tools.dc.html: .line/.pips/.req) -
+     полоска пипсов вместо крупной иконки, короткая акцентная кнопка ("Улучшить")
+     с ценой ОТДЕЛЬНОЙ строкой слева от неё, а не длинная кнопка-простыня со
+     всеми ресурсами внутри самого текста кнопки - по прямому пожеланию,
+     2026-09-13 (см. CLAUDE.md). */
+  .tools-list { display: flex; flex-direction: column; gap: 18px; padding: 18px 22px; }
+  .line { display: flex; gap: 12px; align-items: flex-start; border: 1px solid rgba(255,255,255,.08); padding: 12px 14px; }
+  .line-body { flex: 1; min-width: 0; }
+  .line-name { font-size: 12.5px; font-weight: 700; color: #dbe7ec; margin-bottom: 10px; }
+  .line-sub { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .line-sub.danger { color: var(--danger); }
+  .pips { display: flex; gap: 4px; }
+  .pip { flex: 1; height: 8px; border: 1px solid rgba(255,255,255,.15); }
+  .pip.done { background: rgba(255,255,255,.3); border-color: rgba(255,255,255,.3); }
+  .pip.current { background: var(--accent); border-color: var(--accent); }
+  .pip.locked { background: transparent; }
+  .req { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-family: Consolas, monospace; }
+  .req-text { font-size: 11px; color: #7f97a1; }
+  .req-text b { color: #dbe7ec; font-weight: 700; }
+  .req-text.locked { color: #55606a; }
+  .btn-sm {
+    font-family: Consolas, monospace; font-size: 10.5px; color: #10151b; background: var(--accent);
+    border: 1px solid var(--accent); padding: 8px 13px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px);
+    position: relative; overflow: hidden;
+  }
+  .btn-sm.disabled { background: transparent; color: #4d5762; border-color: #2b333b; cursor: default; }
+  .btn-sm.on-cooldown { opacity: .55; cursor: not-allowed; pointer-events: none; }
 
-  .modal.priorities-modal { max-width: 560px; }
-  .priorities-modal .tabs { padding: 10px 16px 0; }
-  .priority-resource-scroll { max-height: 230px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; margin: 8px 16px 0; }
+  .priorities-modal .tabs { padding: 14px 20px 0; }
+  .priority-resource-scroll {
+    max-height: 230px; overflow-y: auto; overflow-x: hidden; border: 1px solid rgba(255,255,255,.08); margin: 8px 16px 0;
+    scrollbar-width: thin; scrollbar-color: rgba(95,208,232,.4) transparent;
+  }
+  .priority-resource-scroll::-webkit-scrollbar { width: 8px; }
+  .priority-resource-scroll::-webkit-scrollbar-track { background: transparent; }
+  .priority-resource-scroll::-webkit-scrollbar-thumb { background-color: rgba(95,208,232,.35); border: 2px solid #161d24; background-clip: padding-box; }
   .priority-resource-scroll .storage-grid { padding: 10px; }
-  .priority-list { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
-  .priority-row { display: flex; align-items: center; gap: 12px; }
+  .priority-list { display: flex; flex-direction: column; gap: 10px; padding: 18px 22px; }
+  .priority-row {
+    display: flex; align-items: center; gap: 14px;
+    border: 1px solid rgba(255,255,255,.08); border-radius: 0; padding: 12px 14px;
+  }
   .priority-row .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .priority-row .info b { display: block; font-size: 13px; }
   .priority-row .info span { font-size: 11px; color: var(--muted); }
   .priority-row .info span.priority-shortfall-note { color: var(--warn); }
-  .priority-order-controls { display: flex; gap: 4px; flex-shrink: 0; }
+  .priority-order-controls { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .priority-value-input { width: 56px; text-align: center; }
 
-  .loc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px; }
+  .loc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 14px 18px; }
   .loc-card {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 14px 8px; text-align: center; color: var(--text); cursor: pointer; width: 100%;
+    background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); border-radius: 0;
+    padding: 16px 10px; text-align: center; color: var(--text); cursor: pointer; width: 100%;
+    transition: box-shadow .12s;
   }
-  .loc-card:hover { border-color: var(--accent-dim); }
+  .loc-card:hover { box-shadow: inset 0 0 0 1px var(--blueprint); }
   .loc-card .loc-name { font-size: 13px; font-weight: 600; }
   .loc-card .loc-count { font-size: 11px; color: var(--muted); }
-  .back-row { padding: 10px 12px 0; display: flex; gap: 8px; }
+  .back-row { padding: 10px 18px 0; display: flex; gap: 8px; }
   .back-row button { padding: 6px 10px; }
   .panel-head-btn { padding: 4px 10px; }
-  .loc-header { font-size: 13px; font-weight: 700; padding: 10px 12px 0; color: var(--accent); }
-  .loc-breadcrumb { padding: 8px 12px 0; font-size: 12px; color: var(--muted); }
+  .loc-header { font-size: 13px; font-weight: 700; padding: 10px 18px 0; color: var(--accent); }
+  .loc-breadcrumb { padding: 8px 18px 0; font-size: 12px; color: var(--muted); }
   .loc-breadcrumb-item { cursor: pointer; }
   .loc-breadcrumb-item:hover { color: var(--accent); text-decoration: underline; }
   .loc-breadcrumb-item.current { color: var(--accent); font-weight: 700; cursor: default; }
   .loc-breadcrumb-item.current:hover { text-decoration: none; }
-  .loc-search-bar { padding: 8px 12px 0; }
+  .loc-search-bar { flex-shrink: 0; padding: 14px 18px 0; }
   .loc-search-bar input {
     width: 100%; padding-left: 30px;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='6.5' cy='6.5' r='4.5' fill='none' stroke='%238b93a0' stroke-width='1.6'/><line x1='9.8' y1='9.8' x2='14' y2='14' stroke='%238b93a0' stroke-width='1.6' stroke-linecap='round'/></svg>");
@@ -308,26 +389,52 @@
     background-position: 9px center;
     background-size: 13px 13px;
   }
+  /* Строка поиска + сортировки склада - поиск занимает свободное место, сортировка
+     прижата справа фиксированной ширины (см. makeStorageSortBar). */
+  .storage-controls-row { flex-shrink: 0; display: flex; align-items: center; gap: 18px; padding: 14px 18px 0; }
+  .storage-controls-row .loc-search-bar { flex: 1; padding: 0; }
+  .storage-sort-bar { flex-shrink: 0; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .storage-sort-label { color: var(--muted); font-size: 13px; }
 
-  .tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 10px 0; }
+  .tabs { position: relative; display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 10px 0; }
   .tabs button {
-    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
-    border-bottom: none; border-radius: 6px 6px 0 0; padding: 6px 10px; font-size: 12px;
+    background: transparent; color: var(--muted); border: 1px solid rgba(255,255,255,.1);
+    border-bottom: none; border-radius: 0; padding: 6px 10px; font-size: 12px;
   }
-  .tabs button.active { background: var(--bg); color: var(--accent); border-color: var(--accent-dim); }
+  .tabs button.active { background: rgba(95,208,232,.05); color: var(--blueprint); border-color: rgba(95,208,232,.3); }
+  /* Скользящее подчёркивание активной вкладки - JS (positionTabUnderline())
+     двигает left/width под реальный прямоугольник активной кнопки, CSS только
+     анимирует переезд. Один голубой акцент поверх существующей смены фона -
+     не заменяет её, просто добавляет "живой" переезд между вкладками. */
+  .tab-underline {
+    position: absolute; bottom: -2px; height: 3px; background: var(--blueprint);
+    box-shadow: 0 0 6px rgba(95,208,232,.7); pointer-events: none;
+    transition: left .25s ease, width .25s ease; opacity: 0;
+  }
+  .tab-underline.visible { opacity: 1; }
+  /* Вкладки "Пульта действий" на главном экране - отдельный, более лёгкий вид
+     1:1 из канваса (MainScreen_B.dc.html: .tabs/.tab-item), без рамок-боксов
+     вокруг каждой вкладки (в отличие от вкладок в модалках выше) - только текст
+     + общая нижняя линия ряда + скользящее подчёркивание активной. */
+  #actionTabs { gap: 20px; padding: 0 18px; border-bottom: 1px solid rgba(255,255,255,.1); margin-bottom: 16px; flex-wrap: nowrap; }
+  #actionTabs button {
+    background: transparent; border: none; padding: 10px 2px; font-size: 12px; color: var(--muted);
+  }
+  #actionTabs button.active { background: transparent; color: var(--blueprint); }
+  #actionTabs .tab-underline { bottom: -1px; left: 18px; }
 
-  .action-list { padding: 12px; display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; }
+  .action-list { padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; }
   .action-card {
     display: flex; align-items: center; gap: 10px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 10px; text-align: left; color: var(--text); width: 100%;
+    background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); border-radius: 0;
+    padding: 10px 12px; text-align: left; color: var(--text); width: 100%;
     position: relative; overflow: hidden; flex-shrink: 0;
-    transition: transform .08s ease, filter .08s ease, border-color .15s ease;
+    transition: transform .08s ease, filter .08s ease, box-shadow .15s ease;
   }
-  .action-card:hover { border-color: var(--accent-dim); }
+  .action-card:hover { box-shadow: inset 0 0 0 1px var(--blueprint); }
   .action-card:active:not(:disabled) { transform: scale(0.97); filter: brightness(0.94); }
   .action-card:disabled { opacity: .5; cursor: not-allowed; }
-  .action-card:disabled:hover { border-color: var(--border); }
+  .action-card:disabled:hover { box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
   /* Небольшая задержка после клика (game/content.json: click_delay_ms / ui.default_action_delay_ms) -
      защита от спама кнопкой автокликером, см. tryRunAction(). Чисто UI-эффект, ничего
      не сохраняется в save.json - при перезагрузке страницы кулдауны просто забываются. */
@@ -369,20 +476,20 @@
   .action-card-group.flash .action-card { animation: flash-highlight 1.6s ease-out; }
   .scale-slider-row {
     display: flex; align-items: center; gap: 8px; padding: 4px 10px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; font-size: 11px;
+    background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); border-radius: 0; font-size: 11px;
   }
   .scale-slider-label { color: var(--muted); white-space: nowrap; }
   .scale-slider-row input[type=range] { flex: 1; }
   .scale-slider-value { color: var(--accent); font-weight: 600; min-width: 2.5em; text-align: right; }
   .empty-note { color: var(--muted); font-size: 12px; padding: 6px 2px; }
 
-  .skip-row { padding: 0 12px 12px; }
+  .skip-row { padding: 0 18px 18px; }
   .skip-row button {
-    width: 100%; padding: 10px; background: var(--panel2); border: 1px dashed var(--border);
-    border-radius: 8px; color: var(--muted); position: relative; overflow: hidden;
-    transition: transform .08s ease, filter .08s ease, border-color .15s ease;
+    width: 100%; padding: 11px; background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
+    border: 1px dashed var(--blueprint); border-radius: 0; color: var(--blueprint); position: relative; overflow: hidden;
+    transition: transform .08s ease, filter .08s ease, background .15s ease;
   }
-  .skip-row button:hover { border-color: var(--accent-dim); color: var(--text); }
+  .skip-row button:hover { background: rgba(95,208,232,.08); color: var(--blueprint); }
   .skip-row button:active:not(:disabled) { transform: scale(0.98); filter: brightness(0.94); }
 
   .log-list { padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; font-size: 12px; }
@@ -400,30 +507,100 @@
   .log-entry .danger-line { color: var(--danger); }
   .log-entry .turn-tag { color: var(--muted); margin-right: 6px; }
 
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
-  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; width: 100%; max-width: 420px; max-height: 80vh; overflow-y: auto; }
-  .modal.storage-modal { max-width: 820px; }
-  .modal.tools-modal { max-width: 560px; }
-  .modal.upgrades-modal { max-width: 640px; }
-  .upgrades-list { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px; }
-  .upgrade-row { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 100; padding: 20px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(13,17,22,.85);
+  }
+  /* Каркас "Чертёж" - 1:1 порт из канваса (design-канвас, вариант B), см.
+     CLAUDE.md. Скобки - НАСТОЯЩИЕ 4 div'а (не CSS-трюк с фоновыми градиентами),
+     чтобы совпадать с канвасом побитово; вставляются автоматически в ЛЮБОЙ
+     .modal через ensureModalBrackets()/MutationObserver ниже по файлу - не
+     нужно трогать JS каждой из ~19 функций open*Modal(). */
+  .modal {
+    position: relative; background: #161d24; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 0; width: 100%; max-width: 420px; max-height: 80vh;
+    overflow-y: auto; overflow-x: hidden;
+    display: flex; flex-direction: column;
+  }
+  .bracket { position: absolute; width: 22px; height: 22px; pointer-events: none; animation: bracket-breathe 4s ease-in-out infinite; }
+  .bracket.tl { top: -1px; left: -1px; border-top: 2px solid var(--blueprint); border-left: 2px solid var(--blueprint); }
+  .bracket.tr { top: -1px; right: -1px; border-top: 2px solid var(--blueprint); border-right: 2px solid var(--blueprint); }
+  .bracket.bl { bottom: -1px; left: -1px; border-bottom: 2px solid var(--blueprint); border-left: 2px solid var(--blueprint); }
+  .bracket.br { bottom: -1px; right: -1px; border-bottom: 2px solid var(--blueprint); border-right: 2px solid var(--blueprint); }
+  @keyframes bracket-breathe {
+    0%, 100% { opacity: .7; filter: drop-shadow(0 0 0 rgba(95,208,232,0)); }
+    50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(95,208,232,.6)); }
+  }
+  /* Модалки с ФИКСИРОВАННЫМ размером 1:1 из канваса (не max-width/max-height,
+     а именно width/height - см. CLAUDE.md, требование дословного повтора
+     макета) - сама модалка никогда не скроллится целиком (overflow:hidden),
+     скроллится только её внутренний список/сетка/граф (см. .scroll-area
+     ниже), высота модалки не "прыгает" от количества строк внутри. */
+  .modal.storage-modal { width: 960px; height: 720px; max-width: none; max-height: none; overflow: hidden; }
+  .modal.tools-modal { width: 560px; height: 780px; max-width: none; max-height: none; overflow: hidden; }
+  .modal.priorities-modal { width: 560px; height: 780px; max-width: none; max-height: none; overflow: hidden; }
+  .modal.upgrades-modal { width: 560px; height: 780px; max-width: none; max-height: none; overflow: hidden; }
+  .modal.tech-modal { width: 700px; height: 820px; max-width: none; max-height: none; overflow: hidden; }
+  /* Тонкий скроллбар в цвет темы - вместо стандартного браузерного, ВЕЗДЕ, где
+     что-то скроллится внутри интерфейса (список построек на главном экране,
+     внутренние списки/сетки/графы модулей фиксированного размера и т.п.) -
+     .scroll-area дополнительно добавляет flex:1 (для модулей, где область
+     должна растянуться на всё оставшееся место). */
+  .thin-scroll, .scroll-area { scrollbar-width: thin; scrollbar-color: rgba(95,208,232,.4) transparent; }
+  .thin-scroll::-webkit-scrollbar, .scroll-area::-webkit-scrollbar { width: 8px; height: 8px; }
+  .thin-scroll::-webkit-scrollbar-track, .scroll-area::-webkit-scrollbar-track { background: transparent; }
+  .thin-scroll::-webkit-scrollbar-thumb, .scroll-area::-webkit-scrollbar-thumb { background-color: rgba(95,208,232,.35); border: 2px solid #161d24; background-clip: padding-box; }
+  .thin-scroll::-webkit-scrollbar-thumb:hover, .scroll-area::-webkit-scrollbar-thumb:hover { background-color: rgba(95,208,232,.6); background-clip: padding-box; }
+  .scroll-area { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+  .upgrades-list { display: flex; flex-direction: column; gap: 10px; padding: 18px 22px; }
+  .upgrade-row { border: 1px solid rgba(255,255,255,.08); border-radius: 0; padding: 12px 14px; }
   .upgrade-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
   .upgrade-desc { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
   .upgrade-row .costs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
   .upgrade-status { font-size: 12px; margin-top: 6px; }
   .upgrade-status.done { color: var(--ok); }
   .upgrade-status.locked { color: var(--muted); }
-  .upgrade-preview-block { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-top: 8px; }
+  .upgrade-preview-block { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.08); border-radius: 0; padding: 8px 10px; margin-top: 8px; }
+  /* Строка "Улучшений построек" - 1:1 из канваса (B_Buildings.dc.html: .row/.idx/
+     .info/.btn-sm): номер + имя/описание/цена в ОДИН горизонтальный ряд с
+     компактной кнопкой справа - НЕ карточка-стопка, как .upgrade-row выше
+     (тот делит разметку с Навыками/Автоматизацией/апгрейдами ферм, тут
+     сознательно отдельные классы, чтобы не сломать те три места) - по прямому
+     пожеланию, 2026-09-13, см. CLAUDE.md. */
+  .upg-row { display: flex; align-items: center; gap: 14px; border: 1px solid rgba(255,255,255,.08); padding: 12px 14px; }
+  .upg-idx { font-family: Consolas, monospace; font-size: 10px; color: #5b6772; width: 20px; flex-shrink: 0; text-align: right; }
+  .upg-body { flex: 1; min-width: 0; }
+  .upg-body .upgrade-title { margin-bottom: 3px; }
+  .upg-body .upgrade-desc { margin-bottom: 0; }
+  .upg-body .costs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .upg-row > .upgrade-status { flex-shrink: 0; white-space: nowrap; margin-top: 0; text-align: right; }
   .upgrade-preview-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 4px; }
 
-  .farms-modal-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
-  .farm-section { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; }
-  .farm-section h3 { font-size: 14px; margin: 0; }
-  .farm-section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-  .creature-row { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .farms-modal-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 12px; }
+  /* Секция ("Слоты N/M"/"Банк душ"/"Банк особей"/"Синтез") внутри модалок
+     Пасеки/Синтезатора душ/Генетической лаборатории - левая цианевая полоска +
+     моноширинный uppercase заголовок (тот же язык, что .panel-head на главном
+     экране) вместо голого <h3>, чтобы эти модалки выглядели частью общего
+     дизайна, а не отдельным "просто рабочим" интерфейсом - по прямому
+     пожеланию, 2026-09-13, см. CLAUDE.md. */
+  .farm-section {
+    border: 1px solid rgba(255,255,255,.1); border-left: 2px solid rgba(95,208,232,.35);
+    border-radius: 0; padding: 14px 16px; margin-bottom: 8px; background: rgba(255,255,255,.015);
+  }
+  .farm-section h3 {
+    font-family: Consolas, monospace; font-size: 11px; font-weight: 700;
+    letter-spacing: 1.2px; text-transform: uppercase; color: var(--text); margin: 0;
+  }
+  .farm-section-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 12px; padding-bottom: 9px; border-bottom: 1px solid rgba(95,208,232,.18);
+  }
+  /* Голый <h3> без обёртки .farm-section-head (Синтез/Банк душ) - та же
+     подчёркивающая черта, но на самом заголовке, раз нет строки-обёртки. */
+  .farm-section > h3:first-child { display: block; padding-bottom: 9px; margin-bottom: 12px; border-bottom: 1px solid rgba(95,208,232,.18); }
+  .creature-row { background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.08); border-radius: 0; padding: 8px 10px; margin-bottom: 8px; }
   .creature-list { display: flex; flex-direction: column; }
-  .creature-row.search-match { border-color: var(--accent); }
-  .creature-row.search-dim { opacity: .35; }
   .creature-id-badge { font-size: 10px; color: var(--muted); font-weight: 400; }
   /* .job-head/.job-right вне .autocraft-job (см. выше) не были флекс-рядом -
      имя и правый блок (select/кнопки) просто шли inline вплотную друг к другу.
@@ -442,82 +619,157 @@
   .genotype-table td { padding: 2px 10px 2px 0; color: var(--muted); white-space: nowrap; }
   .genotype-table td:first-child { color: var(--text); }
   .creature-toggle-btn { flex-shrink: 0; }
-  .breed-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .breed-row select { max-width: 160px; }
 
   /* Слоты выбора родителей для скрещивания (drag&drop иконки особи) - см.
      renderBreedSlot/renderBreedSection. */
-  .breed-slots { display: flex; align-items: stretch; gap: 10px; padding: 2px 0 10px; }
-  .breed-plus { display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--muted); flex-shrink: 0; }
+  /* .breed-root - корень модалки "Скрещивание" (см. openBreedingModal): сама
+     модалка теперь фиксированного размера 700x820 (.modal.tech-modal), эта
+     обёртка заполняет всё под шапкой (flex:1) - без своей рамки/отступа
+     .farm-section (тут это не карточка внутри списка, а сама модалка). */
+  .breed-root { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: none; padding: 0; margin: 0; }
+  .breed-root .breed-section-head { flex-shrink: 0; padding: 16px 22px 0; margin-bottom: 0; }
+  /* Кросс-ряд - 1:1 из канваса (B_Breeding.dc.html: .cross-row) - слот/кнопка/
+     слот в фиксированной раскладке по центру, а не резиновые на всю ширину. */
+  .breed-slots { flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 22px; padding: 22px 26px; }
+  .breed-cross-btn { flex-shrink: 0; animation: breed-btn-glow 2s ease-in-out infinite; }
+  @keyframes breed-btn-glow {
+    0%, 100% { box-shadow: 0 0 0 rgba(240,160,48,0); }
+    50% { box-shadow: 0 0 20px rgba(240,160,48,.6); }
+  }
   .breed-slot {
-    flex: 1; min-width: 0; border: 2px dashed var(--border); border-radius: 10px;
-    padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; background: var(--bg);
+    flex: 0 0 170px; width: 170px; height: 150px; border: 1px dashed rgba(95,208,232,.4); border-radius: 0;
+    padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: transparent;
     transition: border-color .12s, background .12s;
   }
-  .breed-slot.filled { border-style: solid; background: var(--panel2); }
-  .breed-slot.drag-over { border-color: var(--accent); background: var(--panel2); }
+  .breed-slot:not(.filled):not(.drag-over) { animation: breed-slot-invite 1.8s ease-in-out infinite; }
+  .breed-slot.filled { border-style: solid; border-color: var(--blueprint); background: rgba(95,208,232,.06); animation: breed-slot-glow 2.6s ease-in-out infinite; }
+  .breed-slot.drag-over { border-color: var(--accent); background: rgba(240,160,48,.06); }
+  @keyframes breed-slot-invite {
+    0%, 100% { border-color: rgba(95,208,232,.35); }
+    50% { border-color: rgba(95,208,232,.85); }
+  }
+  @keyframes breed-slot-glow {
+    0%, 100% { box-shadow: 0 0 0 rgba(95,208,232,0); }
+    50% { box-shadow: 0 0 18px rgba(95,208,232,.45); }
+  }
+  /* .breed-slot само уже position:relative не имеет по умолчанию - кнопка
+     "убрать" теперь абсолютным крестиком в углу (см. .breed-slot-clear), а не
+     инлайн рядом с именем, чтобы вертикальный стек (иконка/имя/хинт) остался
+     по центру квадрата 170x150, как в канвасе. */
+  .breed-slot { position: relative; }
   .breed-slot-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   .breed-slot-placeholder { font-size: 11px; color: var(--muted); padding: 10px 0; text-align: center; }
-  .breed-slot-card { display: flex; align-items: center; gap: 8px; }
-  .breed-slot-info { flex: 1; min-width: 0; }
+  .breed-slot-card { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+  .breed-slot-info { min-width: 0; }
   .breed-slot-info .name { font-size: 12px; font-weight: 600; }
   .breed-slot-info .hint { font-size: 11px; color: var(--muted); margin: 0; }
   .breed-slot-clear {
+    position: absolute; top: 6px; right: 6px;
     flex-shrink: 0; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1;
     background: var(--panel); border: 1px solid var(--border); color: var(--muted);
   }
   .breed-slot-clear:hover { color: var(--danger); border-color: var(--danger); }
 
+  /* Слоты синтезатора душ (renderSoulCollectorSection) - тот же визуальный
+     язык приглашения/заполненности, что .breed-slot выше (пунктир мигает, пока
+     пусто; сплошная цианевая рамка, когда занято), но произвольное ЧИСЛО
+     слотов в ряд (entry.capacity, не жёстко зафиксированная пара родителей) и
+     поддержка drag&drop души из банка ниже - по прямому пожеланию, 2026-09-13. */
+  .soul-slots { display: flex; flex-wrap: wrap; gap: 12px; }
+  .soul-slot {
+    position: relative; width: 100px; height: 96px; border: 1px dashed rgba(95,208,232,.4); border-radius: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 6px;
+    text-align: center; background: transparent; transition: border-color .12s, background .12s;
+  }
+  .soul-slot:not(.filled):not(.drag-over) { animation: breed-slot-invite 1.8s ease-in-out infinite; }
+  .soul-slot.filled { border-style: solid; border-color: var(--blueprint); background: rgba(95,208,232,.06); animation: breed-slot-glow 2.6s ease-in-out infinite; }
+  .soul-slot.drag-over { border-color: var(--accent); background: rgba(240,160,48,.06); }
+  .soul-slot-icon { width: 28px; height: 28px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .soul-slot-name { font-size: 10px; line-height: 1.2; }
+  .soul-slot-placeholder { font-size: 10px; color: var(--muted); padding: 0 2px; }
+  /* Карточка банка душ - буквально .breed-card (перетаскиваемая иконка + имя),
+     чтобы "Особи" и "Души" выглядели одной и той же системой, не двумя разными -
+     .soul-bank-card добавляет только "заполнено/пусто" оттенок. */
+  .soul-bank-card { cursor: grab; }
+  .soul-bank-card.disabled { cursor: not-allowed; opacity: .4; }
+  .soul-bank-card:not(.disabled):hover { border-color: var(--accent); }
+  .soul-bank-count { font-size: 10px; color: var(--muted); }
+  /* Иконка карточки банка - ФИКСИРОВАННОГО размера ВСЕГДА, даже без картинки
+     (та же причина, что у .storage-tile-icon: иначе карточки без иконки были
+     бы ниже соседних и портили ровный ряд рамок). */
+  .soul-bank-icon { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; }
+  .soul-bank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)); grid-auto-rows: min-content; align-content: start; gap: 10px; }
+
+  /* Форма "Синтез" в генетической лаборатории (renderSynthesizeSection) -
+     .field-row раньше не имел вообще никакого CSS (голый div: подпись +
+     нативный select впритык друг к другу) - самое "неоформленное" место из
+     трёх модалок, на которые пожаловался игрок, 2026-09-13, см. CLAUDE.md. */
+  .synth-fields { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  .field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+  .field-row select { min-width: 170px; }
+  .synth-footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); font-size: 11px; color: var(--muted); }
+
   /* Сетка карточек всех особей игрока для перетаскивания в слоты выше - те же
      плитки-принципы, что storage-tile/storage-grid (поиск/подсветка общие,
      см. makeResourceSearchBar), но со своим размером под пиксель-иконку. */
   .breed-picker-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 8px;
-    padding: 4px 0; max-height: 220px; overflow-y: auto;
+    display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: min-content; align-content: start; gap: 12px;
+    padding: 12px 26px 26px;
   }
   .breed-card {
     display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: grab;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 4px 6px; text-align: center;
+    background: transparent; border: 1px solid rgba(95,208,232,.25); border-radius: 0; padding: 8px 4px 6px; text-align: center;
     transition: border-color .12s, opacity .12s;
   }
-  .breed-card:hover { border-color: var(--accent-dim); }
+  .breed-card:hover { border-color: var(--blueprint); }
   .breed-card:active { cursor: grabbing; }
-  .breed-card.selected-a, .breed-card.selected-b { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .breed-card.selected-a, .breed-card.selected-b { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); animation: breed-card-selected-glow 2.2s ease-in-out infinite; }
+  @keyframes breed-card-selected-glow {
+    0%, 100% { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 rgba(240,160,48,0); }
+    50% { box-shadow: inset 0 0 0 1px var(--accent), 0 0 12px rgba(240,160,48,.5); }
+  }
   .breed-card.search-match { border-color: var(--accent); }
   .breed-card.search-dim { opacity: .3; }
   .breed-card-id { font-size: 9px; color: var(--muted); }
   .breed-card-name { font-size: 10px; line-height: 1.2; }
+  /* Чипы фильтра по семейству (см. renderBreedSection) - не путать с
+     .tabs (те подразумевают панель под ними), тут просто ряд переключателей. */
+  .breed-family-filter { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0 22px; }
+  .breed-family-filter button {
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 14px; padding: 4px 12px; font-size: 11px;
+  }
+  .breed-family-filter button:hover { border-color: var(--accent-dim); }
+  .breed-family-filter button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
   .note-chip.accent { color: var(--accent); font-weight: 600; }
 
   /* Заголовок блока "Скрестить" с кнопкой книги пчёл справа - см. renderBreedSection. */
   .breed-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
   .breed-section-head h3 { margin: 0; }
 
-  /* Книга пчёл (openSpeciesBookModal) - список видов с поиском слева, детали
+  /* Книга видов (openSpeciesBookModal) - список видов с поиском слева, детали
      выбранного вида (описание + все пары родителей, дающие его) справа. */
-  .book-layout { display: flex; flex-wrap: wrap; gap: 16px; padding: 14px 16px; align-items: flex-start; }
+  .book-layout { display: flex; flex-wrap: wrap; gap: 16px; padding: 18px 22px; align-items: flex-start; }
   .book-list-pane { flex: 1 1 220px; min-width: 200px; display: flex; flex-direction: column; gap: 8px; }
   .book-species-list { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; }
   .book-species-item {
-    display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px;
-    border: 1px solid var(--border); background: var(--panel2); cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 0;
+    border: 1px solid rgba(255,255,255,.1); background: transparent; cursor: pointer; text-align: left;
     font-size: 12px; color: var(--text); transition: border-color .12s, background .12s;
   }
-  .book-species-item:hover { border-color: var(--accent-dim); }
-  .book-species-item.selected { border-color: var(--accent); background: var(--panel); }
-  .book-species-item.search-match { border-color: var(--accent); }
-  .book-species-item.search-dim { opacity: .3; }
+  .book-species-item:hover { border-color: var(--blueprint); }
+  .book-species-item.selected { border-color: var(--accent); background: rgba(240,160,48,.06); }
   .book-detail-pane { flex: 2 1 340px; min-width: 260px; }
   .book-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .book-species-desc { font-size: 12px; color: var(--muted); margin: 4px 0 14px; }
   .book-recipe-row {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; margin-bottom: 6px;
-    border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+    border: 1px solid rgba(255,255,255,.08); border-radius: 0; background: transparent;
   }
   .book-recipe-row.locked { opacity: .55; }
   .book-parent-btn {
-    display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px;
-    background: var(--panel2); border: 1px solid var(--border); font-size: 11px; color: var(--text);
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 0;
+    background: transparent; border: 1px solid rgba(255,255,255,.15); font-size: 11px; color: var(--text);
   }
   .book-parent-btn.clickable { cursor: pointer; }
   .book-parent-btn.clickable:hover { border-color: var(--accent); color: var(--accent); }
@@ -537,10 +789,10 @@
      действия, если докрафт реально что-то возьмёт из запаса, плюс кнопка,
      разворачивающая полное дерево рецепта. */
   .modal.autocraft-confirm-modal { max-width: 560px; }
-  .autocraft-confirm-list { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+  .autocraft-confirm-list { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; }
   .autocraft-confirm-row {
-    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: transparent; border: 1px solid rgba(255,255,255,.08); border-radius: 0;
   }
   .autocraft-confirm-row .info { flex: 1; min-width: 0; font-size: 12px; }
   .autocraft-confirm-row .info .name { font-weight: 600; }
@@ -554,18 +806,18 @@
     background: none; color: var(--muted); border: 1px dashed var(--border); font-weight: 500;
   }
   .autocraft-confirm-footer {
-    display: flex; align-items: center; gap: 8px; padding: 12px 16px;
-    border-top: 1px solid var(--border); position: sticky; bottom: 0; background: var(--panel);
+    display: flex; align-items: center; gap: 8px; padding: 14px 22px;
+    border-top: 1px solid rgba(255,255,255,.08); position: sticky; bottom: 0; background: #161d24;
   }
   .autocraft-confirm-footer .spacer { flex: 1; }
 
   /* Дерево рецепта - вложенный список с направляющей линией (border-left на
      контейнере детей), без SVG - глубина может быть любой, разметка растёт сама. */
-  .autocraft-tree-box { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .autocraft-tree-box { padding: 18px 22px; display: flex; flex-direction: column; gap: 8px; }
   .autocraft-tree-node { display: flex; flex-direction: column; gap: 6px; }
   .autocraft-tree-head {
-    display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 12px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 7px;
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px;
+    background: transparent; border: 1px solid rgba(255,255,255,.08); border-radius: 0;
   }
   .autocraft-tree-head.drafted { border-color: var(--accent-dim); }
   .autocraft-tree-head .name { font-weight: 600; flex-shrink: 0; }
@@ -579,20 +831,53 @@
     background: var(--warn); border: 1px solid var(--warn); border-radius: 10px; padding: 2px 8px;
   }
   .autocraft-tree-children {
-    margin-left: 19px; padding-left: 12px; border-left: 2px solid var(--border);
+    margin-left: 19px; padding-left: 12px; border-left: 2px solid rgba(95,208,232,.3);
     display: flex; flex-direction: column; gap: 6px;
   }
-  .modal-head { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel); }
-  .modal-head button { margin-left: auto; padding: 4px 10px; }
-  .storage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; padding: 14px 16px; }
+  .modal-head {
+    display: flex; align-items: center; padding: 16px 22px 14px; border-bottom: 1px solid rgba(255,255,255,.08);
+    position: sticky; top: 0; background: #161d24;
+  }
+  .modal-head button {
+    margin-left: auto; padding: 6px 14px 6px 10px; flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,.15); background: transparent; color: #7f97a1; font-size: 11px;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  }
+  .modal-head strong {
+    display: inline-block;
+    font-family: Consolas, "Courier New", monospace; letter-spacing: 1.5px; text-transform: uppercase;
+    font-size: 15px; font-weight: 700; color: #dbe7ec;
+  }
+  .modal-head strong::after {
+    content: ""; display: block; height: 1px; margin-top: 10px;
+    background: repeating-linear-gradient(90deg, rgba(95,208,232,.4) 0 6px, transparent 6px 12px);
+  }
+  /* Промежуточный размер между "огромные полупустые иконки" (было изначально)
+     и "слишком мелко, текст не читается" (первая правка, 2026-09-13) - по
+     прямому пожеланию во втором заходе того же дня, см. CLAUDE.md. Модалка
+     расширена (см. .modal.storage-modal), чтобы влезало много колонок и
+     без мелкого шрифта. */
+  .storage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); grid-auto-rows: min-content; align-content: start; gap: 8px; padding: 16px 24px 24px; }
   .storage-tile {
     position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 6px 6px; text-align: center;
+    background: var(--panel2); border: 1px solid rgba(255,255,255,.08); border-radius: 0; padding: 9px 6px 8px; text-align: center;
   }
-  .storage-tile.zero { opacity: .4; filter: grayscale(.75); }
+  /* Не .storage-tile.zero целиком - иначе притемнение как group-фильтр накрыло
+     бы и .pin-toggle (абсолютно спозиционированную дочернюю кнопку): звёздочка
+     закреплённого ресурса должна оставаться яркой (var(--accent)), даже если
+     самого ресурса сейчас 0 и остальная плитка серая - опыт закрепления не
+     должен теряться из-за того, что запас на нуле. CSS filter/opacity предка
+     нельзя отменить у потомка, поэтому притемняем явно каждого ребёнка, кроме
+     звёздочки, вместо самой плитки (см. пожелание игрока, 2026-09-13). */
+  .storage-tile.zero > *:not(.pin-toggle) { opacity: .4; filter: grayscale(.75); }
+  .storage-tile-icon {
+    width: 24px; height: 24px; flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03);
+    display: flex; align-items: center; justify-content: center;
+  }
   .storage-tile .amount { font-size: 13px; font-weight: 700; }
   .storage-tile .amount .cap { font-weight: 400; color: var(--muted); }
-  .storage-tile .name { font-size: 9px; color: var(--muted); line-height: 1.2; }
+  .storage-tile .name { font-size: 10px; color: var(--muted); line-height: 1.2; }
   .storage-tile.clickable { cursor: pointer; transition: border-color .15s, opacity .15s; }
   .storage-tile.clickable:hover { border-color: var(--accent-dim); }
   .storage-tile.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
@@ -601,18 +886,18 @@
   .storage-tile.search-dim { opacity: .3; }
   .all-recipes-tile .all-recipes-icon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--accent); }
   .pin-toggle {
-    position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0;
+    position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0;
     display: flex; align-items: center; justify-content: center;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 50%;
-    font-size: 11px; line-height: 1; color: var(--muted);
+    background: #161d24; border: 1px solid rgba(255,255,255,.15); border-radius: 50%;
+    font-size: 10px; line-height: 1; color: var(--muted);
   }
-  .pin-toggle.pinned { border-color: var(--accent-dim); color: var(--accent); background: var(--accent-dim); }
+  .pin-toggle.pinned { border-color: var(--accent); color: var(--accent); background: rgba(240,160,48,.12); }
   .storage-upgrade-btn {
     position: relative; overflow: hidden;
-    margin-top: 2px; font-size: 10px; padding: 2px 6px; border-radius: 5px;
-    background: var(--panel); border: 1px solid var(--accent-dim); color: var(--accent);
+    margin-top: 2px; font-size: 10px; padding: 2px 7px; border-radius: 0;
+    background: var(--accent); border: 1px solid var(--accent); color: #10151b;
   }
-  .storage-upgrade-btn:disabled { opacity: .45; cursor: not-allowed; color: var(--muted); border-color: var(--border); }
+  .storage-upgrade-btn:disabled { opacity: .45; cursor: not-allowed; color: var(--muted); background: transparent; border-color: rgba(255,255,255,.15); }
   .storage-upgrade-btn.on-cooldown { opacity: .55; cursor: not-allowed; pointer-events: none; }
 
   #toastBanner { position: fixed; top: 70px; right: 20px; z-index: 300; display: flex; flex-direction: column; gap: 8px; max-width: 320px; }
@@ -625,18 +910,28 @@
 
   .toast-error { background: linear-gradient(135deg, #3a1f1f, #20242a); border: 1px solid var(--danger); font-size: 12px; color: var(--text); }
 
-  .quest-prizes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .prize-chip { display: flex; align-items: center; gap: 5px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 3px 7px; font-size: 11px; }
-  .prize-chip .prize-odds { color: var(--muted); }
-
   .lootbox-modal { max-width: 480px; text-align: center; }
-  .lootbox-viewport { position: relative; height: 96px; margin: 16px; overflow: hidden; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); }
+  .lootbox-viewport { position: relative; height: 96px; margin: 24px 16px 0; overflow: hidden; border-radius: 0; background: #0d1116; border: 1px solid rgba(255,255,255,.12); }
   .lootbox-track { position: absolute; top: 0; left: 0; display: flex; height: 100%; will-change: transform; }
-  .lootbox-cell { flex: 0 0 96px; width: 96px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-right: 1px solid var(--border); box-sizing: border-box; }
-  .lootbox-cell.won { background: rgba(240, 160, 48, 0.15); }
+  .lootbox-cell { flex: 0 0 96px; width: 96px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-right: 1px solid rgba(255,255,255,.08); box-sizing: border-box; }
+  .lootbox-cell.won { background: rgba(240, 160, 48, 0.15); animation: lootbox-won-pulse 2.5s ease-in-out infinite; }
   .lootbox-cell .lootbox-cell-name { font-size: 10px; color: var(--muted); text-align: center; padding: 0 4px; }
   .lootbox-cell .lootbox-cell-amount { font-size: 11px; font-weight: 600; color: var(--accent); }
-  .lootbox-pointer { position: absolute; top: 0; left: 50%; width: 2px; height: 100%; background: var(--accent); transform: translateX(-1px); box-shadow: 0 0 8px var(--accent); pointer-events: none; }
+  .lootbox-pointer {
+    position: absolute; top: 0; left: 50%; width: 2px; height: 100%; background: var(--accent);
+    transform: translateX(-1px); box-shadow: 0 0 8px var(--accent); pointer-events: none;
+    animation: lootbox-pointer-tick 2.5s ease-in-out infinite;
+  }
+  @keyframes lootbox-won-pulse {
+    0%, 85% { background: rgba(240,160,48,.15); }
+    92% { background: rgba(240,160,48,.32); }
+    100% { background: rgba(240,160,48,.15); }
+  }
+  @keyframes lootbox-pointer-tick {
+    0%, 85% { box-shadow: 0 0 8px var(--accent); }
+    90% { box-shadow: 0 0 18px var(--accent), 0 0 4px #fff5e6; }
+    100% { box-shadow: 0 0 8px var(--accent); }
+  }
   .lootbox-result { margin: 0 16px 16px; display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 70px; justify-content: center; }
   .lootbox-result .title { font-size: 15px; font-weight: 700; color: var(--accent); }
 
@@ -660,124 +955,253 @@
   .stats-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
 
   .saves-modal { max-width: 520px; }
-  .saves-new-row { display: flex; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .saves-new-row { display: flex; gap: 8px; padding: 16px 22px; border-bottom: 1px solid rgba(255,255,255,.08); }
   .saves-new-row input[type=text] { flex: 1; }
-  .saves-list { padding: 4px 16px 16px; }
-  .save-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .saves-list { padding: 4px 22px 22px; }
+  .save-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
   .save-item:last-child { border-bottom: none; }
   .save-item .info { flex: 1; min-width: 0; }
   .save-item .name { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
   .save-item .meta { font-size: 11px; color: var(--muted); }
-  .saves-reset-row { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .saves-reset-row { padding: 14px 22px; border-top: 1px solid rgba(255,255,255,.08); }
   .saves-reset-row button { width: 100%; padding: 8px; }
 
   .tech-tab-placeholder { padding: 24px 14px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
   .tech-tab-summary { color: var(--muted); font-size: 13px; }
   .tech-tab-open-btn { padding: 10px 18px; font-size: 13px; }
 
-  .modal.tech-modal { width: 96vw; max-width: 1500px; max-height: 92vh; }
-  .tech-modal .tech-graph { max-height: 62vh; }
-
-  .tech-tree-wrap { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
-  .tech-graph { position: relative; overflow: auto; max-height: 360px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); cursor: grab; }
+  /* .tech-tree-wrap заполняет ВСЮ высоту модалки, оставшуюся под шапкой (модалка
+     теперь фиксированного размера 700x820 - см. .modal.tech-modal выше, и
+     никогда не "прыгает" от количества технологий/квестов внутри): граф -
+     flex:1, растягивается на всё оставшееся место и сам скроллится/панорамится
+     (см. .tech-graph), а компактная плашка деталей внизу (.tech-detail) -
+     фиксированной высоты, как в канвасе. */
+  .tech-tree-wrap { display: flex; flex-direction: column; gap: 16px; padding: 20px; flex: 1; min-height: 0; }
+  /* Обёртка вкладок эры в модалке "Квесты" - тоже flex:1 (заполняет всё, что
+     осталось под вкладками эр в фиксированной модалке 700x820), сама модалка
+     никогда не меняет размер при переключении эры - см. CLAUDE.md. */
+  .quest-era-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .tech-graph {
+    position: relative; flex: 1; min-height: 0; overflow: auto;
+    border: 1px solid rgba(255,255,255,.1); border-radius: 0; background: #0d1116; cursor: grab;
+    scrollbar-width: thin; scrollbar-color: rgba(95,208,232,.4) transparent;
+  }
+  .tech-graph::-webkit-scrollbar { width: 8px; height: 8px; }
+  .tech-graph::-webkit-scrollbar-track { background: transparent; }
+  .tech-graph::-webkit-scrollbar-thumb { background-color: rgba(95,208,232,.35); border: 2px solid #0d1116; background-clip: padding-box; }
   .tech-graph.panning { cursor: grabbing; }
   .tech-cols { display: flex; gap: 6px; padding: 18px; position: relative; z-index: 1; width: max-content; }
   .tech-col-band { display: flex; flex-direction: column; border-radius: 10px; padding: 10px 8px; }
   .tech-col-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; text-align: center; margin-bottom: 10px; font-weight: 600; }
   .tech-col-row { display: flex; gap: 28px; flex: 1; }
   .tech-col { display: flex; flex-direction: column; gap: 14px; width: 160px; justify-content: center; }
-  .tech-node { background: var(--panel2); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; cursor: pointer; }
-  .tech-node:hover { border-color: var(--accent-dim); }
+  /* Узел-"чип" 1:1 из канваса (B_TechTree.dc.html): полноцветная плоская рамка +
+     тонированный фон по статусу, вместо старой карточки с цветной полоской
+     слева - тот же язык, что у .n-done/.n-avail/.n-locked в канвасе. */
+  .tech-node {
+    background: #14191f; border: 1px solid #2b333b; border-radius: 0; padding: 8px 10px;
+    font-family: Consolas, "Courier New", monospace; font-size: 11px; color: #4d5762; cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  .tech-node:hover { border-color: var(--blueprint); }
   .tech-node.selected { box-shadow: 0 0 0 1px var(--accent); border-color: var(--accent); }
-  .tech-node.researched { border-left-color: var(--ok); }
-  .tech-node.available { border-left-color: var(--accent); }
-  .tech-node.locked { opacity: .5; }
+  .tech-node.researched { background: rgba(95,208,232,.08); border-color: var(--blueprint); color: #a9e8f5; }
+  .tech-node.available { background: rgba(240,160,48,.08); border-color: var(--accent); color: var(--accent); animation: node-flicker 6s infinite; }
+  .tech-node.locked { opacity: 1; }
+  @keyframes node-flicker {
+    0%, 92% { box-shadow: none; }
+    93% { opacity: .5; box-shadow: none; }
+    94% { opacity: 1; box-shadow: 0 0 10px rgba(240,160,48,.55); }
+    95% { opacity: .65; box-shadow: none; }
+    96%, 100% { opacity: 1; box-shadow: 0 0 10px rgba(240,160,48,.4); }
+  }
   .lab-warn-line { color: var(--warn); font-size: 12px; margin: 4px 0 8px; }
   .tech-edges { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; }
-  .tech-edge { fill: none; stroke: var(--border); stroke-width: 1.5; }
-  .tech-edge.edge-done { stroke: var(--accent-dim); }
+  /* pathLength="1" (см. drawTechEdges/drawQuestEdges) нормализует длину кривой к
+     0..1 - stroke-dasharray:1 значит "один сплошной штрих на всю длину", а
+     анимация просто едет dashoffset 1 -> 0, т.е. "дочерчивает" ребро при
+     каждой перерисовке графа (открытие модалки, исследование технологии). */
+  .tech-edge {
+    fill: none; stroke: var(--border); stroke-width: 1.5;
+    stroke-dasharray: 1; stroke-dashoffset: 1; animation: tech-edge-draw .6s ease-out forwards;
+  }
+  .tech-edge.edge-done { stroke: var(--blueprint); }
+  @keyframes tech-edge-draw { to { stroke-dashoffset: 0; } }
 
   /* Узел квестового графа (openQuestsModal/renderQuestGraph) - НАМЕРЕННО не
      .tech-node: отдельный класс, чтобы декоративная обводка не задела дерево
      технологий. Скошенный угол (clip-path) + двойная рамка (обычный border +
      внутренний inset-контур цвета статуса) + значок-жетон статуса в углу -
      раньше тут была просто цветная левая полоска, как у технологий. */
+  /* 1:1 из канваса (B_Quests.dc.html: .qnode/.q-claimed/.q-completed/.q-avail/
+     .q-locked) - та же полноцветная плоская рамка + тонированный фон, что у
+     .tech-node, только с сохранённым скошенным уголком (clip-path) как
+     декоративным отличием квестового графа от технологического - см.
+     CLAUDE.md. Статусная палитра из канваса НЕ повторяет --ok/--danger:
+     claimed/completed тонируются голубым (--blueprint - "уже часть схемы"),
+     available - янтарным (--accent - "требует действия"), а не зелёным. */
   .quest-node {
     position: relative;
-    background: linear-gradient(165deg, var(--panel2) 0%, var(--panel) 100%);
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 9px 11px;
-    font-size: 12px;
+    background: #14191f; border: 1px solid #2b333b; border-radius: 0;
+    padding: 9px 11px; font-family: Consolas, "Courier New", monospace; font-size: 11px; color: #4d5762;
     cursor: pointer;
     clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 0 2px transparent;
-    transition: filter .12s ease, border-color .12s ease;
+    transition: border-color .12s ease, background .12s ease;
   }
-  .quest-node:hover { border-color: var(--accent-dim); }
-  .quest-node.selected { filter: drop-shadow(0 0 5px rgba(240,160,48,.55)); border-color: var(--accent); }
-  .quest-node.locked { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 0 2px rgba(140,90,90,.35); opacity: .6; }
-  .quest-node.available { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 0 2px var(--accent-dim); }
-  .quest-node.completed { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 0 2px var(--accent); }
-  .quest-node.completed::after { content: ""; position: absolute; inset: 0; border-radius: 7px; box-shadow: 0 0 8px rgba(240,160,48,.45); pointer-events: none; }
-  .quest-node.claimed { box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), inset 0 0 0 2px var(--ok); opacity: .85; }
+  .quest-node:hover { border-color: var(--blueprint); }
+  .quest-node.selected { box-shadow: 0 0 0 1px var(--accent); border-color: var(--accent); }
+  .quest-node.locked { background: #14191f; border-color: #2b333b; color: #4d5762; }
+  .quest-node.available { background: rgba(240,160,48,.08); border-color: var(--accent); color: var(--accent); animation: node-flicker 6s infinite; }
+  .quest-node.completed { background: rgba(95,208,232,.05); border-color: rgba(95,208,232,.5); color: #7f97a1; }
+  .quest-node.claimed { background: rgba(95,208,232,.1); border-color: var(--blueprint); color: #a9e8f5; }
   .quest-node-name { padding-right: 16px; }
   .quest-node-badge {
     position: absolute; top: -7px; right: -7px; width: 19px; height: 19px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1;
-    background: var(--panel); border: 1px solid var(--border);
+    background: #161d24; border: 1px solid #2b333b; color: inherit;
   }
-  .quest-node.locked .quest-node-badge { border-color: rgba(140,90,90,.6); }
-  .quest-node.available .quest-node-badge { border-color: var(--accent-dim); }
-  .quest-node.completed .quest-node-badge { border-color: var(--accent); background: rgba(240,160,48,.15); }
-  .quest-node.claimed .quest-node-badge { border-color: var(--ok); background: rgba(74,201,160,.12); }
+  .quest-node.locked .quest-node-badge { border-color: #2b333b; color: #4d5762; }
+  .quest-node.available .quest-node-badge { border-color: var(--accent); color: var(--accent); }
+  .quest-node.completed .quest-node-badge { border-color: #7f97a1; color: #7f97a1; }
+  .quest-node.claimed .quest-node-badge { border-color: var(--blueprint); color: var(--blueprint); }
+  .quest-node.claimed .quest-node-badge::after {
+    content: ""; position: absolute; inset: -1px; border-radius: 50%; border: 1px solid var(--blueprint);
+    animation: claim-ping 3s ease-out infinite;
+  }
+  @keyframes claim-ping {
+    0% { transform: scale(1); opacity: .8; }
+    70%, 100% { transform: scale(2.4); opacity: 0; }
+  }
 
   .quest-era-tabs button.active { color: var(--era-accent, var(--accent)); border-color: var(--era-accent, var(--accent-dim)); }
-  .tech-detail { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-  .tech-detail h4 { margin: 0 0 6px; font-size: 14px; }
-  .tech-detail .desc { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-  .tech-detail .unlock-line { font-size: 12px; margin: 6px 0; }
-  .tech-detail .costs { margin: 8px 0; }
-  .tech-detail .status-line { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  /* Компактная плашка деталей - 1:1 из канваса (B_TechTree.dc.html/B_Quests.dc.html:
+     .detail/.detail-name/.detail-cost/.btn): один невысокий флекс-ряд (имя +
+     цена слева, кнопка справа), а НЕ карточка с заголовком/описанием/списком
+     "открывает"/бейджем тира друг под другом, как было раньше - см. CLAUDE.md.
+     Полное описание/"открывает"/предупреждение про лабораторию по-прежнему
+     доступны - как title-подсказка на имени технологии, а не постоянным
+     текстом (иначе плашка снова растянулась бы на пол-экрана). */
+  .tech-detail {
+    flex-shrink: 0; background: transparent; border: 1px solid rgba(255,255,255,.1); border-radius: 0;
+    padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .tech-detail-info { min-width: 0; }
+  .tech-detail-name { font-family: Consolas, monospace; font-size: 13px; font-weight: 700; color: #dbe7ec; cursor: help; }
+  .tech-detail-cost { font-size: 11px; color: #7f97a1; font-family: Consolas, monospace; margin-top: 4px; }
+  .tech-detail-cost b { color: #dbe7ec; font-weight: 700; }
+  .tech-detail-cost.warn { color: var(--warn); }
   .tech-detail button {
-    margin-top: 10px; background: var(--accent); color: #1a1207; border: none;
-    border-radius: 6px; padding: 8px 14px; font-weight: 700; font-size: 12px;
+    flex-shrink: 0; background: var(--accent); color: #10151b; border: 1px solid var(--accent);
+    border-radius: 0; padding: 10px 16px; font-weight: 700; font-size: 12px;
+    font-family: Consolas, monospace; letter-spacing: .5px;
+    clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px);
     position: relative; overflow: hidden; transition: transform .08s ease, filter .08s ease;
   }
   .tech-detail button:active:not(:disabled) { transform: scale(0.97); filter: brightness(0.92); }
   .tech-detail button.on-cooldown { opacity: .6; cursor: not-allowed; pointer-events: none; }
+
+  /* ---------- панель схватки (renderActiveEncounterBlock) ---------- */
+  .encounter-box { display: flex; gap: 12px; align-items: flex-start; }
+  .encounter-portrait {
+    position: relative; flex-shrink: 0; width: 72px; height: 72px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; overflow: visible;
+  }
+  .encounter-portrait.is-boss { border-color: var(--accent); box-shadow: 0 0 10px rgba(240,160,48,.25); }
+  .encounter-portrait svg { width: 56px; height: 56px; image-rendering: pixelated; }
+  .encounter-body { flex: 1; min-width: 0; }
+  .encounter-title { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .encounter-timer { font-size: 11px; font-weight: 700; color: var(--muted); }
+  .encounter-timer.urgent { color: var(--danger); animation: pulse 1s infinite; }
+  .encounter-hp-bar {
+    position: relative; height: 10px; border-radius: 5px; background: var(--panel2);
+    border: 1px solid var(--border); overflow: hidden; margin: 6px 0 8px;
+  }
+  .encounter-hp-fill {
+    height: 100%; background: linear-gradient(90deg, var(--accent-dim, var(--accent)), var(--accent));
+    transition: width .3s ease-out;
+  }
+  .encounter-moves { display: flex; gap: 6px; flex-wrap: wrap; }
+  .move-btn {
+    position: relative; overflow: hidden; font-size: 12px; padding: 7px 10px;
+    border-radius: 6px; border: 1px solid var(--border); background: var(--panel2);
+    color: var(--text); cursor: pointer; transition: transform .08s ease, filter .08s ease;
+  }
+  .move-btn:active:not(:disabled) { transform: scale(0.96); }
+  .move-btn.primary { background: var(--accent); color: #241a08; border-color: var(--accent); font-weight: 600; }
+  .move-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .move-btn .move-cd-badge {
+    position: absolute; top: 2px; right: 4px; font-size: 10px; font-weight: 700;
+    color: var(--danger);
+  }
+
+  @keyframes hit-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px) rotate(-2deg); }
+    40% { transform: translateX(3px) rotate(2deg); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+  .encounter-portrait.hit-shake { animation: hit-shake .35s ease-in-out; }
+  .encounter-portrait.hit-shake::after {
+    content: ""; position: absolute; inset: 0; border-radius: 8px;
+    background: rgba(224,82,74,.35); animation: flash-highlight .35s ease-out;
+  }
+
+  @keyframes dmg-float {
+    0% { transform: translate(-50%, 0); opacity: 1; }
+    100% { transform: translate(-50%, -32px); opacity: 0; }
+  }
+  .dmg-float {
+    position: absolute; left: 50%; top: -4px; transform: translate(-50%, 0);
+    font-weight: 700; font-size: 15px; color: var(--danger);
+    text-shadow: 0 1px 2px rgba(0,0,0,.6); animation: dmg-float .8s ease-out forwards;
+    pointer-events: none; white-space: nowrap;
+  }
+
+  @keyframes kill-flash-fade {
+    0% { opacity: .85; }
+    100% { opacity: 0; }
+  }
+  .kill-flash-overlay {
+    position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    background: radial-gradient(circle, rgba(255,225,140,.9), rgba(255,225,140,0) 70%);
+    animation: kill-flash-fade .5s ease-out forwards;
+  }
 </style>
 </head>
 <body>
 
 <div id="toastBanner"></div>
 
-<header class="topbar">
-  <div class="title-block">
-    <h1>Майнкрафт на минималках</h1>
+<header class="hud">
+  <div class="hud-title">
+    Майнкрафт<br>на минималках
     <div class="save-name-label" id="saveNameLabel" hidden>Сохранение: <span id="saveNameText"></span></div>
   </div>
-  <div class="badge">Ход <b id="turnNum">1</b></div>
-  <div class="badge"><span id="timeIcon" class="time-icon"></span>Время <b id="timeLabel">День 1, 00:00</b></div>
-  <div class="badge">Технологии <b id="techProgress">0/0</b></div>
-  <div class="spacer"></div>
-  <button id="toolsBtn">Инструменты</button>
-  <button id="statsBtn">Статистика</button>
-  <button id="storageBtn">Склад</button>
-  <button id="skillsBtn" hidden>Навыки</button>
-  <button id="questsBtn" hidden>Квесты</button>
-  <button id="prioritiesBtn">Приоритеты</button>
-  <button id="savesBtn">Сохранения</button>
-  <div class="sound-control" id="soundControl">
-    <button id="soundToggleBtn" title="Громкость">🔊</button>
-    <div class="sound-panel" id="soundPanel" hidden>
-      <div class="sound-panel-row">
-        <div class="row-head"><span>Музыка</span><b id="musicVolumeLabel">50%</b></div>
-        <input type="range" id="musicVolumeSlider" min="0" max="100" step="1">
-      </div>
-      <div class="sound-panel-row">
-        <div class="row-head"><span>Звуки</span><b id="sfxVolumeLabel">80%</b></div>
-        <input type="range" id="sfxVolumeSlider" min="0" max="100" step="1">
+  <div class="hud-cell"><b id="turnNum">1</b><span>Ход</span></div>
+  <div class="hud-cell"><b><span id="timeIcon" class="time-icon"></span><span id="timeLabel">День 1, 00:00</span></b><span>Время</span></div>
+  <div class="hud-cell"><b id="techProgress">0/0</b><span>Технологии</span></div>
+  <div class="hud-cell"><b id="hudEnergy">0/0</b><span>Энергия</span></div>
+  <div class="hud-nav">
+    <button id="toolsBtn">Инструменты</button>
+    <button id="statsBtn">Статистика</button>
+    <button id="storageBtn">Склад</button>
+    <button id="skillsBtn" hidden>Навыки</button>
+    <button id="questsBtn" hidden>Квесты</button>
+    <button id="prioritiesBtn">Приоритеты</button>
+    <button id="savesBtn">Сохранения</button>
+    <div class="sound-control" id="soundControl">
+      <button id="soundToggleBtn" title="Громкость">🔊</button>
+      <div class="sound-panel" id="soundPanel" hidden>
+        <div class="sound-panel-row">
+          <div class="row-head"><span>Музыка</span><b id="musicVolumeLabel">50%</b></div>
+          <input type="range" id="musicVolumeSlider" min="0" max="100" step="1">
+        </div>
+        <div class="sound-panel-row">
+          <div class="row-head"><span>Звуки</span><b id="sfxVolumeLabel">80%</b></div>
+          <input type="range" id="sfxVolumeSlider" min="0" max="100" step="1">
+        </div>
       </div>
     </div>
   </div>
@@ -790,13 +1214,7 @@
   <div class="dashboard">
     <div class="col">
       <section class="panel" id="actionsPanel">
-        <div class="panel-head panel-head-row">
-          <span>Пульт действий</span>
-          <label class="autocraft-toggle" id="autocraftToggleWrap" hidden>
-            <input type="checkbox" id="autocraftToggle">
-            Автокрафт
-          </label>
-        </div>
+        <div class="panel-head"><span>Пульт действий</span></div>
         <div class="tabs" id="actionTabs"></div>
         <div id="actionBody"></div>
         <div class="skip-row"><button id="skipBtn">Пропустить ход (ничего не делать)</button></div>
@@ -805,7 +1223,7 @@
       <section class="panel">
         <div class="panel-head panel-head-row">
           <span>Производственные мощности</span>
-          <span class="badge mono" id="buildingsCount">0</span>
+          <span class="module-tag mono" id="buildingsCount">0</span>
         </div>
         <div class="panel-body" id="buildingsGrid"></div>
       </section>
@@ -813,7 +1231,7 @@
 
     <div class="col">
       <section class="panel">
-        <div class="panel-head">Энергосистема</div>
+        <div class="panel-head"><span>Энергосистема</span></div>
         <div class="panel-body">
           <div class="energy-readout">
             <div class="energy-stat"><span class="num mono" id="energyStock">0</span><span class="lbl" id="energyStockLbl">Запас</span></div>
@@ -826,22 +1244,29 @@
       </section>
 
       <section class="panel">
-        <div class="panel-head">Склад</div>
+        <div class="panel-head"><span>Склад</span></div>
         <div class="panel-body"><div class="res-grid" id="resGrid"></div></div>
       </section>
 
       <section class="panel" id="autocraftPanel" hidden>
-        <div class="panel-head">Автокрафт</div>
+        <div class="panel-head panel-head-row">
+          <span>Автокрафт</span>
+          <label class="autocraft-toggle" id="autocraftToggleWrap">
+            <input type="checkbox" id="autocraftToggle">
+            <span class="switch"><span class="knob"></span></span>
+            Автокрафт
+          </label>
+        </div>
         <div class="panel-body" id="autocraftBody"></div>
       </section>
 
       <section class="panel" id="energyCraftPanel" hidden>
-        <div class="panel-head">Крафт из энергии</div>
+        <div class="panel-head"><span>Крафт из энергии</span></div>
         <div class="panel-body" id="energyCraftBody"></div>
       </section>
 
       <section class="panel" id="manualJobsPanel" hidden>
-        <div class="panel-head">Долгие действия</div>
+        <div class="panel-head"><span>Долгие действия</span></div>
         <div class="panel-body" id="manualJobsBody"></div>
       </section>
 
@@ -850,7 +1275,7 @@
           <span>Журнал событий</span>
           <button id="logToggleBtn" class="panel-head-btn" title="Развернуть журнал">▾</button>
         </div>
-        <div class="log-list compact" id="logList"></div>
+        <div class="log-list compact thin-scroll" id="logList"></div>
       </section>
     </div>
   </div>
@@ -877,6 +1302,46 @@ function svgEl(tag, attrs = {}) {
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   return node;
 }
+
+// Скользящее голубое подчёркивание активной вкладки под .tabs (см. .tab-underline
+// в CSS) - общий хелпер для openPrioritiesModal/openQuestsModal, чтобы не дублировать
+// позиционирование в каждом месте, где есть вкладки. Создаёт/переиспользует один
+// .tab-underline внутри tabsEl и подгоняет left/width под offsetLeft/offsetWidth
+// activeBtn - тот же приём, что macOS/браузерные табы, только на чистом JS/CSS
+// (без анимационного фреймворка). Вызывать после того, как activeBtn уже в DOM.
+function positionTabUnderline(tabsEl, activeBtn) {
+  let underline = tabsEl.querySelector(".tab-underline");
+  if (!underline) {
+    underline = el("div", { class: "tab-underline" });
+    tabsEl.appendChild(underline);
+  }
+  if (!activeBtn) { underline.classList.remove("visible"); return; }
+  underline.style.left = `${activeBtn.offsetLeft}px`;
+  underline.style.width = `${activeBtn.offsetWidth}px`;
+  underline.classList.add("visible");
+}
+
+// Угловые скобки "Чертёж" (см. .bracket в CSS) - 4 настоящих div'а, вставляются
+// автоматически в ЛЮБУЮ .modal через MutationObserver на document.body, а не
+// руками в каждой из ~19 функций open*Modal(). Настоящие div'ы (не CSS-трюк на
+// фоновых градиентах) нужны, чтобы скобки были пиксель-в-пиксель как в канвасе
+// (design-канвас, вариант B) - см. CLAUDE.md.
+function ensureModalBrackets(modal) {
+  if (modal.querySelector(":scope > .bracket")) return;
+  ["tl", "tr", "bl", "br"].forEach(pos => {
+    modal.insertBefore(el("div", { class: `bracket ${pos}` }), modal.firstChild);
+  });
+}
+new MutationObserver(mutations => {
+  for (const m of mutations) {
+    for (const node of m.addedNodes) {
+      if (!(node instanceof HTMLElement)) continue;
+      const modal = node.classList.contains("modal-overlay") ? node.querySelector(".modal") : null;
+      if (modal) ensureModalBrackets(modal);
+    }
+  }
+}).observe(document.body, { childList: true });
+
 function pixelIcon(grid, palette, size = 32) {
   const rows = grid.length, cols = grid[0].length;
   const svg = svgEl("svg", { viewBox: `0 0 ${cols} ${rows}`, width: size, height: size });
@@ -956,6 +1421,14 @@ const ICONS = {
     "..AAAA..", ".AAAAAA.", "AAAA.AAA", "AAA...AA",
     "AAA...AA", "AAAA.AAA", ".AAAAAA.", "..AAAA..",
   ], palette: { A: "#c9d3e0" } },
+
+  // Generic-заглушка для mobs.*.icon без своей кастомной иконки - ДЕРЖАТЬ В ПАРЕ с
+  // DEFAULT_ICONS.monster в tools/content_editor.html (превью в редакторе должно
+  // совпадать с тем, что реально увидит игрок, см. defaultMobIcon).
+  monster: { grid: [
+    "..A....A..", ".AA....AA.", "AABAAAABAA", "AABBAABBAA",
+    "AAAAAAAAAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
+  ], palette: { A: "#6b6f7a", B: "#1f2226" } },
 };
 
 // Раскраска по тиру для ЛЮБОГО инструмента без своей кастомной иконки - раньше была
@@ -983,6 +1456,9 @@ function resourceIcon(rid) {
 }
 function buildingIcon(bid) {
   return (VIEW.icons.buildings && VIEW.icons.buildings[bid]) || null;
+}
+function mobIcon(mid) {
+  return (VIEW.icons.mobs && VIEW.icons.mobs[mid]) || ICONS.monster;
 }
 // toolId="pickaxe" рисуется формой кирки (встроенная иконка ICONS.pickaxe) -
 // остальные инструменты без своей нарисованной иконки берут нейтральную форму
@@ -1262,6 +1738,14 @@ async function doAction(type, id, scale) {
       if (isModalOpen()) showErrorToast(message);
       return;
     }
+    // Эффект удара (летящий урон/тряска портрета/вспышка на ваншот) играется на
+    // ЕЩЁ СТАРОМ DOM - панель схватки ниже покажет либо новый HP, либо вовсе
+    // исчезнет (цель убита), так что без задержки анимация обрывалась бы на
+    // середине или не успевала начаться вовсе (см. playCombatHitEffect).
+    if (type === "hunt_attack" && payload.log.combat) {
+      playCombatHitEffect(payload.log.combat);
+      await sleep(HIT_EFFECT_DELAY_MS);
+    }
     VIEW = payload.state;
     pushLog(payload.log);
     // Звук провала - только внутри showErrorToast (см. её определение), той же
@@ -1348,14 +1832,17 @@ function actionCooldownInfo(kind, item) {
   const dflt = VIEW.default_action_delay_ms;
   if (kind === "manual") return { key: `manual:${item.id}`, delay: item.click_delay_ms ?? dflt };
   if (kind === "build") return { key: `build:${item.id}`, delay: item.click_delay_ms ?? dflt };
-  if (kind === "repair") return { key: `repair:${item.id}`, delay: item.click_delay_ms ?? dflt };
+  if (kind === "repair") return { key: `repair:${item.id}`, delay: item.repair_click_delay_ms ?? dflt };
   if (kind === "mining") {
     if (item.kind === "mine") return { key: `mine:${item.resource_id}`, delay: item.click_delay_ms ?? dflt };
     if (item.kind === "search_any") return { key: "search_any", delay: dflt };
   }
   if (kind === "hunting") {
     if (item.kind === "search") return { key: `hunt_search:${item.location}`, delay: dflt };
-    if (item.kind === "attack") return { key: "hunt_attack", delay: dflt };
+    // move_id=null (обычная атака без приёма) и move_id="heavy_strike" и т.п. -
+    // РАЗНЫЕ ключи анти-автокликерного кулдауна (см. tryRunAction), иначе клик по
+    // одной кнопке приёма гасил бы визуально и остальные кнопки атаки тоже.
+    if (item.kind === "attack") return { key: `hunt_attack:${item.moveId || "basic"}`, delay: dflt };
     if (item.kind === "summon") return { key: `summon_boss:${item.id}`, delay: dflt };
   }
   return { key: `${kind}:${item.id || ""}`, delay: dflt };
@@ -1380,10 +1867,9 @@ function renderAll() {
   } else {
     saveNameLabel.hidden = true;
   }
-  // Галочка видна только с первого работающего процессора (compute_capacity > 0) -
-  // до этого автокрафт всё равно не может ничего докрафтить (см. game/engine.py:
-  // _ensure_available), так что сама настройка ещё ни на что не влияет.
-  document.getElementById("autocraftToggleWrap").hidden = VIEW.compute_capacity <= 0;
+  // Галочка теперь живёт в шапке самой панели "Автокрафт" (см. renderAutocraft) -
+  // прячется/показывается заодно с ней самой (compute_capacity > 0), отдельно
+  // прятать её саму больше не нужно.
   document.getElementById("autocraftToggle").checked = VIEW.autocraft_enabled;
   // Кнопка "Навыки" - видна, только пока в контенте вообще есть хоть одна
   // линейка (VIEW.skills, см. game/engine.py:skills_view) - generic-система, у
@@ -1421,6 +1907,11 @@ function renderAll() {
     if (VIEW.buildings.some(b => b.id === farmTypeOverlay.dataset.buildingId)) openFarmTypeModal(farmTypeOverlay.dataset.buildingId);
     else closeFarmTypeModal();
   }
+  const soulSynthesizerOverlay = document.getElementById("soulSynthesizerOverlay");
+  if (soulSynthesizerOverlay) {
+    if (VIEW.buildings.some(b => b.id === soulSynthesizerOverlay.dataset.buildingId)) openSoulSynthesizerModal(soulSynthesizerOverlay.dataset.buildingId);
+    else closeSoulSynthesizerModal();
+  }
   if (document.getElementById("breedingOverlay")) openBreedingModal();
   if (document.getElementById("geneticsLabOverlay")) openGeneticsLabModal();
   if (document.getElementById("skillsOverlay")) openSkillsModal();
@@ -1444,6 +1935,12 @@ function renderAll() {
     // тогда просто закрываем модалку вместо показа устаревших данных.
     if (freshItem) openBuildingUpgradesModal(freshItem);
     else closeBuildingUpgradesModal();
+  }
+  const automationOverlay = document.getElementById("automationOverlay");
+  if (automationOverlay) {
+    const freshItem = VIEW.buildings.find(b => b.id === automationOverlay.dataset.buildingId);
+    if (freshItem && freshItem.automation) openAutomationModal(freshItem);
+    else closeAutomationModal();
   }
   if (document.getElementById("prioritiesOverlay")) openPrioritiesModal();
 }
@@ -1534,13 +2031,37 @@ function renderEnergyCraft() {
   });
 }
 
+// Строка "прогресс + отмена" одной многоходовой ручной задачи - общая для панели
+// "Долгие действия" (renderManualJobs, ниже) и самой карточки действия (actionCard,
+// см. "прогресс видно прямо в карточке" - обе точки показа переиспользуют один и тот
+// же DOM/логику, чтобы не могли разойтись). label - опционален: панель "Долгие
+// действия" перечисляет РАЗНЫЕ действия и обязана подписать, какое именно, а
+// карточка своё название уже показывает сама (см. main.name выше), так что там
+// прогресс идёт голым числом. Отмена (cancel_manual_job) возвращает игроку cost,
+// списанный при старте, - "✕" тут не расходный клик.
+function manualJobProgressRow(actionId, turnsDone, turnsTotal, label) {
+  const ratio = turnsTotal > 0 ? turnsDone / turnsTotal : 0;
+  const row = el("div", { class: "autocraft-job" });
+  const head = el("div", { class: "job-head" });
+  const text = label ? `${label}: ${turnsDone}/${turnsTotal} ход(ов)` : `${turnsDone}/${turnsTotal} ход(ов)`;
+  head.appendChild(el("span", { text }));
+  const right = el("span", { class: "job-right" });
+  right.appendChild(jobCancelButton(() => cancelJob("manual", { action_id: actionId })));
+  head.appendChild(right);
+  row.appendChild(head);
+  const bar = el("div", { class: "job-bar" });
+  bar.appendChild(el("div", { class: "job-bar-fill", style: `width:${Math.round(ratio * 100)}%` }));
+  row.appendChild(bar);
+  return row;
+}
+
 // Панель "Долгие действия" (manual_actions.*.duration_turns > 1, см.
 // game/engine.py:_process_manual_jobs) - видна, только пока идёт хотя бы одна такая
 // задача (в отличие от автокрафта/крафта из энергии, тут нет постоянной сводки вроде
-// "скорость/слоты", показывать нечего, пока ничего не запущено). Та же полоска
-// .autocraft-job/.job-bar, что и у остальных фоновых задач - progress здесь всегда
-// целые "прошедшие ходы", без ETA (тиканье не зависит ни от какой пропускной
-// способности, ровно +1 ход/тик, см. renderAutocraft/renderEnergyCraft).
+// "скорость/слоты", показывать нечего, пока ничего не запущено). Остаётся полезной
+// даже теперь, когда та же информация продублирована на самой карточке действия
+// (actionCard) - карточка видна, только пока игрок стоит в той же локации, а эта
+// панель нет (действие может идти где-то ещё).
 function renderManualJobs() {
   const panel = document.getElementById("manualJobsPanel");
   const container = document.getElementById("manualJobsBody");
@@ -1548,18 +2069,7 @@ function renderManualJobs() {
   if (panel.hidden) return;
   container.innerHTML = "";
   VIEW.manual_jobs.forEach(job => {
-    const ratio = job.turns_total > 0 ? job.turns_done / job.turns_total : 0;
-    const row = el("div", { class: "autocraft-job" });
-    const head = el("div", { class: "job-head" });
-    head.appendChild(el("span", { text: `${job.name}: ${job.turns_done}/${job.turns_total} ход(ов)` }));
-    const right = el("span", { class: "job-right" });
-    right.appendChild(jobCancelButton(() => cancelJob("manual", { action_id: job.action_id })));
-    head.appendChild(right);
-    row.appendChild(head);
-    const bar = el("div", { class: "job-bar" });
-    bar.appendChild(el("div", { class: "job-bar-fill", style: `width:${Math.round(ratio * 100)}%` }));
-    row.appendChild(bar);
-    container.appendChild(row);
+    container.appendChild(manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, job.name));
   });
 }
 
@@ -1688,7 +2198,7 @@ function creatureToggleButton(creatureId, bodyEl, refresh) {
 
 function renderFarmUpgrades(farm) {
   if (!farm.upgrades) return null;
-  const box = el("div", { class: "upgrades-list" });
+  const box = el("div", { class: "upgrades-list scroll-area" });
   farm.upgrades.upgrades.forEach(u => {
     const row = el("div", { class: "upgrade-row" });
     row.appendChild(el("div", { class: "upgrade-title", text: u.name }));
@@ -1794,15 +2304,28 @@ let creatureBankSearchQuery = "";
 // поэтому выпадающий список "Поселить" ограничен экземплярами ЭТОГО типа, а не
 // вообще всеми фермами игрока). refresh пробрасывается в creatureToggleButton,
 // как в renderFarmSection.
+//
+// Банк особей тут дополнительно отфильтрован по houseTargets[0].accepts_family
+// (buildings.*.breeding_accepts_family, одинаков у всех экземпляров одного
+// типа построек - см. game/engine.py:breeding_accepts_family, сравнивается с
+// entry.family - species.*.family каждой особи) - иначе в модалке "Пасека"
+// был бы виден и весь банк манацветов вперемешку с пчёлами, хотя поселить их
+// туда всё равно нельзя (движок отклонит house_creature). null/отсутствие
+// поля - старое поведение без ограничений, показываем банк целиком.
 function renderCreatureBankSection(houseTargets, refresh) {
+  const acceptsFamily = houseTargets.length ? houseTargets[0].accepts_family : null;
+  const bankEntries = acceptsFamily ? VIEW.creature_bank.filter(e => e.family === acceptsFamily) : VIEW.creature_bank;
   const section = el("div", { class: "farm-section" });
-  section.appendChild(el("h3", { text: `Банк особей (${VIEW.creature_bank.length})` }));
-  if (!VIEW.creature_bank.length) {
-    section.appendChild(el("div", { class: "empty-note", text: "В запасе никого нет - поймай или выведи особь." }));
+  section.appendChild(el("h3", { text: `Банк особей (${bankEntries.length})` }));
+  if (!bankEntries.length) {
+    const text = VIEW.creature_bank.length
+      ? "В запасе нет особей подходящего для этой фермы вида."
+      : "В запасе никого нет - поймай или выведи особь.";
+    section.appendChild(el("div", { class: "empty-note", text }));
     return section;
   }
   const list = el("div", { class: "creature-list" });
-  VIEW.creature_bank.forEach(entry => {
+  bankEntries.forEach(entry => {
     const row = el("div", { class: "creature-row" });
     row.dataset.resourceName = creatureSearchText(entry);
     const head = el("div", { class: "job-head" });
@@ -1838,7 +2361,7 @@ function renderCreatureBankSection(houseTargets, refresh) {
   section.appendChild(makeResourceSearchBar(list, {
     get: () => creatureBankSearchQuery,
     set: (v) => { creatureBankSearchQuery = v; },
-  }));
+  }, true));
   section.appendChild(list);
   return section;
 }
@@ -1860,6 +2383,12 @@ function allOwnedCreatures() {
 let breedParentAId = null;
 let breedParentBId = null;
 let breedPickerSearchQuery = "";
+// "" - показать особей всех семейств. Семейство (entry.family, см.
+// game/engine.py:species_family) - свободный тег вида (например "bee"/
+// "flower"), а не отдельная сущность - фильтр строится из тех тегов, что
+// реально встретились среди особей игрока, поэтому новый вид/семейство
+// подхватывается сам, без правки этого файла.
+let breedPickerFamilyFilter = "";
 
 // Один слот "Родитель А/Б" - пустой (плейсхолдер под drag&drop) или карточка
 // уже выбранной особи с кнопкой "убрать". onDropId(creatureId) вызывается и
@@ -1874,10 +2403,10 @@ function renderBreedSlot(label, entry, onDropId, onClear) {
     info.appendChild(el("div", { class: "name", text: `${entry.name} №${creatureShortId(entry)}` }));
     info.appendChild(el("div", { class: "hint", text: creatureSummaryLine(entry) }));
     card.appendChild(info);
+    slot.appendChild(card);
     const clearBtn = el("button", { class: "breed-slot-clear", text: "×", title: "Убрать из слота" });
     clearBtn.addEventListener("click", onClear);
-    card.appendChild(clearBtn);
-    slot.appendChild(card);
+    slot.appendChild(clearBtn);
   } else {
     slot.appendChild(el("div", { class: "breed-slot-placeholder", text: "Перетащи сюда особь снизу или кликни по её карточке" }));
   }
@@ -1899,7 +2428,7 @@ function renderBreedSlot(label, entry, onDropId, onClear) {
 // поиском/фильтром (см. creatureSearchText) - особь ставится в слот
 // перетаскиванием иконки-карточки или кликом (первый свободный слот).
 function renderBreedSection() {
-  const section = el("div", { class: "farm-section" });
+  const section = el("div", { class: "farm-section breed-root" });
   const headRow = el("div", { class: "breed-section-head" });
   headRow.appendChild(el("h3", { text: "Скрестить" }));
   // Кнопка книги знаний видна, только когда построен работающий механизм
@@ -1909,7 +2438,7 @@ function renderBreedSection() {
   // это справочник "как получить", им можно пользоваться и заранее.
   if (VIEW.breeding_station_available) {
     const bookBtn = el("button", {
-      class: "small", text: "Книга пчёл",
+      class: "small", text: "Книга видов",
       title: "Каталог видов: какие пары родителей дают какой вид и с каким шансом",
     });
     bookBtn.addEventListener("click", openSpeciesBookModal);
@@ -1938,16 +2467,54 @@ function renderBreedSection() {
     openBreedingModal();
   };
 
+  // Кнопка "Скрестить" - МЕЖДУ слотами родителей (1:1 из канваса, B_Breeding.dc.html:
+  // .cross-row - слот/кнопка/слот в один ряд), не отдельной строкой под сеткой
+  // банка особей, как было раньше - по прямому пожеланию, 2026-09-13, см. CLAUDE.md.
   const slots = el("div", { class: "breed-slots" });
   slots.appendChild(renderBreedSlot("Родитель А", byId[breedParentAId] || null,
     (id) => assign(id, "a"), () => { breedParentAId = null; openBreedingModal(); }));
-  slots.appendChild(el("div", { class: "breed-plus", text: "×" }));
+  const breedBtn = el("button", { class: "primary breed-cross-btn", text: "Скрестить" });
+  breedBtn.disabled = !breedParentAId || !breedParentBId;
+  const breedKey = "breed_action";
+  const breedDelay = VIEW.default_action_delay_ms;
+  const breedRemaining = cooldownRemainingMs(breedKey);
+  if (breedRemaining > 0) applyCooldownVisual(breedBtn, breedRemaining, breedDelay);
+  breedBtn.addEventListener("click", () => {
+    if (!breedParentAId || !breedParentBId) return;
+    tryRunAction(breedKey, breedDelay, breedBtn, () => doAction("breed", `${breedParentAId}:${breedParentBId}`));
+  });
+  slots.appendChild(breedBtn);
   slots.appendChild(renderBreedSlot("Родитель Б", byId[breedParentBId] || null,
     (id) => assign(id, "b"), () => { breedParentBId = null; openBreedingModal(); }));
   section.appendChild(slots);
 
-  const pickerGrid = el("div", { class: "breed-picker-grid" });
-  creatures.forEach(entry => {
+  // Фильтр по семейству ("только пчёлы"/"только цветы") - отдельный от
+  // текстового поиска ниже: чипы реально ПРЯЧУТ карточки чужого семейства
+  // (это выбор категории, не подсказка "где искать"), поэтому оба фильтра
+  // применяются последовательно (сначала семейство, потом текст поиска).
+  const families = [...new Set(creatures.map(c => c.family).filter(Boolean))];
+  if (breedPickerFamilyFilter && !families.includes(breedPickerFamilyFilter)) breedPickerFamilyFilter = "";
+  if (families.length > 1) {
+    const filterBar = el("div", { class: "breed-family-filter" });
+    const allBtn = el("button", { type: "button", text: "Все", class: breedPickerFamilyFilter === "" ? "active" : "" });
+    allBtn.addEventListener("click", () => { breedPickerFamilyFilter = ""; openBreedingModal(); });
+    filterBar.appendChild(allBtn);
+    families.forEach(family => {
+      const btn = el("button", {
+        type: "button", text: family.charAt(0).toUpperCase() + family.slice(1),
+        class: breedPickerFamilyFilter === family ? "active" : "",
+      });
+      btn.addEventListener("click", () => { breedPickerFamilyFilter = family; openBreedingModal(); });
+      filterBar.appendChild(btn);
+    });
+    section.appendChild(filterBar);
+  }
+  const visibleCreatures = breedPickerFamilyFilter
+    ? creatures.filter(c => c.family === breedPickerFamilyFilter)
+    : creatures;
+
+  const pickerGrid = el("div", { class: "breed-picker-grid scroll-area" });
+  visibleCreatures.forEach(entry => {
     const selectedSlot = entry.id === breedParentAId ? "a" : entry.id === breedParentBId ? "b" : null;
     const card = el("div", { class: "breed-card" + (selectedSlot ? ` selected-${selectedSlot}` : "") });
     card.draggable = true;
@@ -1969,24 +2536,10 @@ function renderBreedSection() {
     set: (v) => { breedPickerSearchQuery = v; },
   }));
   section.appendChild(pickerGrid);
-
-  const row = el("div", { class: "breed-row" });
-  const breedBtn = el("button", { text: "Скрестить" });
-  breedBtn.disabled = !breedParentAId || !breedParentBId;
-  const key = "breed_action";
-  const delay = VIEW.default_action_delay_ms;
-  const remaining = cooldownRemainingMs(key);
-  if (remaining > 0) applyCooldownVisual(breedBtn, remaining, delay);
-  breedBtn.addEventListener("click", () => {
-    if (!breedParentAId || !breedParentBId) return;
-    tryRunAction(key, delay, breedBtn, () => doAction("breed", `${breedParentAId}:${breedParentBId}`));
-  });
-  row.appendChild(breedBtn);
-  section.appendChild(row);
   return section;
 }
 
-// ---------- Книга пчёл (справочник рецептов скрещивания, VIEW.species_catalog) ----------
+// ---------- Книга видов (справочник рецептов скрещивания, VIEW.species_catalog) ----------
 
 // Выбранный в книге вид/поисковый запрос - переживают пересборку модалки
 // (openSpeciesBookModal() дёргается заново после любого действия/renderAll,
@@ -2065,7 +2618,7 @@ function renderSpeciesBookDetail(speciesId) {
 
 function renderSpeciesBookList() {
   const pane = el("div", { class: "book-list-pane" });
-  const list = el("div", { class: "book-species-list" });
+  const list = el("div", { class: "book-species-list thin-scroll" });
   VIEW.species_catalog.forEach(species => {
     const item = el("button", {
       class: "book-species-item" + (species.id === speciesBookSelectedId ? " selected" : ""),
@@ -2080,14 +2633,14 @@ function renderSpeciesBookList() {
   pane.appendChild(makeResourceSearchBar(list, {
     get: () => speciesBookSearchQuery,
     set: (v) => { speciesBookSearchQuery = v; },
-  }));
+  }, true));
   pane.appendChild(list);
   return pane;
 }
 
 // Список видов + поиск слева, детали выбранного вида (описание и все пары
 // родителей, дающие его при скрещивании, с шансом) справа - открывается
-// кнопкой "Книга пчёл" из блока "Скрестить" модалки "Скрещивание" (см.
+// кнопкой "Книга видов" из блока "Скрестить" модалки "Скрещивание" (см.
 // renderBreedSection), но живёт в СВОЁМ overlay поверх неё - тот же приём,
 // что у остальных модалок (пересобирается заново в renderAll(), если открыта).
 function openSpeciesBookModal() {
@@ -2100,7 +2653,7 @@ function openSpeciesBookModal() {
 
   const modal = el("div", { class: "modal tech-modal" });
   const head = el("div", { class: "modal-head" });
-  head.appendChild(el("strong", { text: "Книга пчёл" }));
+  head.appendChild(el("strong", { text: "Книга видов" }));
   head.appendChild(el("button", { text: "Закрыть", onclick: closeSpeciesBookModal }));
   modal.appendChild(head);
 
@@ -2132,6 +2685,7 @@ function renderSynthesizeSection() {
     section.appendChild(el("div", { class: "empty-note", text: "Опознай хотя бы одну особь - синтез доступен, только когда изучена хотя бы одна аллель каждого признака." }));
     return section;
   }
+  const fields = el("div", { class: "synth-fields" });
   const selects = {};
   GENOTYPE_TRAIT_IDS.forEach(traitId => {
     const row = el("div", { class: "field-row" });
@@ -2139,10 +2693,12 @@ function renderSynthesizeSection() {
     const select = el("select");
     (VIEW.known_alleles[traitId] || []).forEach(a => select.appendChild(el("option", { value: a.id, text: a.name })));
     row.appendChild(select);
-    section.appendChild(row);
+    fields.appendChild(row);
     selects[traitId] = select;
   });
-  const synthBtn = el("button", { text: "Синтезировать" });
+  section.appendChild(fields);
+  const footer = el("div", { class: "synth-footer" });
+  const synthBtn = el("button", { class: "primary", text: "Синтезировать" });
   const key = "synthesize_action";
   const delay = VIEW.default_action_delay_ms;
   const remaining = cooldownRemainingMs(key);
@@ -2151,9 +2707,9 @@ function renderSynthesizeSection() {
     const chosen = GENOTYPE_TRAIT_IDS.map(t => `${t}=${selects[t].value}`).join(":");
     tryRunAction(key, delay, synthBtn, () => doAction("synthesize", chosen));
   });
-  section.appendChild(synthBtn);
   const costText = VIEW.genetics_cost.synthesize.map(c => `${c.amount} ${c.name}`).join(", ") || "бесплатно";
-  section.appendChild(el("div", { class: "hint", text: `Цена: ${costText}` }));
+  footer.append(synthBtn, el("div", { class: "hint", text: `Цена: ${costText}` }));
+  section.appendChild(footer);
   return section;
 }
 
@@ -2185,7 +2741,7 @@ function openFarmTypeModal(buildingId) {
 
   const refresh = () => openFarmTypeModal(buildingId);
   const farms = VIEW.farms.filter(f => f.building_id === buildingId);
-  const body = el("div", { class: "farms-modal-body" });
+  const body = el("div", { class: "farms-modal-body scroll-area" });
   farms.forEach(farm => body.appendChild(renderFarmSection(farm, refresh)));
   body.appendChild(renderCreatureBankSection(farms, refresh));
   modal.appendChild(body);
@@ -2243,11 +2799,13 @@ function openGeneticsLabModal() {
   head.appendChild(el("strong", { text: "Генетическая лаборатория" }));
   head.appendChild(el("button", { text: "Закрыть", onclick: closeGeneticsLabModal }));
   modal.appendChild(head);
+  const body = el("div", { class: "farms-modal-body scroll-area" });
   if (VIEW.genetics_lab_available) {
-    modal.appendChild(renderSynthesizeSection());
+    body.appendChild(renderSynthesizeSection());
   } else {
-    modal.appendChild(el("div", { class: "empty-note", text: "Лаборатория сейчас не работает (все копии сломаны)." }));
+    body.appendChild(el("div", { class: "empty-note", text: "Лаборатория сейчас не работает (все копии сломаны)." }));
   }
+  modal.appendChild(body);
 
   overlay.appendChild(modal);
   overlay.id = "geneticsLabOverlay";
@@ -2403,32 +2961,120 @@ async function removeSoul(buildingId, index) {
   }
 }
 
-// Мини-панель синтезатора душ (b.soul_collector, см. tools/web_ui.py:
-// soul_collector_view) внутри строки постройки в "Производственных мощностях" -
-// вставленные души (с "✕" - вынуть, без хода) + по кнопке на каждый ДОПУСТИМЫЙ
-// (accepts) тип души, если есть свободный слот (disabled, если её нет в наличии).
-// null у построек без soul_collector - блок вообще не рисуется.
-function renderSoulCollector(b) {
-  if (!b.soul_collector) return null;
-  const box = el("div", { class: "costs" });
-  b.soul_collector.installed.forEach(s => {
-    const chip = el("span", { class: "note-chip", text: s.name });
-    const removeBtn = el("button", { class: "job-cancel", text: "✕", title: "Вынуть обратно в инвентарь" });
-    removeBtn.addEventListener("click", () => removeSoul(b.id, s.index));
-    chip.appendChild(removeBtn);
-    box.appendChild(chip);
+// Модалка "Души" - открывается кнопкой на карточке КОНКРЕТНОЙ built-постройки-
+// синтезатора (soul_collector, is_soul_collector - см. tools/web_ui.py:
+// build_view) в панели "Производственные мощности" - по прямому пожеланию,
+// 2026-09-13: вставка/выемка душ живёт в своей модалке, а не прямо в панели
+// построек - тот же приём, что "Особи" у ферм (openFarmTypeModal). Банк душ
+// внизу (VIEW.soul_bank) отфильтрован по entry.accepts_kind (resources.*.
+// soul_kind, см. game/engine.py:soul_kind/soul_collector_accepts_kind) - в
+// "обычном" синтезаторе показываются и вставляются только души мобов, в
+// "алтаре" - только боссовые, полная аналогия с creature_bank +
+// breeding_accepts_family у ферм.
+// Слоты синтезатора - визуальный ряд ячеек (пустые пунктиром приглашают
+// перетащить душу, заполненные светятся сплошной цианевой рамкой), та же
+// drag&drop-механика, что слоты родителей в "Скрещивании" (renderBreedSlot) -
+// по прямому пожеланию, 2026-09-13, см. CLAUDE.md. Кроме перетаскивания,
+// карточка банка ниже кликабельна (вставляет в первый свободный слот) -
+// drag&drop необязателен, просто удобнее для нескольких слотов сразу.
+function renderSoulCollectorSection(entry) {
+  const section = el("div", { class: "farm-section" });
+  const head = el("div", { class: "farm-section-head" });
+  head.appendChild(el("h3", { text: `Слоты ${entry.installed.length}/${entry.capacity}` }));
+  section.appendChild(head);
+
+  const slots = el("div", { class: "soul-slots" });
+  entry.installed.forEach(s => {
+    const slot = el("div", { class: "soul-slot filled" });
+    const iconWrap = el("div", { class: "soul-slot-icon" });
+    const iconDef = resourceIcon(s.id);
+    if (iconDef) iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 28));
+    slot.appendChild(iconWrap);
+    slot.appendChild(el("div", { class: "soul-slot-name", text: s.name }));
+    const clearBtn = el("button", { class: "breed-slot-clear", text: "×", title: "Вынуть душу" });
+    clearBtn.addEventListener("click", () => removeSoul(entry.building_id, s.index));
+    slot.appendChild(clearBtn);
+    slot.addEventListener("dragover", (e) => e.preventDefault());
+    slot.addEventListener("drop", (e) => e.preventDefault()); // слот занят - перетаскивание сюда ничего не делает
+    slots.appendChild(slot);
   });
-  box.appendChild(el("span", { class: "note-chip", text: `слоты: ${b.soul_collector.installed.length}/${b.soul_collector.capacity}` }));
-  if (b.soul_collector.installed.length < b.soul_collector.capacity) {
-    b.soul_collector.accepts.forEach(soul => {
-      const stock = VIEW.resources[soul.id] || 0;
-      const btn = el("button", { class: "small", text: `Вставить: ${soul.name} (${stock})` });
-      btn.disabled = stock <= 0;
-      btn.addEventListener("click", () => insertSoul(b.id, soul.id));
-      box.appendChild(btn);
+  for (let i = entry.installed.length; i < entry.capacity; i++) {
+    const slot = el("div", { class: "soul-slot" });
+    slot.appendChild(el("div", { class: "soul-slot-placeholder", text: "Перетащи душу сюда" }));
+    slot.addEventListener("dragover", (e) => { e.preventDefault(); slot.classList.add("drag-over"); });
+    slot.addEventListener("dragleave", () => slot.classList.remove("drag-over"));
+    slot.addEventListener("drop", (e) => {
+      e.preventDefault();
+      slot.classList.remove("drag-over");
+      const soulId = e.dataTransfer.getData("text/plain");
+      if (soulId) insertSoul(entry.building_id, soulId);
     });
+    slots.appendChild(slot);
   }
-  return box;
+  section.appendChild(slots);
+  return section;
+}
+
+function renderSoulBankSection(entry) {
+  const bankEntries = VIEW.soul_bank.filter(s => s.kind === entry.accepts_kind);
+  const section = el("div", { class: "farm-section" });
+  section.appendChild(el("h3", { text: `Банк душ (${bankEntries.length})` }));
+  if (!bankEntries.length) {
+    section.appendChild(el("div", { class: "empty-note", text: "В запасе нет подходящих для этого синтезатора душ." }));
+    return section;
+  }
+  const grid = el("div", { class: "soul-bank-grid" });
+  bankEntries.forEach(s => {
+    const full = s.amount <= 0 || entry.installed.length >= entry.capacity;
+    const card = el("div", { class: "breed-card soul-bank-card" + (full ? " disabled" : "") });
+    card.draggable = !full;
+    card.title = full ? "Слоты синтезатора заполнены" : "Перетащи в свободный слот сверху или кликни";
+    const iconBox = el("div", { class: "soul-bank-icon" });
+    const iconDef = resourceIcon(s.id);
+    if (iconDef) iconBox.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 26));
+    card.appendChild(iconBox);
+    card.appendChild(el("div", { class: "breed-card-name", text: s.name }));
+    card.appendChild(el("div", { class: "soul-bank-count", text: `× ${s.amount}` }));
+    card.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", s.id));
+    card.addEventListener("click", () => { if (!full) insertSoul(entry.building_id, s.id); });
+    grid.appendChild(card);
+  });
+  section.appendChild(grid);
+  return section;
+}
+
+function openSoulSynthesizerModal(buildingId) {
+  const prevModal = document.querySelector("#soulSynthesizerOverlay .modal");
+  const savedScroll = prevModal ? prevModal.scrollTop : null;
+
+  closeSoulSynthesizerModal();
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSoulSynthesizerModal(); });
+
+  const entry = VIEW.soul_collectors.find(c => c.building_id === buildingId);
+  const modal = el("div", { class: "modal tech-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: entry ? entry.name : "Синтезатор душ" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: closeSoulSynthesizerModal }));
+  modal.appendChild(head);
+
+  const body = el("div", { class: "farms-modal-body scroll-area" });
+  if (entry) {
+    body.appendChild(renderSoulCollectorSection(entry));
+    body.appendChild(renderSoulBankSection(entry));
+  }
+  modal.appendChild(body);
+
+  overlay.appendChild(modal);
+  overlay.id = "soulSynthesizerOverlay";
+  overlay.dataset.buildingId = buildingId;
+  document.body.appendChild(overlay);
+  if (savedScroll !== null) modal.scrollTop = savedScroll;
+}
+
+function closeSoulSynthesizerModal() {
+  const overlay = document.getElementById("soulSynthesizerOverlay");
+  if (overlay) overlay.remove();
 }
 
 // Ползунок меню "Механизмы" (b.disableable, см. tools/web_ui.py:build_view/
@@ -2485,33 +3131,133 @@ async function abandonEncounter() {
   }
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Сколько ждать после playCombatHitEffect() перед тем, как doAction() применит
+// новый VIEW/renderAll() - панель схватки строится ЗАНОВО на каждый renderAll(),
+// поэтому без этой паузы анимация на СТАРОМ DOM обрывалась бы, не успев доиграть
+// (при убийстве панель вовсе исчезает - см. doAction).
+const HIT_EFFECT_DELAY_MS = 320;
+
+function playKillFlash() {
+  const overlay = el("div", { class: "kill-flash-overlay" });
+  document.body.appendChild(overlay);
+  setTimeout(() => overlay.remove(), 500);
+}
+
+// Летящий урон/тряска портрета/вспышка на ваншот - играется на DOM ЕЩЁ ДО того,
+// как doAction подменит VIEW (см. HIT_EFFECT_DELAY_MS выше). HP-полоска двигается
+// напрямую (inline width), а не через полную перерисовку - иначе CSS-transition
+// не от чего было бы интерполировать (свежий элемент сразу в конечной позиции).
+function playCombatHitEffect(combat) {
+  const fill = document.getElementById("encounterHpFill");
+  if (fill && combat.max_hp > 0) {
+    const ratio = Math.max(0, Math.min(1, combat.remaining_hp / combat.max_hp));
+    fill.style.width = `${Math.round(ratio * 100)}%`;
+  }
+  const portrait = document.getElementById("encounterPortrait");
+  if (portrait) {
+    portrait.classList.remove("hit-shake");
+    void portrait.offsetWidth; // reflow - иначе повторное .add() того же класса не перезапустит анимацию
+    portrait.classList.add("hit-shake");
+    const dmg = el("div", { class: "dmg-float", text: `-${combat.damage}` });
+    portrait.appendChild(dmg);
+    setTimeout(() => dmg.remove(), 900);
+  }
+  if (combat.instant_kill) playKillFlash();
+}
+
+// Кнопка одного варианта атаки - moveId=null - обычная атака (всегда доступна),
+// иначе move - запись из VIEW.hunting.combat_moves (см. engine.combat_moves_view):
+// "не изучен" (тир оружия ещё не дошёл) блокирует кнопку насовсем, "на кулдауне"
+// блокирует ВРЕМЕННО и показывает бейдж с числом ходов до готовности.
+// Человекочитаемая формула урона приёма - см. game/engine.py:_move_damage (4
+// независимых режима). Только для подсказки (title) - сам расчёт всегда на сервере.
+function moveFormulaText(move) {
+  if (move.mode === "percent_max_hp") return `${Math.round(move.percent * 100)}% от максимального HP цели`;
+  if (move.mode === "percent_remaining_hp") return `${Math.round(move.percent * 100)}% от ТЕКУЩЕГО HP цели`;
+  if (move.mode === "execute") {
+    const fallback = move.damage_multiplier ? `×${move.damage_multiplier} обычного урона` : "как обычная атака";
+    return `добивает цель, если её HP ≤ ${Math.round(move.execute_threshold_percent * 100)}% от максимума, иначе - ${fallback}`;
+  }
+  return `×${move.damage_multiplier ?? 1} к обычному урону`;
+}
+
+function makeAttackButton(label, moveId, move) {
+  const { key, delay } = actionCooldownInfo("hunting", { kind: "attack", moveId });
+  const btn = el("button", { class: "move-btn" + (moveId ? "" : " primary") });
+  btn.appendChild(document.createTextNode(label));
+  const locked = move && !move.unlocked;
+  const onCooldown = move && move.cooldown_remaining > 0;
+  if (move) {
+    const base = `${move.description} Урон: ${moveFormulaText(move)}.`;
+    btn.title = locked
+      ? `${base} (приём ещё не изучен)`
+      : onCooldown
+        ? `${base} (готов через ${move.cooldown_remaining} х.)`
+        : base;
+  }
+  if (locked) {
+    btn.disabled = true;
+  } else if (onCooldown) {
+    btn.disabled = true;
+    btn.appendChild(el("span", { class: "move-cd-badge", text: String(move.cooldown_remaining) }));
+  } else {
+    const remaining = cooldownRemainingMs(key);
+    if (remaining > 0) applyCooldownVisual(btn, remaining, delay);
+    btn.addEventListener("click", () => tryRunAction(key, delay, btn, () => doAction("hunt_attack", moveId)));
+  }
+  return btn;
+}
+
 // Панель текущей схватки (ОДНА на всю игру, см. VIEW.hunting.active_encounter) -
 // показывается только в локации, к которой относится сама цель (encounter.location),
-// а не в любой локации с охотой сразу. "Атаковать" - через doAction (тратит ход,
-// как и добыча жилы), "✕" (jobCancelButton) - abandonEncounter (без хода, как
-// house/release особей).
+// а не в любой локации с охотой сразу. Портрет (mobIcon) и HP-полоска несут
+// фиксированные id (#encounterPortrait/#encounterHpFill) - на них целится
+// playCombatHitEffect ДО перерисовки. "✕" (jobCancelButton) - abandonEncounter
+// (без хода, как house/release особей). Кнопки атаки: обычная (всегда) + по одной
+// на каждый приём боя (VIEW.hunting.combat_moves - весь список, а не только
+// открытые, чтобы игрок видел, что вообще есть и на каком тире мечу открывается).
 function renderActiveEncounterBlock(locationId) {
   const encounter = VIEW.hunting.active_encounter;
   if (!encounter || encounter.location !== locationId) return null;
-  const box = el("div", { class: "creature-row" });
-  const head = el("div", { class: "job-head" });
-  head.appendChild(el("span", {
+  const box = el("div", { class: "creature-row encounter-box" });
+
+  const portrait = el("div", { id: "encounterPortrait", class: "encounter-portrait" + (encounter.is_boss ? " is-boss" : "") });
+  const iconDef = mobIcon(encounter.mob_id);
+  if (iconDef) portrait.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 56));
+  box.appendChild(portrait);
+
+  const body = el("div", { class: "encounter-body" });
+  const title = el("div", { class: "encounter-title" });
+  title.appendChild(el("span", {
     text: `${encounter.is_boss ? "Босс" : "Цель"}: ${encounter.name} — ${encounter.remaining_hp}/${encounter.max_hp} HP`,
   }));
   const right = el("span", { class: "job-right" });
+  if (encounter.turns_left !== null && encounter.turns_left !== undefined) {
+    right.appendChild(el("span", {
+      class: "encounter-timer" + (encounter.turns_left <= 3 ? " urgent" : ""),
+      text: `⏱ ${encounter.turns_left} х.`,
+      title: "Сбежит, если не убить за столько ходов",
+    }));
+  }
   right.appendChild(jobCancelButton(abandonEncounter));
-  head.appendChild(right);
-  box.appendChild(head);
+  title.appendChild(right);
+  body.appendChild(title);
+
   const ratio = Math.max(0, Math.min(1, encounter.remaining_hp / encounter.max_hp));
-  const bar = el("div", { class: "job-bar" });
-  bar.appendChild(el("div", { class: "job-bar-fill", style: `width:${Math.round(ratio * 100)}%` }));
-  box.appendChild(bar);
-  const attackBtn = el("button", { text: "Атаковать" });
-  const { key, delay } = actionCooldownInfo("hunting", { kind: "attack" });
-  const remaining = cooldownRemainingMs(key);
-  if (remaining > 0) applyCooldownVisual(attackBtn, remaining, delay);
-  attackBtn.addEventListener("click", () => tryRunAction(key, delay, attackBtn, () => doAction("hunt_attack", null)));
-  box.appendChild(attackBtn);
+  const bar = el("div", { class: "encounter-hp-bar" });
+  bar.appendChild(el("div", { id: "encounterHpFill", class: "encounter-hp-fill", style: `width:${Math.round(ratio * 100)}%` }));
+  body.appendChild(bar);
+
+  const moves = el("div", { class: "encounter-moves" });
+  moves.appendChild(makeAttackButton("Атаковать", null));
+  (VIEW.hunting.combat_moves || []).forEach(move => moves.appendChild(makeAttackButton(move.name, move.id, move)));
+  body.appendChild(moves);
+
+  box.appendChild(body);
   return box;
 }
 
@@ -2535,6 +3281,7 @@ async function cancelJob(kind, extra) {
 function renderEnergy() {
   const e = VIEW.energy;
   const free = e.generation - e.consumption;
+  document.getElementById("hudEnergy").textContent = e.capacity > 0 ? `${e.stock}/${e.capacity}` : e.stock;
   document.getElementById("energyStock").textContent = e.capacity > 0 ? `${e.stock}/${e.capacity}` : e.stock;
   const stockLbl = document.getElementById("energyStockLbl");
   stockLbl.textContent = e.capacity > 0 ? "Запас" : "Запас (без хранилищ)";
@@ -2611,7 +3358,7 @@ function renderBuildings() {
     return;
   }
 
-  const list = el("div", { class: "bld-list" });
+  const list = el("div", { class: "bld-list thin-scroll" });
   VIEW.buildings.forEach(b => {
     const row = el("div", { class: "bld-row" });
     row.dataset.resourceName = b.name.toLowerCase();
@@ -2656,27 +3403,23 @@ function renderBuildings() {
     if (upkeep) main.appendChild(upkeep);
     const special = specialAbilitiesRow(b);
     if (special) main.appendChild(special);
-    const soulBlock = renderSoulCollector(b);
-    if (soulBlock) main.appendChild(soulBlock);
     const mechanismToggle = renderMechanismToggle(b);
     if (mechanismToggle) main.appendChild(mechanismToggle);
 
-    if (b.broken > 0) {
-      const repairLink = el("span", { class: "bld-repair-link", text: "почини →" });
-      repairLink.addEventListener("click", () => {
-        activeActionTab = "repair";
-        renderActions();
-        document.getElementById("actionsPanel").scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-      main.appendChild(repairLink);
-    }
+    if (b.broken > 0) main.appendChild(renderBuildingRepairRow(b));
     head.appendChild(main);
 
-    if (b.upgrades || b.is_farm || b.is_breeding_station || b.is_genetics_lab) {
+    if (b.upgrades || b.is_farm || b.is_breeding_station || b.is_genetics_lab || b.is_soul_collector || b.automation) {
       const actions = el("div", { class: "bld-row-actions" });
       if (b.upgrades) {
         const btn = el("button", { class: "upgrade-open-btn", text: "⚙ Улучшения" });
         btn.addEventListener("click", () => openBuildingUpgradesModal(b));
+        actions.appendChild(btn);
+      }
+      if (b.automation) {
+        const btn = el("button", { class: "upgrade-open-btn", text: "🤖 Автоматизация" });
+        btn.title = "Правила «если ресурс — тогда действие», выполняются автоматически каждый ход";
+        btn.addEventListener("click", () => openAutomationModal(b));
         actions.appendChild(btn);
       }
       if (b.is_farm) {
@@ -2697,6 +3440,12 @@ function renderBuildings() {
         btn.addEventListener("click", openGeneticsLabModal);
         actions.appendChild(btn);
       }
+      if (b.is_soul_collector) {
+        const btn = el("button", { class: "upgrade-open-btn", text: "👻 Души" });
+        btn.title = "Вставить/вынуть души в слоты этого синтезатора";
+        btn.addEventListener("click", () => openSoulSynthesizerModal(b.id));
+        actions.appendChild(btn);
+      }
       head.appendChild(actions);
     }
 
@@ -2707,9 +3456,36 @@ function renderBuildings() {
   container.appendChild(makeResourceSearchBar(list, {
     get: () => buildingsSearchQuery,
     set: (v) => { buildingsSearchQuery = v; },
-  }));
+  }, true));
   container.appendChild(list);
   if (savedScroll !== null) list.scrollTop = savedScroll;
+}
+
+// Ремонт теперь прямо на карточке постройки (не отдельная вкладка "Ремонт" -
+// см. CLAUDE.md) - кнопка чинит СРАЗУ все копии, для которых сейчас хватает
+// инструмента (b.repairable), цена (b.repair_cost) отражает именно эту часть.
+// Если какой-то вид поломки ждёт инструмент (b.repair_blocked) - показываем
+// подсказку под кнопкой, что конкретно нужно, даже если repairable === 0
+// (кнопка тогда просто задизейблена, но сама постройка и её сломанность видны).
+function renderBuildingRepairRow(b) {
+  const wrap = el("div", { class: "bld-repair-row" });
+  const btn = el("button", { class: "small", text: `Ремонт (${b.repairable}/${b.broken})` });
+  btn.disabled = b.repairable <= 0;
+  if (b.repair_cost.length) {
+    const costBox = el("span", { class: "bld-repair-cost" });
+    b.repair_cost.forEach(c => costBox.appendChild(costChip(c.id, c.amount, false, c.jump_to)));
+    wrap.appendChild(costBox);
+  }
+  const { key, delay } = actionCooldownInfo("repair", b);
+  btn.addEventListener("click", () => tryRunAction(key, delay, btn, () => doAction("repair", b.id)));
+  wrap.appendChild(btn);
+  if (b.repair_blocked.length) {
+    const hint = b.repair_blocked
+      .map(t => `${t.type_name} ×${t.count} (нужен: ${t.missing_tools.join(", ")})`)
+      .join("; ");
+    wrap.appendChild(el("span", { class: "bld-repair-blocked", text: hint }));
+  }
+  return wrap;
 }
 
 // Список инструментов живёт в отдельной модалке (кнопка "Инструменты" в шапке,
@@ -2740,35 +3516,79 @@ function openToolsModal() {
   head.appendChild(el("button", { text: "Закрыть", onclick: closeToolsModal }));
   modal.appendChild(head);
 
-  const list = el("div", { class: "tools-list" });
+  // Компактная строка 1:1 из канваса (B_Tools.dc.html: .line/.pips/.req) -
+  // полоска пипсов вместо крупной пиксель-иконки, короткая акцентная кнопка
+  // вместо кнопки-простыни с перечислением всех ресурсов внутри неё самой (по
+  // прямому пожеланию, 2026-09-13 - см. CLAUDE.md). Маленькая иконка тира
+  // слева - ЕДИНСТВЕННОЕ намеренное отличие от канваса (там иконок нет вовсе):
+  // у тиров инструментов есть настоящая кастомная пиксель-иконка, рисуемая в
+  // content_editor.html (iconEditButton у tools[].tiers[]) - прятать реально
+  // нарисованный контент было бы не "привести к канвасу", а потерять фичу.
+  const list = el("div", { class: "tools-list scroll-area" });
   VIEW.tools.forEach(tool => {
-    const row = el("div", { class: "tool-row" });
+    const row = el("div", { class: "line" });
     const iconDef = toolIcon(tool.id, tool.tier);
-    row.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 44));
-    const info = el("div", { class: "info" });
-    info.appendChild(el("b", { text: `${tool.name}: ${tool.tier_name}` }));
-    info.appendChild(el("span", { text: `Тир ${tool.tier} из ${tool.max_tier}` }));
-    row.appendChild(info);
-    if (tool.next_tier_name) {
+    row.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 28));
+    const body = el("div", { class: "line-body" });
+    row.appendChild(body);
+    body.appendChild(el("div", { class: "line-name", text: `${tool.name}: ${tool.tier_name}` }));
+
+    const pips = el("div", { class: "pips" });
+    for (let i = 1; i <= tool.max_tier; i++) {
+      pips.appendChild(el("div", { class: `pip ${i < tool.tier ? "done" : i === tool.tier ? "current" : "locked"}` }));
+    }
+    body.appendChild(pips);
+
+    // Прочность (max_durability на ТЕКУЩЕМ тире) - см. "Виды поломок и ремонт
+    // инструментов" в CLAUDE.md. Инструменты без max_durability (топор/кирка/
+    // меч и т.п.) вообще не показывают эту строку.
+    if (tool.max_durability != null) {
+      body.appendChild(el("div", {
+        class: "line-sub" + (tool.is_broken ? " danger" : ""),
+        text: `Прочность: ${tool.durability_remaining}/${tool.max_durability}`,
+      }));
+    }
+
+    const req = el("div", { class: "req" });
+    const reqText = el("div", { class: "req-text" });
+    if (tool.is_broken) {
+      const repairCostText = tool.repair_cost.map(c => `${c.amount} ${c.name}`).join(", ") || "бесплатно";
+      reqText.append("Ремонт: ", el("b", { text: repairCostText }));
+      req.appendChild(reqText);
+      const repairBtn = el("div", { class: "btn-sm", text: "Почин." });
+      const rKey = `repair_tool:${tool.id}`;
+      const rDelay = VIEW.default_action_delay_ms;
+      const rRemaining = cooldownRemainingMs(rKey);
+      if (rRemaining > 0) applyCooldownVisual(repairBtn, rRemaining, rDelay);
+      repairBtn.addEventListener("click", () => tryRunAction(rKey, rDelay, repairBtn, () => doAction("repair_tool", tool.id)));
+      req.appendChild(repairBtn);
+    } else if (tool.next_tier_name) {
       const costText = tool.next_cost.map(c => `${c.amount} ${c.name}`).join(", ") || "бесплатно";
       if (tool.can_upgrade) {
-        const btn = el("button", { text: `Улучшить -> ${tool.next_tier_name} (${costText})` });
+        reqText.append(`Тир ${tool.tier} → ${tool.tier + 1}: `, el("b", { text: costText }));
+        req.appendChild(reqText);
+        const btn = el("div", { class: "btn-sm", text: "Улучшить" });
         const key = `upgrade_tool:${tool.id}`;
         const delay = VIEW.default_action_delay_ms;
         const remaining = cooldownRemainingMs(key);
         if (remaining > 0) applyCooldownVisual(btn, remaining, delay);
         btn.addEventListener("click", () => tryRunAction(key, delay, btn, () => doAction("upgrade_tool", tool.id)));
-        row.appendChild(btn);
+        req.appendChild(btn);
       } else {
         // Следующий тир существует, но пока не открыт технологией - показываем,
         // что дальше есть куда расти и чего это будет стоить, а не просто прячем
         // (иначе выглядело бы так, будто инструмент уже упёрся в потолок).
-        info.appendChild(el("span", {
-          class: "locked-note",
-          text: `Дальше: ${tool.next_tier_name} (${costText}) - нужна технология «${tool.next_tech_name}»`,
-        }));
+        reqText.classList.add("locked");
+        reqText.textContent = `требует тех «${tool.next_tech_name}»`;
+        req.appendChild(reqText);
+        req.appendChild(el("div", { class: "btn-sm disabled", text: "—" }));
       }
+    } else {
+      reqText.classList.add("locked");
+      reqText.textContent = "максимальный тир";
+      req.appendChild(reqText);
     }
+    body.appendChild(req);
     list.appendChild(row);
   });
   modal.appendChild(list);
@@ -2791,6 +3611,8 @@ const UPGRADE_TYPE_LABELS = {
   energy_converter_capacity: "Пропускная способность",
   soul_collector_slots: "Слоты синтезатора душ",
   soul_generation_efficiency: "Эффективность синтезатора душ",
+  breakdown_immunity: "Неломкость",
+  action_duration_reduction: "Ускорение действия",
 };
 
 // Один блок "Было -> Стало" для ЛИБО постройки (output=produces, input=consumes),
@@ -2849,15 +3671,22 @@ function openBuildingUpgradesModal(item) {
     modal.appendChild(depList);
   }
 
-  const list = el("div", { class: "upgrades-list" });
-  upgrades.forEach(u => {
-    const row = el("div", { class: "upgrade-row" });
-    row.appendChild(el("div", { class: "upgrade-title", text: `${u.name} - ${UPGRADE_TYPE_LABELS[u.type] || u.type}` }));
-    row.appendChild(el("div", { class: "upgrade-desc", text: u.description }));
+  // Строка апгрейда - 1:1 из канваса (B_Buildings.dc.html: .row/.idx/.info/.btn-sm) -
+  // порядковый номер + имя/описание/цена в один горизонтальный ряд с компактной
+  // акцентной кнопкой справа, а не карточка со всем стопкой друг под другом,
+  // как было раньше - по прямому пожеланию, 2026-09-13, см. CLAUDE.md.
+  const list = el("div", { class: "upgrades-list scroll-area" });
+  upgrades.forEach((u, idx) => {
+    const row = el("div", { class: "upg-row" });
+    row.appendChild(el("div", { class: "upg-idx", text: String(idx + 1).padStart(2, "0") }));
+    const body = el("div", { class: "upg-body" });
+    row.appendChild(body);
+    body.appendChild(el("div", { class: "upgrade-title", text: `${u.name} - ${UPGRADE_TYPE_LABELS[u.type] || u.type}` }));
+    body.appendChild(el("div", { class: "upgrade-desc", text: u.description }));
 
     if (u.preview) {
       const buildingBlock = upgradeBeforeAfterBlock("Постройка", current.produces, current.consumes, u.preview.produces, u.preview.consumes);
-      if (buildingBlock) row.appendChild(buildingBlock);
+      if (buildingBlock) body.appendChild(buildingBlock);
       // Только ОДИН показательный рецепт (example_action), а не все зависимые
       // действия разом - их может быть несколько десятков (см. CLAUDE.md) -
       // полный список имён уже дан выше, в dependent_action_names.
@@ -2865,7 +3694,7 @@ function openBuildingUpgradesModal(item) {
       const after = u.preview.example_action;
       if (before && after) {
         const actionBlock = upgradeBeforeAfterBlock(before.name, before.gain, before.cost, after.gain, after.cost);
-        if (actionBlock) row.appendChild(actionBlock);
+        if (actionBlock) body.appendChild(actionBlock);
       }
     }
 
@@ -2873,7 +3702,7 @@ function openBuildingUpgradesModal(item) {
     u.cost.forEach(c => costRow.appendChild(costChip(c.id, c.amount, false, c.jump_to)));
     if (!u.cost.length) costRow.appendChild(el("span", { class: "note-chip", text: "бесплатно" }));
     if (u.repeatable) costRow.appendChild(el("span", { class: "note-chip", text: `куплено раз: ${u.times_purchased}${u.max_purchases != null ? `/${u.max_purchases}` : ""}` }));
-    row.appendChild(costRow);
+    body.appendChild(costRow);
 
     // Следующий уровень прогрессии, который ещё не куплен (sequence_locked),
     // сервер вообще не включает в upgrades (см. web_ui.py:building_upgrades_view) -
@@ -2887,13 +3716,13 @@ function openBuildingUpgradesModal(item) {
     // game/engine.py:repeatable_upgrade_cost) до max_purchases (at_max), если он
     // задан; обычный апгрейд - как раньше, ровно одна покупка.
     if (u.repeatable && u.at_max) {
-      row.appendChild(el("div", { class: "upgrade-status done", text: `✓ Куплено максимум (${u.times_purchased}/${u.max_purchases})` }));
+      row.appendChild(el("div", { class: "upgrade-status done", text: `✓ Максимум (${u.times_purchased}/${u.max_purchases})` }));
     } else if (u.purchased && !u.repeatable) {
       row.appendChild(el("div", { class: "upgrade-status done", text: "✓ Куплено" }));
     } else if (lockReasons.length) {
       row.appendChild(el("div", { class: "upgrade-status locked", text: lockReasons.join(" · ") }));
     } else {
-      const buyBtn = el("button", { text: u.repeatable && u.purchased ? "Купить ещё" : "Купить" });
+      const buyBtn = el("div", { class: "btn-sm", text: u.repeatable && u.purchased ? "Ещё" : "Купить" });
       const key = `building_upgrade:${item.id}:${u.id}:${u.times_purchased}`;
       const delay = VIEW.default_action_delay_ms;
       const remaining = cooldownRemainingMs(key);
@@ -2915,6 +3744,257 @@ function openBuildingUpgradesModal(item) {
 function closeBuildingUpgradesModal() {
   const overlay = document.getElementById("buildingUpgradesOverlay");
   if (overlay) overlay.remove();
+}
+
+const AUTOMATION_OP_LABELS = { ">=": "не меньше", "<=": "не больше" };
+
+// Окно "Автоматизация" (item.automation, см. tools/web_ui.py:automation_view) -
+// список уже настроенных правил вида "если ресурс X >= / <= K (и, может быть,
+// ещё условия) - выполнить действие Y" + кнопка добавления нового, пока есть
+// свободные слоты (item.automation.capacity). Тот же приём, что у
+// openBuildingUpgradesModal: запоминаем прокрутку старой модалки перед
+// пересборкой, id/dataset.buildingId для обновления из renderAll().
+function openAutomationModal(item) {
+  const prevModal = document.querySelector("#automationOverlay .modal");
+  const savedScroll = prevModal ? prevModal.scrollTop : null;
+
+  closeAutomationModal();
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeAutomationModal(); });
+
+  const modal = el("div", { class: "modal upgrades-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: `Автоматизация: ${item.name}` }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: closeAutomationModal }));
+  modal.appendChild(head);
+
+  const automation = item.automation;
+  modal.appendChild(el("p", { class: "hint", text:
+    `Слоты: ${automation.rules.length}/${automation.capacity}. Каждый ход каждое правило проверяет свои `
+    + "условия и, если ВСЕ они истинны (без условий - значит всегда), само выполняет выбранное действие - "
+    + "без клика игрока." }));
+
+  const list = el("div", { class: "upgrades-list scroll-area" });
+  automation.rules.forEach(rule => list.appendChild(renderAutomationRuleRow(item.id, rule)));
+  modal.appendChild(list);
+
+  if (automation.rules.length < automation.capacity) {
+    const addBtn = el("button", { class: "small", text: "+ добавить правило" });
+    addBtn.addEventListener("click", () => openAutomationRuleEditorModal(item.id, null));
+    const addRow = el("div", { class: "upgrade-row" });
+    addRow.appendChild(addBtn);
+    modal.appendChild(addRow);
+  } else if (!automation.rules.length) {
+    modal.appendChild(el("p", { class: "hint", text: "Нет свободных слотов - купите апгрейд автоматизатора." }));
+  }
+
+  overlay.appendChild(modal);
+  overlay.id = "automationOverlay";
+  overlay.dataset.buildingId = item.id;
+  document.body.appendChild(overlay);
+  if (savedScroll !== null) modal.scrollTop = savedScroll;
+}
+
+function closeAutomationModal() {
+  const overlay = document.getElementById("automationOverlay");
+  if (overlay) overlay.remove();
+}
+
+const AUTOMATION_KIND_LABELS = { manual_action: "Действие", energy_recipe: "Крафт за энергию" };
+
+function renderAutomationRuleRow(buildingId, rule) {
+  const row = el("div", { class: "upgrade-row" });
+  row.appendChild(el("div", {
+    class: "upgrade-title",
+    text: `[${AUTOMATION_KIND_LABELS[rule.kind] || rule.kind}] ${rule.target_name}`,
+  }));
+  const condBox = el("div", { class: "costs" });
+  if (!rule.conditions.length) {
+    condBox.appendChild(el("span", { class: "note-chip", text: "условий нет - выполняется всегда" }));
+  } else {
+    rule.conditions.forEach(c => {
+      condBox.appendChild(el("span", {
+        class: "note-chip",
+        text: `${c.resource_name} ${AUTOMATION_OP_LABELS[c.op] || c.op} ${c.amount}`,
+      }));
+    });
+  }
+  row.appendChild(condBox);
+
+  const actions = el("div", { class: "bld-row-actions" });
+  const editBtn = el("button", { class: "small", text: "Изменить" });
+  editBtn.addEventListener("click", () => openAutomationRuleEditorModal(buildingId, rule));
+  actions.appendChild(editBtn);
+  const removeBtn = el("button", { class: "small danger", text: "✕ Удалить" });
+  removeBtn.addEventListener("click", () => removeAutomationRule(buildingId, rule.index));
+  actions.appendChild(removeBtn);
+  row.appendChild(actions);
+  return row;
+}
+
+// Форма добавления/редактирования ОДНОГО правила - отдельный overlay поверх
+// openAutomationModal (обе модалки могут быть открыты одновременно, как
+// стек), закрывается сама по кнопке "Сохранить"/"Отмена" - в отличие от
+// openAutomationModal, renderAll() её не пересобирает (нет смысла держать
+// открытой форму редактирования поперёк хода).
+function openAutomationRuleEditorModal(buildingId, rule) {
+  const building = VIEW.buildings.find(b => b.id === buildingId);
+  if (!building || !building.automation) return;
+  const automation = building.automation;
+
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: rule ? "Изменить правило" : "Новое правило" }));
+  head.appendChild(el("button", { text: "Отмена", onclick: () => overlay.remove() }));
+  modal.appendChild(head);
+
+  const body = el("div", { class: "upgrades-list" });
+
+  // Два уровня выбора: сначала тип цели (ручное действие / крафт за энергию),
+  // потом сама цель - список targetSelect'а зависит от kindSelect'а и
+  // пересобирается при его смене (targetsByKind, сгруппировано один раз).
+  const targetsByKind = { manual_action: [], energy_recipe: [] };
+  automation.eligible_targets.forEach(t => targetsByKind[t.kind].push(t));
+
+  const kindRow = el("div", { class: "upgrade-row" });
+  kindRow.appendChild(el("div", { class: "upgrade-title", text: "Тип цели" }));
+  const kindSelect = el("select");
+  Object.entries(AUTOMATION_KIND_LABELS).forEach(([value, label]) => {
+    const opt = el("option", { value, text: label });
+    if ((rule ? rule.kind : "manual_action") === value) opt.selected = true;
+    kindSelect.appendChild(opt);
+  });
+  kindRow.appendChild(kindSelect);
+  body.appendChild(kindRow);
+
+  const targetRow = el("div", { class: "upgrade-row" });
+  targetRow.appendChild(el("div", { class: "upgrade-title", text: "Цель" }));
+  const targetSelect = el("select");
+  const renderTargetOptions = () => {
+    targetSelect.innerHTML = "";
+    targetsByKind[kindSelect.value].forEach(t => {
+      const opt = el("option", { value: t.id, text: t.name });
+      if (rule && rule.kind === kindSelect.value && rule.target_id === t.id) opt.selected = true;
+      targetSelect.appendChild(opt);
+    });
+  };
+  renderTargetOptions();
+  kindSelect.addEventListener("change", renderTargetOptions);
+  targetRow.appendChild(targetSelect);
+  body.appendChild(targetRow);
+
+  const condRow = el("div", { class: "upgrade-row" });
+  condRow.appendChild(el("div", {
+    class: "upgrade-title",
+    text: "Условия (все должны быть истинны; без единого условия - выполняется всегда)",
+  }));
+  const condList = el("div");
+  const conditions = rule ? rule.conditions.map(c => ({ resource: c.resource, op: c.op, amount: c.amount })) : [];
+
+  const renderConditionRows = () => {
+    condList.innerHTML = "";
+    conditions.forEach((c, i) => {
+      const line = el("div", { class: "costs" });
+      const resSelect = el("select");
+      automation.condition_resources.forEach(r => {
+        const opt = el("option", { value: r.id, text: r.name });
+        if (c.resource === r.id) opt.selected = true;
+        resSelect.appendChild(opt);
+      });
+      resSelect.addEventListener("change", () => { c.resource = resSelect.value; });
+      const opSelect = el("select");
+      Object.entries(AUTOMATION_OP_LABELS).forEach(([value, label]) => {
+        const opt = el("option", { value, text: label });
+        if (c.op === value) opt.selected = true;
+        opSelect.appendChild(opt);
+      });
+      opSelect.addEventListener("change", () => { c.op = opSelect.value; });
+      const amountInput = el("input", { type: "number", min: "0", value: String(c.amount) });
+      amountInput.addEventListener("change", () => { c.amount = Number(amountInput.value) || 0; });
+      const rmBtn = el("button", { class: "small danger", text: "✕" });
+      rmBtn.addEventListener("click", () => { conditions.splice(i, 1); renderConditionRows(); });
+      line.append(resSelect, opSelect, amountInput, rmBtn);
+      condList.appendChild(line);
+    });
+  };
+  renderConditionRows();
+  condRow.appendChild(condList);
+  const addCondBtn = el("button", { class: "small", text: "+ добавить условие" });
+  addCondBtn.addEventListener("click", () => {
+    conditions.push({ resource: automation.condition_resources[0].id, op: ">=", amount: 0 });
+    renderConditionRows();
+  });
+  condRow.appendChild(addCondBtn);
+  body.appendChild(condRow);
+  modal.appendChild(body);
+
+  const footerRow = el("div", { class: "upgrade-row" });
+  const saveBtn = el("button", { text: rule ? "Сохранить" : "Добавить" });
+  saveBtn.addEventListener("click", async () => {
+    if (!targetSelect.value) return;  // выбранный kind вообще без доступных целей
+    saveBtn.disabled = true;
+    if (rule) await updateAutomationRule(buildingId, rule.index, kindSelect.value, targetSelect.value, conditions);
+    else await addAutomationRule(buildingId, kindSelect.value, targetSelect.value, conditions);
+    overlay.remove();
+  });
+  footerRow.appendChild(saveBtn);
+  modal.appendChild(footerRow);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+async function addAutomationRule(buildingId, kind, targetId, conditions) {
+  if (busy) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/add_automation_rule", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ building_id: buildingId, kind, target_id: targetId, conditions }),
+    });
+    const payload = await res.json();
+    VIEW = payload.state;
+    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+    renderAll();
+  } finally {
+    busy = false;
+  }
+}
+
+async function updateAutomationRule(buildingId, index, kind, targetId, conditions) {
+  if (busy) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/update_automation_rule", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ building_id: buildingId, index, kind, target_id: targetId, conditions }),
+    });
+    const payload = await res.json();
+    VIEW = payload.state;
+    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+    renderAll();
+  } finally {
+    busy = false;
+  }
+}
+
+async function removeAutomationRule(buildingId, index) {
+  if (busy) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/remove_automation_rule", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ building_id: buildingId, index }),
+    });
+    const payload = await res.json();
+    VIEW = payload.state;
+    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+    renderAll();
+  } finally {
+    busy = false;
+  }
 }
 
 async function setActionPriority(actionId, priority) {
@@ -2953,23 +4033,11 @@ async function setEnergyPriority(buildingId, priority) {
 // живёт только в памяти вкладки браузера (как activeLocationTab и т.п.).
 let prioritiesActiveTab = "autocraft";
 
-// Общий помощник для ↑/↓ в ОБЕИХ вкладках модалки "Приоритеты" - sorted уже
-// отсортирован по убыванию priority (см. openPrioritiesModal), поэтому
-// "подняться/опуститься на один" значит стать строго больше/меньше СОСЕДНЕГО по
-// текущему порядку элемента, а не переставлять местами произвольные числа -
-// работает даже если приоритеты не идут подряд или совпадают у нескольких строк.
-function priorityMoveValue(sorted, index, delta) {
-  const neighborIndex = index + delta;
-  if (neighborIndex < 0 || neighborIndex >= sorted.length) return null;
-  const neighbor = sorted[neighborIndex].priority;
-  return delta < 0 ? neighbor + 1 : neighbor - 1;
-}
-
 // Одна строка списка приоритета (используется и вкладкой "Автокрафт", и вкладкой
-// "Энергосистема") - имя + произвольные доп. строки (subtitleLines) + ↑/↓ (позиция
-// в ОТСОРТИРОВАННОМ списке - не число само по себе) + кнопка сброса, если приоритет
-// переопределён игроком под это сохранение.
-function priorityRow(item, sorted, index, setFn, subtitleLines) {
+// "Энергосистема") - имя + произвольные доп. строки (subtitleLines) + поле ручного
+// ввода числа приоритета + кнопка сброса, если приоритет переопределён игроком
+// под это сохранение.
+function priorityRow(item, setFn, subtitleLines) {
   const row = el("div", { class: "priority-row" });
   const info = el("div", { class: "info" });
   info.appendChild(el("b", { text: item.name }));
@@ -2977,19 +4045,20 @@ function priorityRow(item, sorted, index, setFn, subtitleLines) {
   row.appendChild(info);
 
   const order = el("div", { class: "priority-order-controls" });
-  const up = el("button", { class: "panel-head-btn", title: "Поднять приоритет", text: "↑" });
-  if (index === 0) up.disabled = true;
-  up.addEventListener("click", () => {
-    const v = priorityMoveValue(sorted, index, -1);
-    if (v !== null) setFn(item.id, v);
+  const valueInput = el("input", {
+    type: "number", class: "priority-value-input",
+    title: "Задать значение приоритета",
+    value: String(item.priority),
   });
-  const down = el("button", { class: "panel-head-btn", title: "Понизить приоритет", text: "↓" });
-  if (index === sorted.length - 1) down.disabled = true;
-  down.addEventListener("click", () => {
-    const v = priorityMoveValue(sorted, index, 1);
-    if (v !== null) setFn(item.id, v);
-  });
-  order.append(up, down);
+  const commitValue = () => {
+    const v = parseInt(valueInput.value, 10);
+    if (Number.isNaN(v)) { valueInput.value = String(item.priority); return; }
+    if (v === item.priority) return;
+    setFn(item.id, v);
+  };
+  valueInput.addEventListener("change", commitValue);
+  valueInput.addEventListener("keydown", (e) => { if (e.key === "Enter") valueInput.blur(); });
+  order.appendChild(valueInput);
   row.appendChild(order);
 
   if (item.overridden) {
@@ -3059,8 +4128,7 @@ function renderAutocraftPriorityTab(container) {
   container.appendChild(el("p", { class: "hint", text:
     "Если несколько действий производят один и тот же ресурс, автокрафт выбирает то, у "
     + "которого приоритет БОЛЬШЕ (при равенстве - любое из них). Выбери ресурс, чтобы увидеть "
-    + "только рецепты, которые его производят, и расставить порядок между ними - ↑/↓ переставляют "
-    + "действие в списке, значение приоритета под капотом подбирается само." }));
+    + "только рецепты, которые его производят, и вписать в поле нужное число приоритета." }));
 
   renderPriorityResourcePicker(container);
 
@@ -3069,10 +4137,10 @@ function renderAutocraftPriorityTab(container) {
     ? VIEW.action_priorities.filter(a => a.gain.some(g => g.id === priorityResourceFilter))
     : VIEW.action_priorities;
   const sorted = [...items].sort((a, b) => b.priority - a.priority);
-  sorted.forEach((a, index) => {
+  sorted.forEach((a) => {
     const sub = [`даёт: ${a.gain.map(g => g.name).join(", ")}`];
     if (a.is_active_recipe) sub.push("сейчас используется автокрафтом");
-    list.appendChild(priorityRow(a, sorted, index, setActionPriority, [sub.join(" - ")]));
+    list.appendChild(priorityRow(a, setActionPriority, [sub.join(" - ")]));
   });
   if (!sorted.length) {
     list.appendChild(el("div", { class: "empty-note", text: priorityResourceFilter
@@ -3090,12 +4158,12 @@ function renderEnergyPriorityTab(container) {
     + "приоритет решает только споры за то, что осталось в общем запасе." }));
   const list = el("div", { class: "priority-list" });
   const sorted = [...VIEW.energy_priorities].sort((a, b) => b.priority - a.priority);
-  sorted.forEach((e, index) => {
+  sorted.forEach((e) => {
     const sub = [
       e.built_count > 0 ? `построено: ${e.built_count}` : "ещё не построено",
       e.quota == null ? "пропускная способность: без ограничения" : `пропускная способность: ${e.quota}/ход`,
     ];
-    const row = priorityRow(e, sorted, index, setEnergyPriority, [sub.join(" - ")]);
+    const row = priorityRow(e, setEnergyPriority, [sub.join(" - ")]);
     if (e.shortfall_last_turn > 0) {
       row.querySelector(".info").appendChild(el("span", {
         class: "priority-shortfall-note",
@@ -3136,7 +4204,7 @@ function openPrioritiesModal(tab) {
   tabs.append(autocraftTabBtn, energyTabBtn);
   modal.appendChild(tabs);
 
-  const body = el("div", {});
+  const body = el("div", { class: "scroll-area" });
   modal.appendChild(body);
 
   // Вкладка "Энергосистема" появляется, только когда построена хотя бы одна
@@ -3155,6 +4223,9 @@ function openPrioritiesModal(tab) {
     body.innerHTML = "";
     if (prioritiesActiveTab === "autocraft") renderAutocraftPriorityTab(body);
     else renderEnergyPriorityTab(body);
+    // rAF - на первом вызове overlay ещё не в document (appendChild ниже по
+    // коду), offsetLeft/offsetWidth активной кнопки были бы нулями без layout.
+    requestAnimationFrame(() => positionTabUnderline(tabs, prioritiesActiveTab === "autocraft" ? autocraftTabBtn : energyTabBtn));
   };
   autocraftTabBtn.addEventListener("click", () => { prioritiesActiveTab = "autocraft"; renderTab(); });
   energyTabBtn.addEventListener("click", () => { prioritiesActiveTab = "energy"; renderTab(); });
@@ -3175,7 +4246,6 @@ const ACTION_TABS = [
   ["locations", "Локации"],
   ["build", "Построить"],
   ["tech", "Исследовать"],
-  ["repair", "Ремонт"],
 ];
 
 // locId=null - корень дерева локаций (действия и локации без своей "родительской"
@@ -3210,11 +4280,12 @@ function pluralItems(n) {
 }
 
 function renderActions() {
-  const visibleTabs = ACTION_TABS.filter(([key]) => key !== "repair" || (VIEW.categories.repair || []).length > 0);
+  const visibleTabs = ACTION_TABS;
   if (!visibleTabs.some(([k]) => k === activeActionTab)) activeActionTab = "locations";
 
   const tabsBox = document.getElementById("actionTabs");
   tabsBox.innerHTML = "";
+  let activeTabBtn = null;
   visibleTabs.forEach(([key, label]) => {
     const count = key === "locations"
       ? locationItemCount(null)
@@ -3222,7 +4293,9 @@ function renderActions() {
     const btn = el("button", { text: `${label} (${count})`, class: activeActionTab === key ? "active" : "" });
     btn.addEventListener("click", () => { activeActionTab = key; renderActions(); });
     tabsBox.appendChild(btn);
+    if (activeActionTab === key) activeTabBtn = btn;
   });
+  requestAnimationFrame(() => positionTabUnderline(tabsBox, activeTabBtn));
 
   const body = document.getElementById("actionBody");
   // Списки действий (.action-list) и дерево технологий (.tech-graph) скроллятся
@@ -3252,7 +4325,6 @@ function renderActions() {
 
 const EMPTY_NOTES = {
   build: "Нечего строить.",
-  repair: "Всё исправно.",
 };
 
 function manualActionsAt(locationId) {
@@ -3314,7 +4386,7 @@ function renderLocationsPanel() {
     container.appendChild(grid);
   }
 
-  const list = el("div", { class: "action-list" });
+  const list = el("div", { class: "action-list thin-scroll" });
   const addCard = (kind, item) => {
     const card = actionCard(kind, item);
     card.dataset.search = actionLabel(kind, item).toLowerCase();
@@ -3398,7 +4470,7 @@ function makeLocationSearchBar(locationId, listContainer) {
 
 function renderActionCategory(kind) {
   const list = VIEW.categories[kind] || [];
-  const container = el("div", { class: "action-list" });
+  const container = el("div", { class: "action-list thin-scroll" });
   if (!list.length) {
     container.appendChild(el("div", { class: "empty-note", text: EMPTY_NOTES[kind] || "Пусто." }));
     return container;
@@ -3588,7 +4660,6 @@ function actionLabel(kind, item) {
     if (item.kind === "attack") return `Атаковать: ${item.name}`;
     if (item.kind === "summon") return `Призвать: ${item.name}`;
   }
-  if (kind === "repair") return `Починить: ${item.name} (сломано ${item.broken})`;
   if (kind === "converter") return `Запустить: ${item.name}`;
   if (kind === "build" && item.stage_total > 1) {
     return `${item.name}: ${item.stage_description} (Стадия ${item.stage_number} из ${item.stage_total})`;
@@ -3610,6 +4681,7 @@ function actionCard(kind, item) {
   // для таких действий приходят UNIT-ом (за x1 партию, см. build_view) - карточка
   // сама домножает их на текущее положение ползунка, без похода на сервер.
   const hasScale = kind === "manual" && item.scale_cap > 1;
+  const manualJobRunning = kind === "manual" && item.already_running;
   const scaleStateKey = `manual:${item.id}`;
   if (hasScale && !(scaleStateKey in manualActionScale)) {
     manualActionScale[scaleStateKey] = item.scale_cap; // по умолчанию - максимум, как было раньше без ползунка
@@ -3617,13 +4689,15 @@ function actionCard(kind, item) {
   let currentScale = hasScale ? manualActionScale[scaleStateKey] : 1;
 
   const btn = el("button", { class: "action-card" });
-  if (kind === "manual" && !hasScale) btn.dataset.actionId = item.id;
+  // data-action-id идёт либо на саму кнопку (простой случай, без обёртки), либо
+  // на group ниже - никогда на оба сразу (см. group.dataset.actionId).
+  if (kind === "manual" && !hasScale && !manualJobRunning) btn.dataset.actionId = item.id;
 
   let iconDef = null;
   if (kind === "mining") {
     if (item.kind === "search_any") iconDef = ICONS.ore;
     else iconDef = resourceIcon(item.resource_id);
-  } else if (kind === "build" || kind === "repair") {
+  } else if (kind === "build") {
     iconDef = buildingIcon(item.id) || { grid: ICONS.machine.grid, palette: BUILDING_PALETTE.ok };
   } else if (kind === "manual" && item.gain && item.gain[0]) {
     iconDef = resourceIcon(item.gain[0].id);
@@ -3649,8 +4723,8 @@ function actionCard(kind, item) {
       costs.appendChild(el("span", { class: "note-chip", text: item.available ? "есть что искать" : "искать больше нечего" }));
     }
     if (kind === "mining" && item.kind === "mine") {
-      const qualityText = item.quality_name ? `, качество: ${item.quality_name} (×${item.quality_multiplier})` : "";
-      costs.appendChild(el("span", { class: "note-chip", text: `в жиле: ${item.remaining}, добыча ${item.per_turn}/ход${qualityText}` }));
+      const qualityText = item.quality_name ? ` (качество: ${item.quality_name} ×${item.quality_multiplier} к запасу)` : "";
+      costs.appendChild(el("span", { class: "note-chip", text: `в жиле: ${item.remaining}${qualityText}, добыча ${item.per_turn}/ход` }));
     }
     if (kind === "converter") {
       item.produces.forEach(c => costs.appendChild(costChip(c.id, c.amount, true)));
@@ -3659,7 +4733,10 @@ function actionCard(kind, item) {
       else if (!item.available) costs.appendChild(el("span", { class: "note-chip", text: "все преобразователи заняты" }));
     }
     if (kind === "manual" && item.duration_turns) {
-      costs.appendChild(el("span", { class: "note-chip", text: item.already_running ? "уже выполняется" : `займёт ${item.duration_turns} ход(ов)` }));
+      const chipText = item.already_running
+        ? `${item.turns_done}/${item.turns_total} ход(ов)`
+        : `займёт ${item.duration_turns} ход(ов)`;
+      costs.appendChild(el("span", { class: "note-chip", text: chipText }));
     }
     if (kind === "hunting" && item.kind === "search") {
       costs.appendChild(el("span", { class: "note-chip", text: "рандомная встреча" }));
@@ -3686,13 +4763,12 @@ function actionCard(kind, item) {
   // (см. renderBuildings) - каталог "Построить" всегда показывает только то,
   // что ещё можно построить.
   const noFreeConverter = kind === "converter" && !item.available;
-  const manualJobRunning = kind === "manual" && item.already_running;
   if (noFreeConverter) {
     btn.disabled = true;
     btn.title = "Все энергетические преобразователи заняты - дождись завершения текущего крафта";
   } else if (manualJobRunning) {
     btn.disabled = true;
-    btn.title = "Это действие уже выполняется - дождись завершения (см. панель «Долгие действия»)";
+    btn.title = "Это действие уже выполняется - прогресс и отмена ниже";
   } else {
     const { key, delay } = actionCooldownInfo(kind, item);
     const remaining = cooldownRemainingMs(key);
@@ -3703,11 +4779,12 @@ function actionCard(kind, item) {
     btn.addEventListener("click", () => tryRunAction(key, delay, btn, () => runAction(kind, item, hasScale ? currentScale : undefined)));
   }
 
-  if (!hasScale) return btn;
+  if (!hasScale && !manualJobRunning) return btn;
 
-  // Ползунок живёт СНАРУЖИ <button> (не внутри неё) - вложенный <input type=range>
-  // внутри нативной кнопки ненадёжен в браузерах (перетаскивание конфликтует с
-  // кликом по кнопке) - тот же принцип, что уже применялся к costChip.jumpable
+  // Прогресс-бар/ползунок живут СНАРУЖИ <button> (не внутри неё) - вложенные
+  // интерактивные элементы внутри нативной кнопки ненадёжны в браузерах
+  // (перетаскивание слайдера или клик по "✕" конфликтуют с кликом по самой
+  // кнопке) - тот же принцип, что уже применялся к costChip.jumpable
   // (см. CLAUDE.md), только в этот раз обойти нельзя одним stopPropagation,
   // поэтому целая группа-обёртка. data-action-id/data-search
   // (см. addCard) обязаны быть на ЭТОЙ обёртке - именно она попадает в DOM
@@ -3715,6 +4792,10 @@ function actionCard(kind, item) {
   const group = el("div", { class: "action-card-group" });
   group.dataset.actionId = item.id;
   group.appendChild(btn);
+
+  if (manualJobRunning) group.appendChild(manualJobProgressRow(item.id, item.turns_done, item.turns_total));
+
+  if (!hasScale) return group;
 
   const sliderRow = el("div", { class: "scale-slider-row" });
   sliderRow.appendChild(el("span", { class: "scale-slider-label", text: "Партий за раз:" }));
@@ -3736,7 +4817,6 @@ function actionCard(kind, item) {
 function runAction(kind, item, scale) {
   if (kind === "manual") return doAction("manual", item.id, scale);
   if (kind === "build") return doAction("build", item.id);
-  if (kind === "repair") return doAction("repair", item.id);
   if (kind === "mining") {
     if (item.kind === "mine") return doAction("mining_mine", item.resource_id);
     if (item.kind === "search_any") return doAction("mining_search", null);
@@ -3952,6 +5032,7 @@ function drawTechEdges(graph, svg, tree, nodeEls) {
   svg.setAttribute("width", graph.scrollWidth);
   svg.setAttribute("height", graph.scrollHeight);
   svg.innerHTML = "";
+  let edgeIndex = 0;
   tree.forEach(t => {
     const toEl = nodeEls[t.id];
     if (!toEl) return;
@@ -3966,9 +5047,14 @@ function drawTechEdges(graph, svg, tree, nodeEls) {
       const y2 = toRect.top - graphRect.top + toRect.height / 2 + graph.scrollTop;
       const midX = (x1 + x2) / 2;
       const done = t.status !== "locked";
+      // pathLength=1 нормализует stroke-dasharray/-dashoffset к 0..1 независимо
+      // от реальной длины кривой - позволяет одной и той же CSS-анимации
+      // "дочерчивания" (см. .tech-edge) работать для рёбер любой длины/формы.
       svg.appendChild(svgEl("path", {
         d: `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`,
         class: `tech-edge${done ? " edge-done" : ""}`,
+        pathLength: "1",
+        style: `animation-delay:${(edgeIndex++ * 0.03).toFixed(2)}s`,
       }));
     });
   });
@@ -3978,28 +5064,8 @@ function renderTechDetail(tech) {
   const box = el("div", { class: "tech-detail" });
   if (!tech) return box;
 
-  const statusText = { researched: "Уже изучено", available: "Доступно для исследования", locked: "Нужны другие технологии" };
-  box.appendChild(el("div", { class: "status-line", text: statusText[tech.status] || "" }));
-  box.appendChild(el("h4", { text: tech.name }));
-  const palette = tierBandColor(tech.tier);
-  const tierBadge = el("span", { class: "note-chip", text: `Тир ${tech.tier}` });
-  tierBadge.style.color = palette.text;
-  box.appendChild(tierBadge);
-  box.appendChild(el("div", { class: "desc", text: tech.description }));
-  // lab_built ложно, только если тир требует лаборатории, которой ещё нет
-  // (game/engine.py:research/lab_tier_capacity) - показываем это СРАЗУ, а не
-  // только после попытки нажать "Исследовать" и получить ошибку.
-  if (tech.status === "available" && !tech.lab_built) {
-    box.appendChild(el("div", { class: "lab-warn-line", text: `Нужна лаборатория тира ${tech.tier} - она ещё не построена.` }));
-  }
-
-  const costs = el("div", { class: "costs" });
-  tech.cost.forEach(c => costs.appendChild(costChip(c.id, c.amount, false, c.jump_to)));
-  if (!tech.cost.length) costs.appendChild(el("span", { class: "note-chip", text: "бесплатно" }));
-  box.appendChild(costs);
-
   const u = tech.unlocks;
-  const names = [
+  const unlockNames = [
     ...u.buildings.map(x => x.name),
     ...u.locations.map(x => `локация «${x.name}»`),
     ...u.manual_actions.map(x => x.name),
@@ -4007,13 +5073,37 @@ function renderTechDetail(tech) {
     ...u.tools,
     ...u.energy_recipes.map(x => `рецепт за энергию «${x.name}»`),
   ];
-  box.appendChild(el("div", {
-    class: "unlock-line",
-    text: names.length ? `Открывает: ${names.join(", ")}` : "Прямо ничего не открывает - усиливает уже имеющееся.",
-  }));
+  // Полное описание/что открывает/предупреждение про лабораторию - НЕ постоянным
+  // текстом (это разрослось бы обратно в большую карточку), а подсказкой при
+  // наведении на имя технологии - см. CLAUDE.md, "компактная плашка деталей".
+  const titleParts = [tech.description];
+  titleParts.push(unlockNames.length ? `Открывает: ${unlockNames.join(", ")}` : "Прямо ничего не открывает - усиливает уже имеющееся.");
+  if (tech.status === "available" && !tech.lab_built) {
+    titleParts.push(`Нужна лаборатория тира ${tech.tier} - она ещё не построена.`);
+  }
+
+  const info = el("div", { class: "tech-detail-info" });
+  const statusText = { researched: " — изучено", available: "", locked: " — заблокировано" };
+  info.appendChild(el("div", { class: "tech-detail-name", title: titleParts.join(" "), text: `${tech.name}${statusText[tech.status] || ""}` }));
+
+  const costText = tech.cost.length
+    ? tech.cost.map(c => `${c.amount} ${c.name}`).join(" · ")
+    : "бесплатно";
+  const costLine = el("div", { class: "tech-detail-cost" + (tech.status === "available" && !tech.lab_built ? " warn" : "") });
+  if (tech.status === "researched") {
+    costLine.textContent = `Тир ${tech.tier}`;
+  } else if (tech.status === "available" && !tech.lab_built) {
+    costLine.textContent = `Нужна лаборатория тира ${tech.tier}`;
+  } else if (tech.status === "locked") {
+    costLine.textContent = `Тир ${tech.tier} · нужны другие технологии`;
+  } else {
+    costLine.append(`Тир ${tech.tier}: `, el("b", { text: costText }));
+  }
+  info.appendChild(costLine);
+  box.appendChild(info);
 
   if (tech.status === "available") {
-    const btn = el("button", { text: "Исследовать" });
+    const btn = el("button", { text: "Исследовать →" });
     const key = `tech:${tech.id}`;
     const delay = VIEW.default_action_delay_ms;
     const remaining = cooldownRemainingMs(key);
@@ -4131,6 +5221,12 @@ const SOUND_PRESETS = {
   // falls back на preset с ТЕМ ЖЕ именем.
   button_click: () => _playTones([[820, 0, 0.03]], "square", 0.05),
   lootbox_open: () => _playTones([[300, 0, 0.05], [420, 0.05, 0.08], [520, 0.11, 0.14]], "square", 0.14),
+  // Короткий "тик" за каждую ячейку, пролетающую мимо указателя во время прокрутки
+  // барабана (см. _runLootboxTicker) - имитация классического звука лутбокса
+  // (как в CS:GO): один и тот же щелчок, частота его повторов сама по себе
+  // отражает замедление ленты (cubic-bezier в openLootBoxModal), без искусственной
+  // логики "ближе к концу - реже".
+  lootbox_tick: () => _playTones([[1100, 0, 0.025]], "square", 0.07),
 };
 
 function playSound(name) {
@@ -4237,6 +5333,9 @@ function pushLog(log) {
   if (log.broken && log.broken.length) {
     entry.appendChild(el("div", { class: "danger-line", text: `Сломалось: ${log.broken.map(b => `${b.name} x${b.count}`).join(", ")}` }));
   }
+  if (log.boss_fled) {
+    entry.appendChild(el("div", { class: "danger-line", text: `${log.boss_fled} сбежал - время вышло.` }));
+  }
   if (log.autocraft_completed && log.autocraft_completed.length) {
     entry.appendChild(el("div", { class: "msg", text: `Автокрафт докрафтил: ${log.autocraft_completed.join(", ")}` }));
   }
@@ -4248,6 +5347,10 @@ function pushLog(log) {
   }
   if (log.manual_completed && log.manual_completed.length) {
     entry.appendChild(el("div", { class: "msg", text: `Завершено: ${log.manual_completed.join(", ")}` }));
+  }
+  if (log.automation_fired && log.automation_fired.length) {
+    const line = log.automation_fired.map(a => `${a.building_name}: ${a.message}`).join("; ");
+    entry.appendChild(el("div", { class: "msg", text: `Автоматизация: ${line}` }));
   }
   if (log.quests_completed && log.quests_completed.length) {
     entry.appendChild(el("div", { class: "msg", text: `Квесты выполнены: ${log.quests_completed.map(q => q.name).join(", ")}` }));
@@ -4266,38 +5369,95 @@ function pushLog(log) {
 // Текст поиска по складу - переживает rebuild сетки (openStorage() дёргается
 // заново на каждый пин/апгрейд), как categorySearchQuery/locationSearchQuery.
 let storageSearchQuery = "";
+// Режим сортировки склада - тем же приёмом переживает rebuild сетки.
+// "default" - порядок появления в игре (как VIEW.storage пришёл с сервера).
+let storageSortMode = "default";
 // То же самое, но для сетки выбора ресурса во вкладке "Автокрафт" модалки
 // "Приоритеты" (см. renderAutocraftPriorityTab) - отдельная переменная, у этих
 // двух сеток разный набор плиток и они открываются независимо друг от друга.
 let priorityResourceSearchQuery = "";
 
-// Подсвечивает плитки ресурса, чьё имя содержит запрос (без учёта регистра) -
-// вместо того, чтобы прятать остальные (как makeCategorySearchBar/
-// makeLocationSearchBar для линейных списков), тут они просто притемняются
-// (search-dim) - сетка иконок не должна "прыгать" и терять привычное игроку
-// расположение, поиск - это подсказка "где смотреть", а не фильтр.
-function applyResourceHighlight(grid, query) {
+// Подсвечивает плитки ресурса, чьё имя содержит запрос (без учёта регистра).
+// Сетки иконок (hide=false: склад, выбор ресурса в "Приоритетах", сетка
+// перетаскивания особей в "Скрещивании") только притемняют непопавшие плитки
+// (search-dim) - сетка не должна "прыгать" и терять привычное игроку
+// расположение, поиск тут подсказка "где смотреть", а не фильтр. Обычные
+// списки (hide=true - постройки, банк особей, книга пчёл) прячут непопавшие
+// строки целиком через display:none, тот же приём, что makeCategorySearchBar/
+// makeLocationSearchBar - порядок строк неважен, скрытие ничего не ломает.
+function applyResourceHighlight(grid, query, hide) {
   const q = query.trim().toLowerCase();
   grid.querySelectorAll("[data-resource-name]").forEach(tile => {
     tile.classList.remove("search-match", "search-dim");
+    if (hide) {
+      tile.style.display = (!q || tile.dataset.resourceName.includes(q)) ? "" : "none";
+      return;
+    }
     if (!q) return;
     tile.classList.add(tile.dataset.resourceName.includes(q) ? "search-match" : "search-dim");
   });
 }
 
-// Строка поиска над сеткой ресурсов - queryState.get/set читает и пишет
-// значение в переменную-держатель конкретной сетки (storageSearchQuery или
-// priorityResourceSearchQuery), чтобы текст не сбрасывался при пересборке.
-function makeResourceSearchBar(grid, queryState) {
+// Сортировка плиток склада - копия VIEW.storage (сам массив не трогаем, им
+// пользуется ещё и подсчёт "закреплено N/10" в заголовке). "default" - как
+// пришло с сервера (порядок появления ресурса в игре, resource_order).
+function sortedStorageItems() {
+  const items = [...VIEW.storage];
+  const nameOf = (rid) => (VIEW.resource_names[rid] || "").toLowerCase();
+  const amountOf = (rid) => VIEW.resources[rid] || 0;
+  if (storageSortMode === "amount_asc") {
+    items.sort((a, b) => amountOf(a.id) - amountOf(b.id));
+  } else if (storageSortMode === "amount_desc") {
+    items.sort((a, b) => amountOf(b.id) - amountOf(a.id));
+  } else if (storageSortMode === "alpha") {
+    items.sort((a, b) => nameOf(a.id).localeCompare(nameOf(b.id), "ru"));
+  }
+  return items;
+}
+
+const STORAGE_SORT_OPTIONS = [
+  ["default", "Как в игре"],
+  ["amount_desc", "Количество ↓"],
+  ["amount_asc", "Количество ↑"],
+  ["alpha", "По алфавиту"],
+];
+
+// Переключатель сортировки склада - select, а не отдельные кнопки-вкладки:
+// вариантов всего 4 и они не нуждаются в развесистом UI вкладок с подчёркиванием
+// (см. positionTabUnderline) - тут это было бы избыточно ради самого частого
+// экрана игры. Выбор дёргает openStorage() целиком (та же схема, что и пин),
+// т.к. меняется порядок плиток, не просто фильтр видимости.
+function makeStorageSortBar() {
+  const bar = el("div", { class: "storage-sort-bar" });
+  bar.appendChild(el("span", { class: "storage-sort-label", text: "Сортировка:" }));
+  const select = el("select");
+  STORAGE_SORT_OPTIONS.forEach(([value, text]) => {
+    const opt = el("option", { value, text });
+    if (value === storageSortMode) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.addEventListener("change", () => {
+    storageSortMode = select.value;
+    openStorage();
+  });
+  bar.appendChild(select);
+  return bar;
+}
+
+// Строка поиска над сеткой/списком ресурсов - queryState.get/set читает и
+// пишет значение в переменную-держатель конкретной сетки (storageSearchQuery,
+// priorityResourceSearchQuery и т.д.), чтобы текст не сбрасывался при
+// пересборке. hide - см. applyResourceHighlight.
+function makeResourceSearchBar(grid, queryState, hide) {
   const bar = el("div", { class: "loc-search-bar" });
   const input = el("input", { type: "text", placeholder: "Поиск по названию…" });
   input.value = queryState.get();
   input.addEventListener("input", () => {
     queryState.set(input.value);
-    applyResourceHighlight(grid, input.value);
+    applyResourceHighlight(grid, input.value, hide);
   });
   bar.appendChild(input);
-  applyResourceHighlight(grid, queryState.get());
+  applyResourceHighlight(grid, queryState.get(), hide);
   return bar;
 }
 
@@ -4309,8 +5469,13 @@ function resourceTileBase(rid) {
   const amount = VIEW.resources[rid] || 0;
   const tile = el("div", { class: "storage-tile" + (amount === 0 ? " zero" : "") });
   tile.dataset.resourceName = VIEW.resource_names[rid].toLowerCase();
+  // Слот иконки - ФИКСИРОВАННОГО размера ВСЕГДА (см. .storage-tile-icon), даже
+  // если у ресурса нет картинки (iconDef === null) - иначе такие плитки были
+  // ниже остальных в сетке и портили ровный ряд рамок (см. CLAUDE.md).
+  const iconBox = el("div", { class: "storage-tile-icon" });
   const iconDef = resourceIcon(rid);
-  if (iconDef) tile.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 28));
+  if (iconDef) iconBox.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 24));
+  tile.appendChild(iconBox);
   return tile;
 }
 
@@ -4332,7 +5497,7 @@ function openSkillsModal() {
   head.appendChild(el("button", { text: "Закрыть", onclick: closeSkillsModal }));
   modal.appendChild(head);
 
-  const list = el("div", { class: "upgrades-list" });
+  const list = el("div", { class: "upgrades-list scroll-area" });
   VIEW.skills.forEach(s => {
     const row = el("div", { class: "upgrade-row" });
     row.appendChild(el("div", { class: "upgrade-title", text: `${s.name} — уровень ${s.level}${s.max_level ? `/${s.max_level}` : ""}` }));
@@ -4394,7 +5559,7 @@ function openQuestsModal() {
 
   const quests = VIEW.quests;
   const eras = [...new Set(quests.map(q => q.era))].sort((a, b) => a - b);
-  const body = el("div");
+  const body = el("div", { class: "quest-era-body" });
   if (!eras.length) {
     body.appendChild(el("div", { class: "empty-note", text: "В этой игре нет квестов." }));
   } else {
@@ -4402,6 +5567,7 @@ function openQuestsModal() {
       questsActiveEra = defaultQuestEra(eras, quests);
     }
     const tabs = el("div", { class: "tabs quest-era-tabs" });
+    let activeEraBtn = null;
     eras.forEach(era => {
       const palette = tierBandColor(era);
       const btn = el("button", { text: `Эра ${era}`, class: era === questsActiveEra ? "active" : "" });
@@ -4412,11 +5578,15 @@ function openQuestsModal() {
         btn.classList.add("active");
         body.innerHTML = "";
         body.appendChild(renderQuestGraph(era));
+        positionTabUnderline(tabs, btn);
       });
       tabs.appendChild(btn);
+      if (era === questsActiveEra) activeEraBtn = btn;
     });
     modal.appendChild(tabs);
     body.appendChild(renderQuestGraph(questsActiveEra));
+    // rAF - на первом открытии tabs ещё не в document (appendChild ниже по коду).
+    requestAnimationFrame(() => positionTabUnderline(tabs, activeEraBtn));
   }
   modal.appendChild(body);
 
@@ -4547,6 +5717,7 @@ function drawQuestEdges(graph, svg, quests, nodeEls) {
   svg.setAttribute("width", graph.scrollWidth);
   svg.setAttribute("height", graph.scrollHeight);
   svg.innerHTML = "";
+  let edgeIndex = 0;
   quests.forEach(q => {
     const toEl = nodeEls[q.id];
     if (!toEl) return;
@@ -4564,6 +5735,8 @@ function drawQuestEdges(graph, svg, quests, nodeEls) {
       svg.appendChild(svgEl("path", {
         d: `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`,
         class: `tech-edge${done ? " edge-done" : ""}`,
+        pathLength: "1",
+        style: `animation-delay:${(edgeIndex++ * 0.03).toFixed(2)}s`,
       }));
     });
   });
@@ -4573,18 +5746,16 @@ function renderQuestDetail(quest) {
   const box = el("div", { class: "tech-detail" });
   if (!quest) return box;
 
-  const statusText = {
-    claimed: "Награда получена", completed: "Выполнено - забери награду",
-    available: "В процессе", locked: "Сначала выполни другие квесты",
-  };
-  box.appendChild(el("div", { class: "status-line", text: statusText[quest.status] || "" }));
-  box.appendChild(el("h4", { text: quest.name }));
-  const palette = tierBandColor(quest.era);
-  const eraBadge = el("span", { class: "note-chip", text: `Эра ${quest.era}` });
-  eraBadge.style.color = palette.text;
-  box.appendChild(eraBadge);
-  box.appendChild(el("div", { class: "desc", text: quest.description }));
-
+  // Компактная плашка 1:1 из канваса (B_Quests.dc.html: .detail) - имя+награда
+  // в одну строку слева, кнопка справа. Описание/разбивка призов по шансам
+  // (barabан всё равно крутится ДО настоящего результата в openLootBoxModal,
+  // см. claimQuestReward) - в подсказке на имени, не постоянным текстом.
+  const totalWeight = totalPrizeWeight(quest.reward_case.prizes);
+  const prizeLines = quest.reward_case.prizes.map(p => {
+    const odds = totalWeight ? Math.round((p.weight || 1) / totalWeight * 100) : 0;
+    return `${VIEW.resource_names[p.resource]} ×${p.amount} (${odds}%)`;
+  });
+  const titleParts = [quest.description, `Награда (лутбокс «${quest.reward_case.name}»): ${prizeLines.join(", ")}`];
   if (quest.status === "locked" && quest.requires.length) {
     // Требование из ДРУГОЙ эры не нарисовано линией на этом графе (см.
     // renderQuestGraph) - поэтому явно подписываем эру рядом с именем, иначе
@@ -4594,27 +5765,20 @@ function renderQuestDetail(quest) {
       if (!rq) return rid;
       return rq.era === quest.era ? rq.name : `${rq.name} (эра ${rq.era})`;
     });
-    box.appendChild(el("div", { class: "lab-warn-line", text: `Нужно сначала выполнить: ${reqNames.join(", ")}` }));
+    titleParts.push(`Нужно сначала выполнить: ${reqNames.join(", ")}`);
   }
 
-  box.appendChild(el("div", { class: "hint", text: `Награда: лутбокс «${quest.reward_case.name}»` }));
-  const totalWeight = totalPrizeWeight(quest.reward_case.prizes);
-  const prizesBox = el("div", { class: "quest-prizes" });
-  quest.reward_case.prizes.forEach(prize => {
-    const chip = el("div", { class: "prize-chip" });
-    const iconDef = resourceIcon(prize.resource);
-    if (iconDef) chip.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 18));
-    const odds = totalWeight ? Math.round((prize.weight || 1) / totalWeight * 100) : 0;
-    chip.appendChild(el("span", { text: `${VIEW.resource_names[prize.resource]} ×${prize.amount}` }));
-    chip.appendChild(el("span", { class: "prize-odds", text: `${odds}%` }));
-    prizesBox.appendChild(chip);
-  });
-  box.appendChild(prizesBox);
+  const info = el("div", { class: "tech-detail-info" });
+  const statusSuffix = {
+    claimed: " — награда получена", completed: " — готов к выполнению",
+    available: " — в процессе", locked: " — заблокирован",
+  };
+  info.appendChild(el("div", { class: "tech-detail-name", title: titleParts.join(" "), text: `${quest.name}${statusSuffix[quest.status] || ""}` }));
+  info.appendChild(el("div", { class: "tech-detail-cost", text: `Эра ${quest.era} · награда: лутбокс «${quest.reward_case.name}»` }));
+  box.appendChild(info);
 
-  if (quest.status === "claimed") {
-    box.appendChild(el("div", { class: "upgrade-status done", text: "✓ Награда получена" }));
-  } else if (quest.status === "completed") {
-    const claimBtn = el("button", { class: "primary", text: "Открыть лутбокс" });
+  if (quest.status === "completed") {
+    const claimBtn = el("button", { text: "Открыть лутбокс" });
     claimBtn.addEventListener("click", () => claimQuestReward(quest, claimBtn));
     box.appendChild(claimBtn);
   }
@@ -4658,7 +5822,49 @@ const LOOTBOX_CELL_WIDTH = 96;
 const LOOTBOX_REEL_LENGTH = 30;
 const LOOTBOX_WINNING_INDEX = 24; // достаточно далеко, чтобы лента успела разогнаться и затормозить
 
+let _lootboxTickRaf = null;
+
+// Достаёт текущий translateX ленты прямо из вычисленного CSS-transform (а не из
+// track.style.transform, который во время CSS-transition остаётся строкой
+// ЦЕЛЕВОГО значения) - только так можно узнать, где лента находится ПРЯМО
+// СЕЙЧАС, посреди анимации.
+function _trackTranslateX(track) {
+  const transform = getComputedStyle(track).transform;
+  if (!transform || transform === "none") return 0;
+  const match = /matrix\(([^)]+)\)/.exec(transform);
+  if (!match) return 0;
+  const parts = match[1].split(",").map(Number);
+  return parts[4] || 0;
+}
+
+// Каждый кадр сверяет, какая ячейка сейчас под указателем, и на КАЖДУЮ смену
+// ячейки играет один и тот же "тик" (SOUND_PRESETS.lootbox_tick) - не таймер с
+// фиксированным интервалом: интервал между тиками сам вытекает из реальной
+// скорости ленты (быстро в начале, реже и с "провисанием" перед остановкой, как
+// задаёт cubic-bezier в openLootBoxModal), без искусственного ускорения/замедления.
+function _runLootboxTicker(viewport, track, durationMs) {
+  const start = performance.now();
+  const viewportWidth = viewport.clientWidth;
+  let lastIndex = Math.floor((viewportWidth / 2 - _trackTranslateX(track)) / LOOTBOX_CELL_WIDTH);
+  const step = () => {
+    if (!document.body.contains(track)) { _lootboxTickRaf = null; return; }
+    const offset = -_trackTranslateX(track);
+    const index = Math.floor((offset + viewportWidth / 2) / LOOTBOX_CELL_WIDTH);
+    if (index !== lastIndex) {
+      playSound("lootbox_tick");
+      lastIndex = index;
+    }
+    if (performance.now() - start < durationMs) {
+      _lootboxTickRaf = requestAnimationFrame(step);
+    } else {
+      _lootboxTickRaf = null;
+    }
+  };
+  _lootboxTickRaf = requestAnimationFrame(step);
+}
+
 function closeLootBoxModal() {
+  if (_lootboxTickRaf) { cancelAnimationFrame(_lootboxTickRaf); _lootboxTickRaf = null; }
   const overlay = document.getElementById("lootBoxOverlay");
   if (overlay) overlay.remove();
 }
@@ -4711,6 +5917,7 @@ function openLootBoxModal(caseData, wonPrize) {
     const targetOffset = LOOTBOX_WINNING_INDEX * LOOTBOX_CELL_WIDTH + LOOTBOX_CELL_WIDTH / 2 - viewportWidth / 2 + jitter;
     track.style.transition = "transform 4.2s cubic-bezier(0.1, 0.7, 0.15, 1)";
     track.style.transform = `translateX(-${targetOffset}px)`;
+    _runLootboxTicker(viewport, track, 4200);
   });
 
   setTimeout(() => {
@@ -4745,14 +5952,21 @@ function openStorage() {
   head.appendChild(el("button", { text: "Закрыть", onclick: closeStorage }));
   modal.appendChild(head);
 
-  const grid = el("div", { class: "storage-grid" });
+  const grid = el("div", { class: "storage-grid scroll-area" });
   // Идём по VIEW.storage (не по resource_order напрямую) - виды (SPECIES)
   // переиспользуют id ресурса только ради иконки/имени и НЕ должны попадать
   // на склад как отдельные плитки (см. tools/web_ui.py: storage_view) - особи
   // живут в state.creatures и показываются в панели "Фермы", не здесь.
-  VIEW.storage.forEach(item => {
+  sortedStorageItems().forEach(item => {
     const rid = item.id;
     const amount = VIEW.resources[rid] || 0;
+    const pinned = VIEW.pinned.includes(rid);
+    // Ресурс, которого у игрока сейчас нет, на складе не показываем вовсе (по
+    // прямому пожеланию игрока) - иначе при сортировке "по возрастанию" экран
+    // забивался бы кучей нулей. ИСКЛЮЧЕНИЕ - закреплённые (★): плитка склада
+    // единственное место с кнопкой "Открепить" (см. pinBtn ниже), спрятав её,
+    // игрок не смог бы снять пин с ресурса, который потратил в ноль.
+    if (amount === 0 && !pinned) return;
     const tile = resourceTileBase(rid);
     // capacity === null - у ресурса вообще не настроена вместимость склада, он
     // хранится без ограничений (как было для ВСЕХ ресурсов до этой механики) -
@@ -4777,7 +5991,6 @@ function openStorage() {
     tile.appendChild(amountEl);
     tile.appendChild(nameEl);
 
-    const pinned = VIEW.pinned.includes(rid);
     const pinBtn = el("button", {
       class: "pin-toggle" + (pinned ? " pinned" : ""),
       text: pinned ? "★" : "☆",
@@ -4817,10 +6030,16 @@ function openStorage() {
     }
     grid.appendChild(tile);
   });
-  modal.appendChild(makeResourceSearchBar(grid, {
+  if (!grid.children.length) {
+    grid.appendChild(el("div", { class: "empty-note", text: "Пока нечего показать - ни одного ресурса на руках." }));
+  }
+  const controls = el("div", { class: "storage-controls-row" });
+  controls.appendChild(makeResourceSearchBar(grid, {
     get: () => storageSearchQuery,
     set: (v) => { storageSearchQuery = v; },
   }));
+  controls.appendChild(makeStorageSortBar());
+  modal.appendChild(controls);
   modal.appendChild(grid);
 
   overlay.appendChild(modal);
@@ -5110,7 +6329,7 @@ document.getElementById("savesBtn").addEventListener("click", openSaves);
     soundPanel.hidden = !soundPanel.hidden;
     // Панель по умолчанию прижата правым краем к кнопке (см. .sound-panel) - на
     // достаточно узком окне (особенно если сама кнопка съехала в начало строки
-    // из-за переноса header.topbar) это уводит её за левый край видимой области.
+    // из-за переноса .hud-nav) это уводит её за левый край видимой области.
     // Переключаемся на левое прижатие, только если правое реально не влезло.
     if (!soundPanel.hidden) {
       soundPanel.style.left = "";

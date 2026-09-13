@@ -1,14 +1,18 @@
 """
-Веб-обёртка для игры - открывается в браузере, без установки зависимостей
-(только стандартная библиотека Python). Вся игровая логика по-прежнему живёт
-в game/engine.py - этот файл лишь превращает её в HTTP API и отдаёт страницу.
+Веб-обёртка для игры - HTTP API (стандартная библиотека) поверх game/engine.py
++ окно pywebview вместо системного браузера, чтобы игра выглядела отдельным
+приложением, а не вкладкой браузера. Сам HTTP-сервер по-прежнему поднимается
+и слушает 127.0.0.1:8790 - при желании страницу всё ещё можно открыть вручную
+в обычном браузере на том же адресе.
+
+Единственная внешняя зависимость - pywebview (pip install pywebview).
 
 Запуск:
     python tools/web_ui.py
 
-Откроет http://127.0.0.1:8790 в браузере. Прогресс сохраняется в save.json
-в корне проекта - тот же файл, что использует консольная версия (main.py),
-так что партию можно продолжать в любом из двух интерфейсов.
+Откроет игру в отдельном окне. Прогресс сохраняется в save.json в корне
+проекта - тот же файл, что использует консольная версия (main.py), так что
+партию можно продолжать в любом из двух интерфейсов.
 """
 from __future__ import annotations
 
@@ -19,9 +23,10 @@ import re
 import sys
 import threading
 import time
-import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+import webview
 
 # В exe-сборке (PyInstaller, --windowed) sys.stdout/sys.stderr бывают None -
 # голый print() уронил бы процесс ещё до того, как он успеет что-то показать.
@@ -36,10 +41,10 @@ sys.path.insert(0, str(ROOT))
 
 from game import engine  # noqa: E402
 from game.content import (  # noqa: E402
-    BUILDINGS, DEFAULT_ACTION_DELAY_MS, ENERGY_RECIPES, GENETIC_TRAITS, LOCATIONS,
-    LOOT_CASES, MANUAL_ACTIONS, MINING_INFO, MOBS, QUESTS, RESOURCE_ICONS,
-    RESOURCE_NAMES, RESOURCE_ORDER, RESOURCE_STORAGE, SKILLS, SOUL_RECIPES, SPECIES,
-    TECHS, TOOLS, UI_SOUNDS,
+    BREAKDOWN_TYPES, BUILDINGS, DEFAULT_ACTION_DELAY_MS, ENERGY_RECIPES,
+    GENETIC_TRAITS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS, MINING_INFO, MOBS,
+    QUESTS, RESOURCE_ICONS, RESOURCE_NAMES, RESOURCE_ORDER, RESOURCE_STORAGE,
+    SKILLS, SOUL_RECIPES, SPECIES, TECHS, TOOLS, UI_SOUNDS,
 )
 from game.state import GameState  # noqa: E402
 
@@ -625,13 +630,18 @@ def tools_view(state: GameState) -> list[dict]:
     сейчас (null у обоих - только когда инструмент уже на максимальном тире).
     next_tech_name - название недостающей технологии (null, если для следующего
     тира технология не нужна или уже изучена). can_upgrade - можно ли нажать
-    кнопку апгрейда прямо сейчас (совпадает с engine.upgradable_tools)."""
+    кнопку апгрейда прямо сейчас (совпадает с engine.upgradable_tools).
+    max_durability/durability_remaining/is_broken/repair_cost - см. "Прочность
+    инструментов ремонта" в CLAUDE.md: null у инструментов без max_durability
+    на текущем тире (не изнашиваются вовсе)."""
     upgradable = set(engine.upgradable_tools(state))
     items = []
     for tool_id, tool in TOOLS.items():
         next_info = engine.next_tool_tier_info(state, tool_id)
         next_tech_id = next_info["requires_tech"] if next_info else None
         tech_missing = next_tech_id if next_tech_id and next_tech_id not in state.techs else None
+        current_tier = tool["tiers"][engine.tool_tier(state, tool_id) - 1]
+        max_durability = current_tier.get("max_durability")
         items.append({
             "id": tool_id,
             "name": tool["name"],
@@ -642,6 +652,10 @@ def tools_view(state: GameState) -> list[dict]:
             "next_cost": cost_list(next_info["cost"], state) if next_info else None,
             "next_tech_name": TECHS[tech_missing]["name"] if tech_missing else None,
             "can_upgrade": tool_id in upgradable,
+            "max_durability": max_durability,
+            "durability_remaining": engine.tool_durability_remaining(state, tool_id),
+            "is_broken": engine.tool_is_broken(state, tool_id),
+            "repair_cost": cost_list(current_tier.get("repair_cost", {}), state) if max_durability else None,
         })
     return items
 
@@ -652,10 +666,14 @@ def hunting_view(state: GameState) -> dict:
     (mobs.*.location - несколько локаций-"Охот" могут существовать одновременно,
     у каждой свой набор). combat_skill - срез engine.skills_view именно по
     COMBAT_SKILL_ID, отдельным полем для удобства фронтенда (не нужно искать по
-    списку "skills")."""
+    списку "skills"). combat_moves - ВСЕ приёмы боя со статусом (unlocked/
+    cooldown_remaining, см. engine.combat_moves_view) - независимо от активной
+    схватки, панель "Охота" показывает их и без цели (чтобы игрок видел, что
+    вообще открыто и когда освободится)."""
     encounter = None
     if state.active_encounter:
         mob = MOBS[state.active_encounter["mob_id"]]
+        deadline = state.active_encounter.get("deadline_turn")
         encounter = {
             "mob_id": state.active_encounter["mob_id"],
             "name": mob["name"],
@@ -663,6 +681,7 @@ def hunting_view(state: GameState) -> dict:
             "is_boss": bool(mob.get("is_boss")),
             "remaining_hp": state.active_encounter["remaining_hp"],
             "max_hp": mob["hp"],
+            "turns_left": max(0, deadline - state.turn) if deadline is not None else None,
         }
     entries = []
     for mid, mob in MOBS.items():
@@ -676,23 +695,89 @@ def hunting_view(state: GameState) -> dict:
             "rarity": mob.get("rarity") if not is_boss else None,
             "loot": cost_list(mob.get("loot", {})),
             "summon_cost": cost_list(mob.get("summon_cost", {}), state) if is_boss else None,
+            "turn_limit": mob.get("turn_limit") if is_boss else None,
         })
     skills = engine.skills_view(state)
     combat_skill = next((e for e in skills if e["id"] == engine.COMBAT_SKILL_ID), None)
-    return {"active_encounter": encounter, "mobs": entries, "combat_skill": combat_skill}
-
-
-def soul_collector_view(building_id: str, state: GameState) -> dict | None:
-    """None у построек без soul_collector (не показываем блок вовсе)."""
-    config = BUILDINGS[building_id].get("soul_collector")
-    if not config:
-        return None
     return {
-        "capacity": engine.soul_collector_capacity(state, building_id),
-        "accepts": [{"id": rid, "name": RESOURCE_NAMES[rid]} for rid in config.get("accepts", [])],
-        "installed": [
-            {"id": rid, "name": RESOURCE_NAMES[rid], "index": i}
-            for i, rid in enumerate(state.soul_slots.get(building_id, []))
+        "active_encounter": encounter, "mobs": entries, "combat_skill": combat_skill,
+        "combat_moves": engine.combat_moves_view(state),
+    }
+
+
+def soul_collector_entries_view(state: GameState) -> list[dict]:
+    """Все построенные синтезаторы душ (по типу постройки - soul_collector, в
+    отличие от ферм, не заводит физических экземпляров) для отдельной модалки
+    "Души" (открывается кнопкой на карточке конкретной built-постройки, см.
+    web_ui.html: openSoulSynthesizerModal) - по прямому пожеланию, 2026-09-13:
+    вставка/выемка душ больше не происходит прямо в панели "Производственные
+    мощности", тот же приём разделения, что у ферм/банка особей."""
+    result = []
+    for bid, b in BUILDINGS.items():
+        config = b.get("soul_collector")
+        if not config or state.buildings.get(bid, 0) <= 0:
+            continue
+        result.append({
+            "building_id": bid,
+            "name": b["name"],
+            "capacity": engine.soul_collector_capacity(state, bid),
+            "accepts_kind": engine.soul_collector_accepts_kind(bid),
+            "installed": [
+                {"id": rid, "name": RESOURCE_NAMES[rid], "index": i}
+                for i, rid in enumerate(state.soul_slots.get(bid, []))
+            ],
+        })
+    return result
+
+
+def souls_bank_view(state: GameState) -> list[dict]:
+    """Банк душ в инвентаре - тот же приём, что creature_bank_view, только
+    вместо особей ресурсы-души (все ключи SOUL_RECIPES). kind - тег
+    resources.*.soul_kind (см. game/engine.py:soul_kind) - модалка конкретного
+    синтезатора фильтрует этот банк по своему accepts_kind, показывая только
+    подходящие души (полная аналогия с creature_bank + accepts_family)."""
+    return [
+        {"id": e["id"], "name": RESOURCE_NAMES[e["id"]], "kind": e["kind"], "amount": e["amount"]}
+        for e in engine.souls_bank_view(state)
+    ]
+
+
+def _automation_target_name(kind: str, target_id: str) -> str:
+    names = MANUAL_ACTIONS if kind == "manual_action" else ENERGY_RECIPES
+    return names.get(target_id, {}).get("name", target_id)
+
+
+def automation_view(building_id: str, state: GameState) -> dict | None:
+    """None у построек без automation_hub (не показываем блок вовсе), зеркало
+    soul_collector_view. eligible_targets - вообще ВСЕ действия/рецепты крафта
+    за энергию, которые в принципе можно поставить в правило (см.
+    engine.automation_eligible_targets), НЕЗАВИСИМО от того, уже открыты они
+    игроку или нет - правило можно настроить заранее (см.
+    engine.process_automation_rules)."""
+    if not BUILDINGS[building_id].get("automation_hub"):
+        return None
+    rules = state.automation_rules.get(building_id, [])
+    return {
+        "capacity": engine.automation_slots_capacity(state, building_id),
+        "eligible_targets": engine.automation_eligible_targets(),
+        # Виды (SPECIES) исключены - id вида переиспользует id ресурса только
+        # ради имени/иконки, особи не копятся стопкой в state.resources (см.
+        # storage_view), поэтому условие на такой id никогда не имело бы смысла.
+        "condition_resources": [
+            {"id": rid, "name": RESOURCE_NAMES[rid]} for rid in RESOURCE_ORDER if rid not in SPECIES
+        ],
+        "rules": [
+            {
+                "index": i,
+                "kind": rule["kind"],
+                "target_id": rule["target_id"],
+                "target_name": _automation_target_name(rule["kind"], rule["target_id"]),
+                "conditions": [
+                    {**c, "resource_name": RESOURCE_NAMES.get(c["resource"], c["resource"])}
+                    for c in rule["conditions"]
+                ],
+            }
+            for i, rule in enumerate(rules)
         ],
     }
 
@@ -782,6 +867,26 @@ def manual_jobs_view(state: GameState) -> list[dict]:
     ]
 
 
+def repair_blocked_view(state: GameState, building_id: str) -> list[dict]:
+    """Виды поломки СЕЙЧАС сломанной постройки building_id, которые repair()
+    НЕ сможет починить прямо сейчас (не хватает хотя бы одного из
+    required_tools) - для подсказки на карточке постройки рядом с кнопкой
+    ремонта, см. tools/web_ui.html. Группирует по виду поломки (несколько
+    одновременно сломанных копий одного вида - один пункт с count)."""
+    result = []
+    for type_id, count in engine.repair_blocked_types(state, building_id):
+        missing = [
+            TOOLS[tid]["name"] for tid in engine.breakdown_type_required_tools(type_id)
+            if not engine.tool_usable_for_repair(state, tid)
+        ]
+        result.append({
+            "type_name": BREAKDOWN_TYPES[type_id]["name"] if type_id else "Поломка",
+            "count": count,
+            "missing_tools": missing,
+        })
+    return result
+
+
 def build_view(state: GameState) -> dict:
     stock, gen, cons = engine.energy_breakdown(state)
     capacity = engine.energy_capacity(state)
@@ -801,6 +906,15 @@ def build_view(state: GameState) -> dict:
             "count": count,
             "max_count": b.get("max_count"),
             "broken": state.broken.get(bid, 0),
+            # Ремонт теперь прямо здесь, на карточке постройки (кнопки "Ремонт" -
+            # см. tools/web_ui.html), а не в отдельной вкладке "Ремонт" - см.
+            # CLAUDE.md. repairable - сколько из сломанных копий можно починить
+            # ПРЯМО СЕЙЧАС (может быть меньше broken, если у какого-то вида
+            # поломки не хватает инструмента - см. repair_blocked).
+            "repairable": engine.repairable_count(state, bid),
+            "repair_cost": cost_list(engine.repair_cost_total(state, bid), state),
+            "repair_blocked": repair_blocked_view(state, bid) if state.broken.get(bid, 0) else [],
+            "repair_click_delay_ms": b.get("click_delay_ms"),
             "status": building_status(state, bid),
             "produces": cost_list(produces),
             "consumes": cost_list(consumes),
@@ -817,7 +931,7 @@ def build_view(state: GameState) -> dict:
             "autocraft_slots": b.get("autocraft_slots", 0),
             "unlocks_autocraft": [RESOURCE_NAMES[r] for r in b.get("unlocks_autocraft", [])],
             "energy_converter": energy_converter_view(bid),
-            "soul_collector": soul_collector_view(bid, state),
+            "automation": automation_view(bid, state),
             # Кнопка "⚙ Улучшения" теперь живёт ТОЛЬКО в панели "Производственные
             # мощности" (см. web_ui.html: renderBuildings) - каталог "Построить"
             # больше не обязан держать штучную постройку на виду после лимита
@@ -839,6 +953,10 @@ def build_view(state: GameState) -> dict:
             "is_farm": bool(b.get("breeding_slots")),
             "is_breeding_station": bool(b.get("breeding_station")),
             "is_genetics_lab": bool(b.get("genetics_lab")),
+            # Кнопка "Души" на карточке (см. web_ui.html: renderBuildings) -
+            # вставка/выемка живёт в своей модалке (soul_collectors/soul_bank
+            # ниже), не тут - тот же приём, что is_farm.
+            "is_soul_collector": bool(b.get("soul_collector")),
         })
 
     manual = []
@@ -855,6 +973,7 @@ def build_view(state: GameState) -> dict:
         building_id = action.get("requires_building")
         scale_cap = engine.mechanism_scale_cap(building_id, state) if building_id else 1
         cost, gain = engine.effective_manual_action_stats(aid, state, chosen_scale=1)
+        running_job = state.manual_jobs.get(aid)
         manual.append({
             "id": aid, "name": action["name"], "location": action.get("location"),
             "cost": manual_action_cost_list(cost, action.get("cost_chance", {}), state),
@@ -863,7 +982,14 @@ def build_view(state: GameState) -> dict:
             "click_delay_ms": action.get("click_delay_ms"),
             "sound_url": sound_url(action.get("sound")),
             "duration_turns": action.get("duration_turns"),
-            "already_running": aid in state.manual_jobs,
+            "already_running": running_job is not None,
+            # Прогресс уже идущего job'а ПРЯМО на карточке действия (см. actionCard в
+            # web_ui.html) - дублирует то, что уже есть в панели "Долгие действия"
+            # (manual_jobs выше), т.к. панель не всегда на виду (действие может быть
+            # в другой локации), а прогресс своего же действия игрок должен видеть,
+            # не уходя с карточки.
+            "turns_done": running_job["turns_done"] if running_job else None,
+            "turns_total": running_job["turns_total"] if running_job else None,
         })
     hunting = hunting_view(state)
     hunting_location_ids = {m["location"] for m in hunting["mobs"]}
@@ -914,13 +1040,6 @@ def build_view(state: GameState) -> dict:
         {"id": tid, "name": TECHS[tid]["name"], "cost": cost_list(TECHS[tid]["cost"], state)}
         for tid in engine.available_techs(state)
     ]
-    repair = [
-        {"id": bid, "name": BUILDINGS[bid]["name"], "broken": state.broken[bid],
-         "cost": cost_list(engine.repair_cost_total(state, bid), state),
-         "click_delay_ms": BUILDINGS[bid].get("click_delay_ms")}
-        for bid in engine.broken_buildings(state)
-    ]
-
     mining = []
     for rid, remaining in state.veins.items():
         quality_tiers = MINING_INFO[rid].get("quality_tiers")
@@ -931,7 +1050,7 @@ def build_view(state: GameState) -> dict:
             "remaining": remaining, "per_turn": engine.mining_yield_per_turn(rid, state),
             "click_delay_ms": MINING_INFO[rid].get("click_delay_ms"),
             "quality_name": quality["name"] if quality else None,
-            "quality_multiplier": quality["yield_multiplier"] if quality else None,
+            "quality_multiplier": quality["size_multiplier"] if quality else None,
         })
     mining.append({"kind": "search_any", "available": engine.can_search_for_vein(state)})
 
@@ -1009,6 +1128,8 @@ def build_view(state: GameState) -> dict:
         "energy_converter_capacity": engine.energy_converter_capacity(state),
         "farms": farms_view(state),
         "creature_bank": creature_bank_view(state),
+        "soul_collectors": soul_collector_entries_view(state),
+        "soul_bank": souls_bank_view(state),
         "known_alleles": engine.known_alleles_view(state),
         "genetics_lab_available": engine.genetics_lab_available(state),
         "breeding_station_available": engine.breeding_station_available(state),
@@ -1027,7 +1148,7 @@ def build_view(state: GameState) -> dict:
         "techs_total": len(TECHS),
         "all_researched": engine.all_techs_researched(state),
         "categories": {
-            "manual": manual, "build": build, "tech": tech, "repair": repair,
+            "manual": manual, "build": build, "tech": tech,
             "mining": mining, "converter": converter,
         },
         "tech_tree": tech_tree,
@@ -1038,6 +1159,7 @@ def build_view(state: GameState) -> dict:
                 tool_id: {i + 1: t["icon"] for i, t in enumerate(tool["tiers"]) if t.get("icon")}
                 for tool_id, tool in TOOLS.items()
             },
+            "mobs": {mid: m["icon"] for mid, m in MOBS.items() if m.get("icon")},
         },
         "quests": [
             {
@@ -1090,6 +1212,8 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
         return engine.research(state, action_id)
     if action_type == "repair":
         return engine.repair(state, action_id)
+    if action_type == "repair_tool":
+        return engine.repair_tool(state, action_id)
     if action_type == "mining_search":
         return engine.search_vein_any(state)
     if action_type == "mining_mine":
@@ -1099,7 +1223,9 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
         # локаций могут существовать одновременно, в отличие от единственной шахты.
         return engine.search_mob_any(state, action_id)
     if action_type == "hunt_attack":
-        return engine.attack_encounter(state)
+        # action_id - id приёма боя (content.json["combat_moves"]) или None для
+        # обычной атаки без приёма (см. game/engine.py:attack_encounter/unlocked_attack_moves).
+        return engine.attack_encounter(state, move_id=action_id)
     if action_type == "summon_boss":
         return engine.summon_boss(state, action_id)
     if action_type == "upgrade_tool":
@@ -1136,7 +1262,8 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
         "message": None, "ok": True, "action_deltas": [], "production_deltas": [],
         "idle": [], "broken": [], "quests_completed": [], "autocraft_completed": [],
         "pending_finished": [], "energy_crafted": [], "sound_url": None,
-        "manual_completed": [],
+        "manual_completed": [], "combat": None, "boss_fled": None,
+        "automation_fired": [],
     }
 
     if action_type != "skip":
@@ -1148,6 +1275,10 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
             # Резолвится сервером (а не клиентом по своей копии VIEW), чтобы
             # источником истины оставался content.json - см. manual_actions.*.sound.
             log["sound_url"] = sound_url(MANUAL_ACTIONS.get(action_id, {}).get("sound"))
+        if action_type == "hunt_attack":
+            # Данные удара (урон/killed/instant_kill) для анимации на клиенте -
+            # см. game/engine.py:ActionResult.combat/attack_encounter.
+            log["combat"] = result.combat
         if not result.ok:
             return log
         log["action_deltas"] = resource_deltas(before, state.resources)
@@ -1155,6 +1286,7 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
     before_turn = dict(state.resources)
     report = engine.advance_turn(state)
     _LAST_ENERGY_SHORTFALL = dict(report.energy_shortfall)
+    log["boss_fled"] = report.boss_fled
     log["production_deltas"] = resource_deltas(before_turn, state.resources)
     log["idle"] = [BUILDINGS[b]["name"] for b, (ran, idle) in report.ran.items() if idle > 0]
     log["broken"] = [{"name": BUILDINGS[b]["name"], "count": n} for b, n in report.newly_broken.items()]
@@ -1162,6 +1294,10 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
     log["manual_completed"] = [MANUAL_ACTIONS[a]["name"] for a in report.manual_completed]
     log["pending_finished"] = list(report.pending_finished)
     log["energy_crafted"] = [ENERGY_RECIPES[rid]["name"] for rid, count in report.crafted.items() for _ in range(count)]
+    log["automation_fired"] = [
+        {"building_name": BUILDINGS[e["building_id"]]["name"], "message": e["message"]}
+        for e in report.automation_fired
+    ]
 
     newly_completed_quests = engine.check_quests(state)
     log["quests_completed"] = [
@@ -1241,7 +1377,7 @@ def _action_label(state: GameState, action_type: str, action_id: str) -> str | N
         return BUILDINGS[action_id]["name"]
     if action_type == "tech":
         return TECHS[action_id]["name"]
-    if action_type == "upgrade_tool":
+    if action_type in ("upgrade_tool", "repair_tool"):
         return TOOLS[action_id]["name"]
     if action_type == "storage_upgrade":
         return f"расширение склада «{RESOURCE_NAMES[action_id]}»"
@@ -1477,6 +1613,37 @@ class Handler(BaseHTTPRequestHandler):
             result = engine.remove_soul(STATE, payload.get("building_id"), index)
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/add_automation_rule":
+            # Настройка правила автоматизации - управление имуществом, как
+            # insert_soul/remove_soul, НЕ тратит ход (см. engine.add_automation_rule).
+            # kind - "manual_action" или "energy_recipe" (engine.AUTOMATION_TARGET_KINDS).
+            result = engine.add_automation_rule(
+                STATE, payload.get("building_id"), payload.get("kind"), payload.get("target_id"),
+                payload.get("conditions") or [],
+            )
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/update_automation_rule":
+            try:
+                index = int(payload.get("index"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "index должен быть целым числом"})
+                return
+            result = engine.update_automation_rule(
+                STATE, payload.get("building_id"), index, payload.get("kind"), payload.get("target_id"),
+                payload.get("conditions") or [],
+            )
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/remove_automation_rule":
+            try:
+                index = int(payload.get("index"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "index должен быть целым числом"})
+                return
+            result = engine.remove_automation_rule(STATE, payload.get("building_id"), index)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/claim_quest":
             # Забрать кейс с лутом за выполненный квест - управление имуществом, как
             # insert_soul/remove_soul, НЕ тратит ход (см. engine.claim_quest_reward).
@@ -1564,6 +1731,13 @@ class _SingleInstanceHTTPServer(HTTPServer):
     allow_reuse_address = False
 
 
+def _serve(server: HTTPServer) -> None:
+    try:
+        server.serve_forever()
+    except Exception as e:
+        _show_error(f"Игра неожиданно остановилась:\n{e}")
+
+
 def main() -> None:
     url = f"http://127.0.0.1:{PORT}/"
     try:
@@ -1576,18 +1750,29 @@ def main() -> None:
         return
 
     print(f"Игра запущена: {url}")
-    print("Останови сервер (Ctrl+C), когда закончишь - прогресс уже сохранён в save.json.")
-    webbrowser.open(url)
+    print("Закрой окно игры, когда закончишь - прогресс уже сохранён в save.json.")
     global _last_heartbeat
     with _heartbeat_lock:
         _last_heartbeat = time.monotonic()
+    # serve_forever() уходит в фоновый поток - webview.start() ниже занимает
+    # главный поток сам (нативный GUI-цикл окна обязан работать в главном
+    # потоке, иначе пустой экран/падение на некоторых бэкендах Windows).
+    threading.Thread(target=_serve, args=(server,), daemon=True).start()
     threading.Thread(target=_watchdog, args=(server,), daemon=True).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nОстановлено.")
-    except Exception as e:
-        _show_error(f"Игра неожиданно остановилась:\n{e}")
+
+    webview.create_window(
+        "Майнкрафт на минималках", url, width=1280, height=800, min_size=(1024, 700), maximized=True
+    )
+    # private_mode=False - pywebview по умолчанию открывает окно в приватном
+    # профиле (True), который стирается при закрытии окна. Без этого localStorage
+    # (громкость музыки/звуков, см. web_ui.html: _loadVolume/_applyVolumes) не
+    # переживал перезапуск игры, хотя код честно писал в него каждый раз.
+    webview.start(private_mode=False)
+    # Окно закрыто - сервер в фоновом потоке больше не нужен никому, кроме
+    # него самого (daemon=True и так не даст ему помешать выходу процесса,
+    # но explicit shutdown() не оставляет висящий поток до сборки мусора).
+    server.shutdown()
+    print("Остановлено.")
 
 
 if __name__ == "__main__":

@@ -118,7 +118,8 @@
     },
     {
       "id": "wolf_soul",
-      "name": "Душа волка"
+      "name": "Душа волка",
+      "soul_kind": "моб"
     },
     {
       "id": "boss_fang",
@@ -126,7 +127,8 @@
     },
     {
       "id": "forest_guardian_soul",
-      "name": "Душа Стража леса"
+      "name": "Душа Стража леса",
+      "soul_kind": "босс"
     },
     {
       "id": "boss_totem",
@@ -205,6 +207,7 @@
     "converter": {
       "name": "Преобразователь",
       "requires_tech": "resource_synthesis",
+      "requires_building": "energy_converter",
       "icon_label": "ПР",
       "parent_location": "mechanisms"
     }
@@ -217,7 +220,11 @@
       "cost": {},
       "gain": {
         "wood": 3
-      }
+      },
+      "tool_scaling": {
+        "tool": "axe"
+      },
+      "sound": "wood_chop.ogg"
     },
     "gather_stone": {
       "name": "Добывать камень",
@@ -226,7 +233,8 @@
       "cost": {},
       "gain": {
         "stone": 2
-      }
+      },
+      "sound": "rock_break.ogg"
     },
     "craft_planks": {
       "name": "Напилить досок вручную",
@@ -237,7 +245,8 @@
       },
       "gain": {
         "planks": 1
-      }
+      },
+      "sound": "wood_saw.ogg"
     },
     "craft_tools": {
       "name": "Сделать инструменты вручную",
@@ -249,7 +258,8 @@
       },
       "gain": {
         "tools": 1
-      }
+      },
+      "sound": "anvil_hit.ogg"
     },
     "make_charcoal": {
       "name": "Жечь уголь вручную",
@@ -260,7 +270,8 @@
       },
       "gain": {
         "charcoal": 1
-      }
+      },
+      "sound": "fire_crackle.wav"
     },
     "smelt_metal": {
       "name": "Плавить металл вручную",
@@ -272,7 +283,8 @@
       },
       "gain": {
         "metal": 1
-      }
+      },
+      "sound": "metal_melt.ogg"
     },
     "forge_rivet": {
       "name": "Расклепать заклёпку",
@@ -284,7 +296,8 @@
       },
       "gain": {
         "tools": 1
-      }
+      },
+      "sound": "hammer_hit.wav"
     },
     "smelt_enriched_metal": {
       "name": "Выплавить обогащённый металл",
@@ -297,7 +310,8 @@
       },
       "gain": {
         "metal": 6
-      }
+      },
+      "sound": "metal_melt_2.ogg"
     },
     "catch_wild_swarm": {
       "name": "Поймать дикий рой",
@@ -305,7 +319,8 @@
       "location": "forest",
       "cost": {},
       "gain": {},
-      "spawn_species": "bee"
+      "spawn_species": "bee",
+      "sound": "bee_buzz.wav"
     },
     "craft_boss_totem": {
       "name": "Смастерить тотем призыва",
@@ -318,7 +333,8 @@
       },
       "gain": {
         "boss_totem": 1
-      }
+      },
+      "sound": "stone_totem.ogg"
     },
     "craft_guardian_soul": {
       "name": "Заключить душу Стража",
@@ -329,7 +345,8 @@
       },
       "gain": {
         "forest_guardian_soul": 1
-      }
+      },
+      "sound": "soul_seal.wav"
     },
     "catch_wild_flower": {
       "name": "Найти дикий манацвет",
@@ -349,7 +366,8 @@
       },
       "gain": {
         "mana_crystal": 1
-      }
+      },
+      "sound": "mana_crystal.ogg"
     }
   },
   "buildings": {
@@ -1094,6 +1112,7 @@
       },
       "icon_label": "ПС",
       "breeding_slots": 2,
+      "breeding_accepts_family": "bee",
       "upgrades": [
         {
           "id": "apiary_extra_slot",
@@ -1127,6 +1146,7 @@
       },
       "icon_label": "ОР",
       "breeding_slots": 2,
+      "breeding_accepts_family": "flower",
       "upgrades": [
         {
           "id": "greenhouse_extra_pot",
@@ -1193,6 +1213,7 @@
       },
       "icon_label": "ЭП",
       "breeding_slots": 3,
+      "breeding_accepts_family": "bee",
       "upgrades": [
         {
           "id": "electric_apiary_output",
@@ -1263,6 +1284,7 @@
       },
       "icon_label": "ПП",
       "breeding_slots": 4,
+      "breeding_accepts_family": "bee",
       "upgrades": [
         {
           "id": "industrial_apiary_output",
@@ -1418,9 +1440,7 @@
       "icon_label": "СД",
       "soul_collector": {
         "slots": 1,
-        "accepts": [
-          "wolf_soul"
-        ]
+        "accepts_kind": "моб"
       },
       "upgrades": [
         {
@@ -1467,9 +1487,7 @@
       "icon_label": "АС",
       "soul_collector": {
         "slots": 1,
-        "accepts": [
-          "forest_guardian_soul"
-        ]
+        "accepts_kind": "босс"
       },
       "upgrades": [
         {
@@ -1482,6 +1500,42 @@
           "cost": {
             "stone": 40,
             "metal": 15
+          },
+          "repeatable": true,
+          "cost_growth": 1.7
+        }
+      ]
+    },
+    "automation_center": {
+      "name": "Центр автоматизации",
+      "description": "Позволяет настроить правила вида «если ресурс — тогда действие»: каждый ход правило проверяет условия по ресурсам (например, «руды не меньше 50») и, если все они истинны, само выполняет выбранное ручное действие - без клика игрока. Правила настраиваются прямо в игре (кнопка «Автоматизация» на карточке постройки), число одновременных правил ограничено слотами.",
+      "requires_tech": "advanced_photonics",
+      "cost": {
+        "metal": 150,
+        "tools": 60,
+        "uranium": 5
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 15
+      },
+      "icon_label": "ЦА",
+      "automation_hub": {
+        "slots": 1
+      },
+      "upgrades": [
+        {
+          "id": "automation_center_slot",
+          "name": "Дополнительный слот",
+          "description": "+1 слот для правил автоматизации в этом центре. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "type": "automation_slots",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "metal": 80,
+            "uranium": 3
           },
           "repeatable": true,
           "cost_growth": 1.7
@@ -1784,31 +1838,31 @@
         {
           "name": "Бедная",
           "weight": 5,
-          "yield_multiplier": 0.5,
+          "size_multiplier": 0.5,
           "min_tool_tier": 1
         },
         {
           "name": "Обычная",
           "weight": 5,
-          "yield_multiplier": 1,
+          "size_multiplier": 1,
           "min_tool_tier": 1
         },
         {
           "name": "Богатая",
           "weight": 2,
-          "yield_multiplier": 2,
+          "size_multiplier": 2,
           "min_tool_tier": 2
         },
         {
           "name": "Отличная",
           "weight": 1,
-          "yield_multiplier": 3,
+          "size_multiplier": 3,
           "min_tool_tier": 3
         },
         {
           "name": "Чистая",
           "weight": 0.3,
-          "yield_multiplier": 5,
+          "size_multiplier": 5,
           "min_tool_tier": 5
         }
       ]
@@ -1839,11 +1893,70 @@
         "wolf_pelt": 1
       },
       "soul_id": "wolf_soul",
-      "soul_chance": 0.05
+      "soul_chance": 0.05,
+      "icon": {
+        "grid": [
+          "................................................",
+          "................................................",
+          "................................................",
+          "................................................",
+          ".............A.....................A............",
+          ".............A.....................A............",
+          "............AAA...................AAA...........",
+          "............AAAA.................AAAA...........",
+          "...........AAAAA.................AAAAA..........",
+          "..........AAACAAA...............AAACAAA.........",
+          "..........AAACAAAA.............AAAACAAA.........",
+          ".........AAACCCAAAA...........AAAACCCAAA........",
+          ".........AAACCCCAAAAAAAAAAAAAAAAACCCCAAA........",
+          "........AAACCCCCAAAAAAAAAAAAAAAAACCCCCAAA.......",
+          ".......AAAACCCAAAAAAAAAAAAAAAAAAAACCCCAAAA......",
+          ".......AAACCAAAAAAABBBBBBBBBBAAAAAAACCCAAA......",
+          "......AAACAAAAAAABBBBBBBBBBBBBBAAAAAAAACAAA.....",
+          ".....A....AAAAAABBBBBBBBBBBBBBBBAAAAAA.....A....",
+          "..........AAAAABBBBBBBBBBBBBBBBBBAAAAA..........",
+          ".........AAAAABBBBBBBBBBBBBBBBBBBBAAAAA.........",
+          "........AAAAAABBBBBBBBBBBBBBBBBBBBAAAAAA........",
+          "........AAAAAABBBBBBBBBBBBBBBBBBBBAAAAAA........",
+          "........AAAAAABBBBBBBBBBBBBBBBBBBBAAAAAA........",
+          ".......AAAAAAAEEEEBBBBBBBBBBBBEEEEAAAAAAA.......",
+          ".......AAAAAAEEDDEEBBBBBBBBBBEEDDEEAAAAAA.......",
+          ".......AAAAAAAEEEEBBBBBBBBBBBBEEEEAAAAAAA.......",
+          ".......AAAAAAAAAABBBBBBBBBBBBBBAAAAAAAAAA.......",
+          ".......AAAAAAAAAAAABBBBBBBBBBAAAAAAAAAAAA.......",
+          ".......AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.......",
+          ".......AAAAAAAAAAAAABBBBBBBBAAAAAAAAAAAAA.......",
+          "........AAAAAAAAAABBBBBBBBBBBBAAAAAAAAAA........",
+          "........AAAAAAAAABBBBBBBBBBBBBBAAAAAAAAA........",
+          "........AAAAAAAABBBBBBBBBBBBBBBBAAAAAAAA........",
+          ".........AAAAAAABBBBBBDDDDBBBBBBAAAAAAA.........",
+          "..........AAAAABBBBBBDDDDDDBBBBBBAAAAA..........",
+          "..........AAAAABBBBBBDDDDDDBBBBBBAAAAA..........",
+          "...........AAAABBBBBCCDDDDCCBBBBBAAAA...........",
+          "............AAABBBBCCCCCCCCCCBBBBAAA............",
+          "..............ABBBCCCCCCCCCCCCBBBA..............",
+          "................BBCCCCCCCCCCCCBB................",
+          "................BBCCCCCCCCCCCCBB................",
+          ".................BBCCCCCCCCCCBB.................",
+          "..................BBCCCCCCCCBB..................",
+          "....................BCCCCCCB....................",
+          "................................................",
+          "................................................",
+          "................................................",
+          "................................................"
+        ],
+        "palette": {
+          "A": "#5a5a5a",
+          "B": "#8a8a8a",
+          "C": "#d8d3c8",
+          "D": "#241a08",
+          "E": "#f0c040"
+        }
+      }
     },
     "forest_guardian": {
       "name": "Страж леса",
-      "description": "Могучий босс охотничьих угодий - призывается тотемом. Роняет клыки, из которых можно выковать легендарный меч или заключить душу Стража для алтаря.",
+      "description": "Могучий босс охотничьих угодий - призывается тотемом. Роняет клыки, из которых можно выковать легендарный меч или заключить душу Стража для алтаря. Не терпит промедления - если не свалить его за отведённое число ходов, он скрывается в чаще.",
       "location": "hunting_grounds",
       "requires_tech": null,
       "is_boss": true,
@@ -1855,7 +1968,102 @@
       },
       "summon_cost": {
         "boss_totem": 1
+      },
+      "turn_limit": 12,
+      "icon": {
+        "grid": [
+          "................................................",
+          "......A...................................A.....",
+          "......AA.................................AA.....",
+          "......AAA...............................AAA.....",
+          "......AAAA.........AAAAAAAAAA..........AAAA.....",
+          ".....AAAAAA......AAAAAAAAAAAAAA.......AAAAAA....",
+          ".....AAAAAAA...AAAAAAAAAAAAAAAAAA....AAAAAAA....",
+          ".....AAAAAAAA.AAAAAAAAAAAAAAAAAAAA..AAAAAAAA....",
+          ".....AAAAAAAAAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAA....",
+          "....AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...",
+          "....AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA...",
+          "....AAAAAA..AAAAACCCCAAAAAACCCCAAAAA...AAAAAA...",
+          "...A........AAAAACCCCAAAAAACCCCAAAAA.........A..",
+          "............AAAACCEECCAAAACCEECCAAAA............",
+          "............AAAAACCCCAAAAAACCCCAAAAA............",
+          "............AAAAACCCCAAAAAACCCCAAAAA............",
+          ".............AAAAAAAAAAAAAAAAAAAAAA.............",
+          ".............AAAAAAAAAAAAAAAAAAAAAA.............",
+          "..............AAAAAAAAAAAAAAAAAAAA..............",
+          ".............AAAAAAAAAAAAAAAAAAAAAA.............",
+          "...........AAAAAAAAAAAAAAAAAAAAAAAAAA...........",
+          ".........AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.........",
+          "......BBBBBBAAAAAAAAAAAAAAAAAAAAAAAABBBBBB......",
+          ".....BBBBBBBBAAAAAAAAAAAAAAAAAAAAAABBBBBBBB.....",
+          "....BBBBBBBBBBAAAAADAAAAAAADAAAAAABBBBBBBBBB....",
+          "....BBBBBBBBBBAAAAADAAAAAAADAAAAAABBBBBBBBBB....",
+          "....BBBBBBBBBBAAAAABBBBBBBBBBAAAAABBBBBBBBBB....",
+          "....BBBBBBBBBBAAAABBBBBBBBBBBBAAAABBBBBBBBBB....",
+          "...ABBBBBBBBBBAAABBBBBBBBBBBBBBAAABBBBBBBBBBA...",
+          "...AABBBBBBBBAAABBBBBBBBBBBBBBBBAAABBBBBBBBAA...",
+          "...AAABBBBBBAAABBBBBBBBBBBBBBBBBBAADBBBBBBAAA...",
+          "...AAAAAAAADAAABBBBBBBBBBBBBBBBBBAADAAAAAAAAA...",
+          "...AAAAAAAADAAABBBBBBBBBBBBBBBBBBAADAAAAAAAAA...",
+          "....AAAAAAADAAABBBBBBBBBBBBBBBBBBAADAAAAAAAA....",
+          "....AAAAAAADAAABBBBBBBBBBBBBBBBBBAADAAAAAAAA....",
+          ".....AAAAAADAAAABBBBBBBBBBBBBBBBAAADAAAAAAA.....",
+          ".....AAAAAADAAAAABBBBBBBBBBBBBBAAAADAAAAAAA.....",
+          "......AAAAADAAAAAABBBBBBBBBBBBAAAAADAAAAAA......",
+          ".......AAAADAAAAAAABBBBBBBBBBAAAAAADAAAAA.......",
+          "........AAADAAAAAAADAAAAAAADAAAAAAADAAAA........",
+          "........AAADAAAAAAADAAAAAAADAAAAAAADAAAA........",
+          ".......AAAADAAAAAAADAAAAAAADAAAAAAADAAAAA.......",
+          ".......AAAADAAAAAAADAAAAAAADAAAAAAADAAAAA.......",
+          ".......AAAADAAAAAAADAAAAAAADAAAAAAADAAAAA.......",
+          ".......AAAADAAAAAAADAAAAAAADAAAAAAADAAAAA.......",
+          ".......AAAADAAAAAAADAAAAAAADAAAAAAADAAAAA.......",
+          ".......AAAADAAAAAAADAAAAAAADAAAAAAADAAAAA.......",
+          ".......AAAADAAAAAAADAAAAAAADAAAAAAADAAAAA......."
+        ],
+        "palette": {
+          "A": "#3d2b1f",
+          "B": "#4a7c3f",
+          "C": "#e8fcd8",
+          "D": "#6b4a32",
+          "E": "#9dff6a"
+        }
       }
+    }
+  },
+  "combat_moves": {
+    "focused_strike": {
+      "name": "Точный удар",
+      "description": "Замах прицельнее обычного - урон заметно выше базового, но оружию нужно время, чтобы снова ударить так же метко. Открывается деревянным мечом.",
+      "damage_multiplier": 1.8,
+      "cooldown_turns": 2
+    },
+    "heavy_strike": {
+      "name": "Сокрушающий удар",
+      "description": "Замах на пределе сил - урон намного выше базового, но после него нужно долго восстанавливаться. Открывается металлическим мечом.",
+      "damage_multiplier": 3,
+      "cooldown_turns": 5
+    },
+    "shatter_strike": {
+      "name": "Раскалывающий удар",
+      "description": "Удар в самое уязвимое место - урон считается не от навыка и не от оружия, а от МАКСИМАЛЬНОГО HP цели, поэтому одинаково страшен что мелкой добыче, что огромному боссу. Открывается металлическим мечом.",
+      "mode": "percent_max_hp",
+      "percent": 0.12,
+      "cooldown_turns": 4
+    },
+    "rending_strike": {
+      "name": "Кровопускание",
+      "description": "Глубокая рана - тем страшнее, чем больше здоровья у цели ОСТАЛОСЬ прямо сейчас: против полного HP валит с ног, но с каждым разом слабеет. Открывается Клинком Стража.",
+      "mode": "percent_remaining_hp",
+      "percent": 0.3,
+      "cooldown_turns": 3
+    },
+    "finishing_blow": {
+      "name": "Добивающий удар",
+      "description": "Если у цели осталось не больше пятой части HP - добивает её на месте одним движением; иначе бьёт как обычная атака. Открывается деревянным мечом.",
+      "mode": "execute",
+      "execute_threshold_percent": 0.2,
+      "cooldown_turns": 4
     }
   },
   "soul_recipes": {
@@ -2024,7 +2232,10 @@
   },
   "ui": {
     "default_action_delay_ms": 400,
-    "sounds": {}
+    "sounds": {
+      "background_music": "village_loop.mp3",
+      "lootbox_open": "lootbox_chime.wav"
+    }
   },
   "energy_recipes": {
     "metal_from_energy": {
@@ -2056,6 +2267,32 @@
     }
   },
   "tools": {
+    "axe": {
+      "name": "Топор",
+      "tiers": [
+        {
+          "name": "Голые руки",
+          "cost": null,
+          "requires_tech": null
+        },
+        {
+          "name": "Каменный топор",
+          "cost": {
+            "wood": 10,
+            "stone": 5
+          },
+          "requires_tech": null
+        },
+        {
+          "name": "Металлический топор",
+          "cost": {
+            "metal": 20,
+            "tools": 10
+          },
+          "requires_tech": "metallurgy"
+        }
+      ]
+    },
     "pickaxe": {
       "name": "Кирка",
       "tiers": [
@@ -2114,7 +2351,8 @@
             "stone": 5
           },
           "requires_tech": null,
-          "damage_multiplier": 2
+          "damage_multiplier": 2,
+          "unlocks_moves": ["focused_strike", "finishing_blow"]
         },
         {
           "name": "Металлический меч",
@@ -2123,7 +2361,8 @@
             "tools": 10
           },
           "requires_tech": "metallurgy",
-          "damage_multiplier": 4
+          "damage_multiplier": 4,
+          "unlocks_moves": ["heavy_strike", "shatter_strike"]
         }
       ]
     },
@@ -2145,7 +2384,8 @@
           "requires_tech": null,
           "instant_kill_max_hp": 250,
           "loot_multiplier": 1.5,
-          "soul_chance_multiplier": 2
+          "soul_chance_multiplier": 2,
+          "unlocks_moves": ["rending_strike"]
         }
       ]
     }
@@ -2185,6 +2425,7 @@
   "species": {
     "bee": {
       "description": "Обычная лесная пчела - даёт немного мёда, пока живёт в ферме.",
+      "family": "bee",
       "produces": {
         "honey": 2
       },
@@ -2194,6 +2435,7 @@
     },
     "royal_bee": {
       "description": "Редкая порода пчёл, появляющаяся при скрещивании - производит заметно больше мёда и маточное молочко.",
+      "family": "bee",
       "produces": {
         "honey": 5,
         "royal_jelly": 1
@@ -2204,6 +2446,7 @@
     },
     "mana_flower_sunlight": {
       "description": "Обычный дикий манацвет - питается светом, ничего не тратит, даёт немного маны, пока живёт в оранжерее.",
+      "family": "flower",
       "produces": {
         "mana": 2
       },
@@ -2213,6 +2456,7 @@
     },
     "mana_flower_ember": {
       "description": "Манацвет, появляющийся при скрещивании - разгорается, поедая уголь, и даёт заметно больше маны, чем солнечный.",
+      "family": "flower",
       "produces": {
         "mana": 5
       },
@@ -2224,6 +2468,7 @@
     },
     "mana_flower_geode": {
       "description": "Редкий манацвет, появляющийся при скрещивании тлеющих цветов - прорастает камнем и рудой, даёт больше всего маны.",
+      "family": "flower",
       "produces": {
         "mana": 9
       },

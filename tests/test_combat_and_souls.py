@@ -179,6 +179,150 @@ class AttackEncounterTests(FixtureTestCase):
         self.assertEqual(s.resources["test_soul"], 1)
 
 
+class CombatMovesTests(FixtureTestCase):
+    def test_no_moves_unlocked_without_weapon_tier3(self):
+        s = GameState(tool_tiers={"sword": 2})
+        self.assertEqual(engine.unlocked_attack_moves(s), set())
+
+    def test_move_unlocked_at_tier3_and_stays_unlocked_higher(self):
+        s = GameState(tool_tiers={"sword": 3})
+        self.assertEqual(
+            engine.unlocked_attack_moves(s),
+            {"power_strike", "pct_max_move", "pct_remaining_move", "execute_move"},
+        )
+
+    def test_attack_with_unknown_move_fails_without_consuming_turn(self):
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        result = engine.attack_encounter(s, move_id="no_such_move")
+        self.assertFalse(result.ok)
+        self.assertEqual(s.active_encounter["remaining_hp"], 10)
+
+    def test_attack_with_locked_move_fails(self):
+        # sword тир 2 - power_strike требует тир 3, ещё не открыт.
+        s = GameState(tool_tiers={"sword": 2})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        result = engine.attack_encounter(s, move_id="power_strike")
+        self.assertFalse(result.ok)
+        self.assertEqual(s.active_encounter["remaining_hp"], 10)
+
+    def test_move_multiplies_damage_and_sets_cooldown(self):
+        # Тир 3: damage_multiplier=3 (у _weapon_bonuses), skill level 1 damage=3
+        # -> обычный урон 9. С приёмом (multiplier x2) -> 18.
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 100}
+        result = engine.attack_encounter(s, move_id="power_strike")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.combat["damage"], 18)
+        self.assertEqual(s.active_encounter["remaining_hp"], 82)
+        self.assertEqual(s.move_cooldowns["power_strike"], 2)
+
+    def test_move_on_cooldown_is_rejected(self):
+        s = GameState(tool_tiers={"sword": 3}, move_cooldowns={"power_strike": 1})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 100}
+        result = engine.attack_encounter(s, move_id="power_strike")
+        self.assertFalse(result.ok)
+        self.assertEqual(s.active_encounter["remaining_hp"], 100)
+
+    def test_cooldown_ticks_down_every_turn_and_clears_at_zero(self):
+        s = GameState(move_cooldowns={"power_strike": 2})
+        engine.advance_turn(s)
+        self.assertEqual(s.move_cooldowns["power_strike"], 1)
+        engine.advance_turn(s)
+        self.assertNotIn("power_strike", s.move_cooldowns)
+
+    def test_basic_attack_without_move_id_is_unaffected(self):
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 100}
+        result = engine.attack_encounter(s)
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.combat["damage"], 9)
+        self.assertNotIn("power_strike", s.move_cooldowns)
+
+    def test_percent_max_hp_move_ignores_skill_and_weapon(self):
+        # test_boss hp=50, percent=0.2 -> 10 урона, НЕЗАВИСИМО от навыка/оружия
+        # (skill level 1 damage=3, тир3 меча damage_multiplier=3 - обычный расчёт
+        # дал бы 9, а не 10, если бы percent_max_hp их учитывал).
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_boss", "remaining_hp": 50}
+        result = engine.attack_encounter(s, move_id="pct_max_move")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.combat["damage"], 10)
+        self.assertEqual(s.active_encounter["remaining_hp"], 40)
+
+    def test_percent_remaining_hp_move_scales_with_current_not_max(self):
+        # test_boss hp=50, но remaining_hp уже подсажен до 20 - percent=0.5 от
+        # ОСТАВШЕГОСЯ (20), а не от максимума (50) -> 10, не 25.
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_boss", "remaining_hp": 20}
+        result = engine.attack_encounter(s, move_id="pct_remaining_move")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(result.combat["damage"], 10)
+        self.assertEqual(s.active_encounter["remaining_hp"], 10)
+
+    def test_execute_move_kills_at_or_below_threshold(self):
+        # test_boss hp=50, execute_threshold_percent=0.2 -> порог 10. remaining_hp=10
+        # РОВНО на пороге ("не выше" - включительно) - должен добить, несмотря на то,
+        # что обычный урон (навык 3 * оружие 3 = 9) сам по себе НЕ убил бы (9 < 10).
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_boss", "remaining_hp": 10}
+        result = engine.attack_encounter(s, move_id="execute_move")
+        self.assertTrue(result.ok, result.message)
+        self.assertIsNone(s.active_encounter)
+        self.assertTrue(result.combat["instant_kill"])
+        self.assertEqual(result.combat["damage"], 10)
+
+    def test_execute_move_deals_fallback_damage_above_threshold(self):
+        # Выше порога (remaining_hp=50 > 10) - execute_move бьёт как обычная атака
+        # (fallback damage_multiplier по умолчанию 1.0, приём не задавал его явно):
+        # навык 3 * оружие 3 * 1.0 = 9.
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_boss", "remaining_hp": 50}
+        result = engine.attack_encounter(s, move_id="execute_move")
+        self.assertTrue(result.ok, result.message)
+        self.assertFalse(result.combat["killed"])
+        self.assertEqual(result.combat["damage"], 9)
+        self.assertEqual(s.active_encounter["remaining_hp"], 41)
+
+
+class BossTurnLimitTests(FixtureTestCase):
+    def test_summon_sets_deadline_when_turn_limit_present(self):
+        s = GameState(resources={"raw_a": 5})
+        engine.summon_boss(s, "test_boss")
+        # test_boss (фикстура) не имеет turn_limit - дедлайна нет.
+        self.assertNotIn("deadline_turn", s.active_encounter)
+
+    def test_boss_flees_after_deadline_turn_passes(self):
+        s = GameState(resources={"raw_a": 5})
+        engine.summon_boss(s, "test_boss")
+        # Проставляем дедлайн руками (в фикстуре у test_boss нет turn_limit) -
+        # проверяем именно механику _process_combat, не контент.
+        s.active_encounter["deadline_turn"] = s.turn + 1
+        report = engine.advance_turn(s)
+        self.assertIsNone(report.boss_fled)
+        self.assertIsNotNone(s.active_encounter)
+        report = engine.advance_turn(s)
+        self.assertEqual(report.boss_fled, "Тестовый босс")
+        self.assertIsNone(s.active_encounter)
+
+    def test_boss_does_not_flee_before_deadline(self):
+        s = GameState(resources={"raw_a": 5})
+        engine.summon_boss(s, "test_boss")
+        s.active_encounter["deadline_turn"] = s.turn + 5
+        for _ in range(4):
+            engine.advance_turn(s)
+        self.assertIsNotNone(s.active_encounter)
+
+    def test_killing_boss_before_deadline_leaves_no_trace(self):
+        s = GameState(resources={"raw_a": 5}, skill_xp={"combat": 10})
+        engine.summon_boss(s, "test_boss")
+        s.active_encounter["deadline_turn"] = s.turn + 5
+        engine.attack_encounter(s)  # урон уровня 2 = 100 >= 50, убит сразу
+        self.assertIsNone(s.active_encounter)
+        report = engine.advance_turn(s)
+        self.assertIsNone(report.boss_fled)
+
+
 class SoulCollectorTests(FixtureTestCase):
     def test_capacity_zero_without_building(self):
         s = GameState()

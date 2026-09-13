@@ -26,6 +26,11 @@ RESOURCE_ICONS: dict[str, dict] = {r["id"]: r["icon"] for r in _DATA["resources"
 # ВСЕГДА округляются в большую сторону при расчёте эффективных produces/consumes
 # (после умножения на множитель улучшения постройки), дробные не трогаются.
 RESOURCE_FRACTIONAL: dict[str, bool] = {r["id"]: bool(r.get("fractional", False)) for r in _DATA["resources"]}
+# Тег "вида" души (resources.*.soul_kind, например "моб"/"босс") - тот же
+# generic-принцип, что у species.*.family (см. game/engine.py:soul_kind/
+# soul_collector_accepts_kind): группирует души независимо от их числа, так
+# что новый вид моба/босса сам попадёт в нужный синтезатор без правки построек.
+RESOURCE_SOUL_KIND: dict[str, str] = {r["id"]: r["soul_kind"] for r in _DATA["resources"] if r.get("soul_kind")}
 # Настройка вместимости склада (необязательная, resources[].storage) - только у
 # ресурсов, для которых её явно задал автор контента; отсутствие ключа = ресурс
 # хранится без ограничений, как было для ВСЕХ ресурсов до этой механики. См.
@@ -74,6 +79,13 @@ GENETICS_SETTINGS: dict = _DATA.get("genetics", {})
 # (обычный manual_actions рецепт из лута босса), поэтому у boss-записей этих
 # полей нет.
 MOBS: dict = _DATA.get("mobs", {})
+# Приёмы боя (id -> {"name", "description", "damage_multiplier", "cooldown_turns"}) -
+# разблокируются НЕ этим словарём, а tools.*.tiers[].unlocks_moves (текущий тир
+# владеемого оружия, кумулятивно по всем тирам линейки до текущего включительно -
+# см. game/engine.py:unlocked_attack_moves). damage_multiplier домножает уже
+# посчитанный обычный урон (навык * лучший damage_multiplier оружия), cooldown_turns -
+# сколько ходов приём недоступен после применения (game/state.py:move_cooldowns).
+COMBAT_MOVES: dict = _DATA.get("combat_moves", {})
 # Навыки прокачки - ПРОИЗВОЛЬНОЕ число линеек (см. CLAUDE.md, тот же принцип, что
 # у TOOLS), каждая копит XP независимо (game/state.py:skill_xp) и даёт уровень
 # по порогу (game/engine.py:skill_level). "effects" каждого уровня - свободный
@@ -104,6 +116,12 @@ LOOT_CASES: dict = _DATA.get("loot_cases", {})
 # с лутом (LOOT_CASES), который игрок открывает сам отдельным кликом после
 # выполнения условий (см. claim_quest_reward).
 QUESTS: dict = _DATA.get("quests", {})
+# Виды поломки построек (необязательный раздел) - id -> {"name", "description",
+# "required_tools"}. buildings.*.breakdown_types ссылается на эти id (список,
+# пусто/нет ключа = поломка без типа, старое поведение). required_tools -
+# список id из TOOLS, которыми ДОЛЖЕН владеть игрок (tool_tier >= 2), чтобы
+# починить поломку этого вида - см. game/engine.py:_is_breakdown_type_fixable.
+BREAKDOWN_TYPES: dict = _DATA.get("breakdown_types", {})
 UI: dict = _DATA.get("ui", {})
 # Задержка (в мс), которую клиент выдерживает после клика по кнопке действия, если
 # у самого действия нет собственного click_delay_ms (см. buildings/manual_actions/
