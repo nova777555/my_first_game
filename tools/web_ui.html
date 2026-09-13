@@ -252,6 +252,14 @@
   .res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; }
   .res-tile { background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); border-radius: 0; padding: 6px 8px; display: flex; align-items: center; gap: 6px; }
   .res-tile.zero { opacity: .45; filter: grayscale(.7); }
+  /* Разовая пульсация плитки в момент, когда число реально поменялось с прошлого
+     рендера (см. renderResources/prevResourceAmounts) - зелёная для роста,
+     красная для убыли, сама цифра при этом отдельно "докручивается"
+     (animateResourceValue), а не прыгает мгновенно. */
+  .res-tile.changed.up { animation: res-tile-pulse-up .8s ease-out; }
+  .res-tile.changed.down { animation: res-tile-pulse-down .8s ease-out; }
+  @keyframes res-tile-pulse-up { 0% { background: rgba(74, 201, 160, .22); } 100% { background: var(--panel2); } }
+  @keyframes res-tile-pulse-down { 0% { background: rgba(224, 82, 74, .18); } 100% { background: var(--panel2); } }
   .res-tile svg { flex-shrink: 0; }
   .res-tile .info { display: flex; flex-direction: column; overflow: hidden; }
   .res-tile .amount { font-size: 13px; font-weight: 700; white-space: nowrap; }
@@ -283,6 +291,10 @@
     padding: 10px 12px; margin-bottom: 8px; transition: box-shadow .15s, opacity .15s;
   }
   .bld-row:last-child { margin-bottom: 0; }
+  /* Разовая вспышка постройки, которая реально произвела ресурс в ход, только
+     что завершившийся (см. renderBuildings/lastBuildingsFlashTurn) - переиспользует
+     тот же keyframe, что вспышка карточки действия (flash-highlight выше). */
+  .bld-row.produced { animation: flash-highlight 1.6s ease-out; }
   .bld-row-head { display: flex; align-items: flex-start; gap: 10px; }
   .bld-row-icon { position: relative; width: 30px; height: 30px; flex-shrink: 0; margin-top: 1px; }
   .bld-row-icon svg { width: 100%; height: 100%; }
@@ -370,8 +382,18 @@
     transition: box-shadow .12s;
   }
   .loc-card:hover { box-shadow: inset 0 0 0 1px var(--blueprint); }
+  .loc-card:active { transform: scale(.96); }
   .loc-card .loc-name { font-size: 13px; font-weight: 600; }
   .loc-card .loc-count { font-size: 11px; color: var(--muted); }
+  /* Переход между уровнями дерева локаций (см. locationNavDirection) - лёгкий
+     слайд+фейд ВСЕГО контента панели, направление зависит от того, зашли мы
+     глубже ("forward") или вернулись назад/наверх ("back"). Одноразовая анимация
+     на конкретный рендер (класс добавляется только renderLocationsPanel, когда
+     сама навигация и произошла), а не постоянный декор. */
+  .loc-panel-enter { animation: loc-panel-slide-forward .2s ease-out; }
+  .loc-panel-enter.back { animation-name: loc-panel-slide-back; }
+  @keyframes loc-panel-slide-forward { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes loc-panel-slide-back { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: translateX(0); } }
   .back-row { padding: 10px 18px 0; display: flex; gap: 8px; }
   .back-row button { padding: 6px 10px; }
   .panel-head-btn { padding: 4px 10px; }
@@ -990,7 +1012,7 @@
   .tech-graph::-webkit-scrollbar-track { background: transparent; }
   .tech-graph::-webkit-scrollbar-thumb { background-color: rgba(95,208,232,.35); border: 2px solid #0d1116; background-clip: padding-box; }
   .tech-graph.panning { cursor: grabbing; }
-  .tech-cols { display: flex; gap: 6px; padding: 18px; position: relative; z-index: 1; width: max-content; }
+  .tech-cols { display: flex; gap: 6px; padding: 18px; position: relative; z-index: 1; width: max-content; transform-origin: 0 0; }
   .tech-col-band { display: flex; flex-direction: column; border-radius: 10px; padding: 10px 8px; }
   .tech-col-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; text-align: center; margin-bottom: 10px; font-weight: 600; }
   .tech-col-row { display: flex; gap: 28px; flex: 1; }
@@ -1480,6 +1502,12 @@ let activeActionTab = "locations";
 // (VIEW.locations[].parent_location), внутри неё одновременно могут быть и
 // вложенные локации, и собственные действия (см. renderLocationsPanel).
 let locationPath = [];
+// Направление последнего перехода по локациям ("forward" - зашли глубже,
+// "back" - вернулись назад/наверх) - выставляется обработчиком клика ПЕРЕД
+// вызовом renderActions(), renderLocationsPanel() считывает и сбрасывает его
+// один раз за рендер, чтобы анимация перехода не срабатывала на обычных
+// перерисовках (после действия в той же локации).
+let locationNavDirection = null;
 let selectedTechId = null;
 let selectedQuestId = null; // см. openQuestsModal/selectQuestNode - выбранный узел графа квестов
 let lastRenderedActionView = null; // см. renderActions() - для сохранения скролла между перерисовками
@@ -3299,6 +3327,25 @@ function renderEnergy() {
   fill.classList.toggle("danger", e.consumption > e.generation);
 }
 
+// Предыдущее показанное значение каждого ресурса (rid -> amount) - нужно,
+// чтобы renderResources() понимал, что именно изменилось с прошлого рендера,
+// и проиграл докрутку/пульсацию только по-настоящему изменившимся плиткам.
+let prevResourceAmounts = {};
+
+// Плавно докручивает текст узла от `from` к `to` за `duration` мс (ease-out),
+// вместо мгновенной подмены - тот же принцип разовой анимации по событию, что
+// у вспышки постройки/перехода по локациям, только на самой цифре.
+function animateResourceValue(node, from, to, duration = 350) {
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    node.textContent = String(Math.round(from + (to - from) * eased));
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 function renderResources() {
   const container = document.getElementById("resGrid");
   container.innerHTML = "";
@@ -3309,11 +3356,18 @@ function renderResources() {
   VIEW.pinned.forEach(rid => {
     const amount = VIEW.resources[rid] || 0;
     const rate = VIEW.rates[rid] || 0;
-    const tile = el("div", { class: "res-tile" + (amount === 0 ? " zero" : "") });
+    const prevAmount = prevResourceAmounts[rid];
+    const tileClasses = ["res-tile"];
+    if (amount === 0) tileClasses.push("zero");
+    if (prevAmount !== undefined && prevAmount !== amount) tileClasses.push("changed", amount > prevAmount ? "up" : "down");
+    const tile = el("div", { class: tileClasses.join(" ") });
     const iconDef = resourceIcon(rid);
     if (iconDef) tile.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 32));
     const info = el("div", { class: "info" });
-    info.appendChild(el("div", { class: "amount mono", text: String(amount) }));
+    const amountEl = el("div", { class: "amount mono", text: String(prevAmount !== undefined ? prevAmount : amount) });
+    info.appendChild(amountEl);
+    if (prevAmount !== undefined && prevAmount !== amount) animateResourceValue(amountEl, prevAmount, amount);
+    prevResourceAmounts[rid] = amount;
     if (rate !== 0) info.appendChild(el("div", { class: `rate ${rate > 0 ? "pos" : "neg"}`, text: `${rate > 0 ? "+" : ""}${rate}/ход` }));
     // jump_to (см. engine.RECIPE_BOARD_BUILDING_ID/VIEW.resource_jump) - тот же
     // клик "перейти к рецепту", что и у чипов цены/плиток склада, только здесь
@@ -3334,6 +3388,10 @@ function renderResources() {
 // (renderBuildings() дёргается заново после каждого действия), как
 // creatureBankSearchQuery/storageSearchQuery.
 let buildingsSearchQuery = "";
+// Последний ход, для которого уже проставили вспышку "произвело" - null значит
+// "ещё ни разу не рендерили", чтобы не вспыхивало ВСЁ разом при самой первой
+// отрисовке страницы (см. renderBuildings).
+let lastBuildingsFlashTurn = null;
 
 // Список построек (не сетка тайлов) - та же строка, что "Банк особей" в
 // "Особях": иконка со статусом, счётчик/бейдж лимита, описание, содержание
@@ -3358,9 +3416,17 @@ function renderBuildings() {
     return;
   }
 
+  // Ход реально продвинулся с прошлого рендера (не просто действие вроде
+  // insert_soul/toggle_autocraft, которые хода не тратят, см. CLAUDE.md) -
+  // именно в этот момент постройки со status="ok"/"partial" и активными копиями
+  // произвели ресурс за только что прошедший ход.
+  const turnAdvanced = lastBuildingsFlashTurn !== null && VIEW.turn !== lastBuildingsFlashTurn;
+  lastBuildingsFlashTurn = VIEW.turn;
+
   const list = el("div", { class: "bld-list thin-scroll" });
   VIEW.buildings.forEach(b => {
-    const row = el("div", { class: "bld-row" });
+    const producedThisTurn = turnAdvanced && b.active_count > 0 && b.produces.length > 0;
+    const row = el("div", { class: producedThisTurn ? "bld-row produced" : "bld-row" });
     row.dataset.resourceName = b.name.toLowerCase();
 
     const head = el("div", { class: "bld-row-head" });
@@ -4337,7 +4403,13 @@ function manualActionsAt(locationId) {
 // locationPath - путь от корня до текущей; "← Назад"/"⌂ В начало" всегда доступны,
 // пока мы не в корне (кнопки, а не привязка к номеру хода - переход НЕ тратит ход).
 function renderLocationsPanel() {
-  const wrap = el("div");
+  // Считываем и сразу сбрасываем направление перехода (см. locationNavDirection) -
+  // ровно один рендер получает анимацию, следующие обычные перерисовки этой же
+  // локации (после клика на действие) её не подхватят.
+  const navDir = locationNavDirection;
+  locationNavDirection = null;
+
+  const wrap = el("div", { class: navDir ? `loc-panel-enter ${navDir}` : "" });
   if (!VIEW.locations.length) {
     wrap.appendChild(el("div", { class: "empty-note", text: "Локации пока недоступны." }));
     return wrap;
@@ -4349,10 +4421,10 @@ function renderLocationsPanel() {
   if (locationPath.length) {
     const navRow = el("div", { class: "back-row" });
     const backBtn = el("button", { text: "← Назад" });
-    backBtn.addEventListener("click", () => { locationPath.pop(); renderActions(); });
+    backBtn.addEventListener("click", () => { locationNavDirection = "back"; locationPath.pop(); renderActions(); });
     navRow.appendChild(backBtn);
     const rootBtn = el("button", { text: "⌂ В начало" });
-    rootBtn.addEventListener("click", () => { locationPath = []; renderActions(); });
+    rootBtn.addEventListener("click", () => { locationNavDirection = "back"; locationPath = []; renderActions(); });
     navRow.appendChild(rootBtn);
     wrap.appendChild(navRow);
 
@@ -4362,7 +4434,7 @@ function renderLocationsPanel() {
       const l = VIEW.locations.find(x => x.id === lid);
       const isLast = i === locationPath.length - 1;
       const seg = el("span", { class: "loc-breadcrumb-item" + (isLast ? " current" : ""), text: l ? l.name : lid });
-      if (!isLast) seg.addEventListener("click", () => { locationPath = locationPath.slice(0, i + 1); renderActions(); });
+      if (!isLast) seg.addEventListener("click", () => { locationNavDirection = "back"; locationPath = locationPath.slice(0, i + 1); renderActions(); });
       crumbs.appendChild(seg);
     });
     wrap.appendChild(crumbs);
@@ -4380,7 +4452,7 @@ function renderLocationsPanel() {
       card.appendChild(el("div", { class: "loc-name", text: l.name }));
       const n = locationItemCount(l.id);
       card.appendChild(el("div", { class: "loc-count", text: `${n} ${pluralItems(n)}` }));
-      card.addEventListener("click", () => { locationPath.push(l.id); renderActions(); });
+      card.addEventListener("click", () => { locationNavDirection = "forward"; locationPath.push(l.id); renderActions(); });
       grid.appendChild(card);
     });
     container.appendChild(grid);
@@ -4865,8 +4937,10 @@ function openTechTreeModal() {
   // сюда позвал renderAll() после исследования технологии изнутри неё же),
   // запоминаем прокрутку графа/детали ДО пересборки и возвращаем её после -
   // иначе выбор технологии или оплата сбрасывали бы просмотр в начало графа.
-  const prevModal = document.querySelector("#techTreeOverlay .modal");
-  const savedScroll = prevModal ? { left: prevModal.scrollLeft, top: prevModal.scrollTop } : null;
+  // Скроллится именно .tech-graph (см. его CSS: overflow: auto) - сам .modal
+  // не скроллится (overflow: hidden), брать прокрутку с него было бы всегда 0.
+  const prevGraph = document.querySelector("#techTreeOverlay .tech-graph");
+  const savedScroll = prevGraph ? { left: prevGraph.scrollLeft, top: prevGraph.scrollTop } : null;
 
   closeTechTreeModal();
   const overlay = el("div", { class: "modal-overlay" });
@@ -4882,7 +4956,10 @@ function openTechTreeModal() {
   overlay.appendChild(modal);
   overlay.id = "techTreeOverlay";
   document.body.appendChild(overlay);
-  if (savedScroll) { modal.scrollLeft = savedScroll.left; modal.scrollTop = savedScroll.top; }
+  if (savedScroll) {
+    const newGraph = modal.querySelector(".tech-graph");
+    if (newGraph) { newGraph.scrollLeft = savedScroll.left; newGraph.scrollTop = savedScroll.top; }
+  }
 }
 
 function closeTechTreeModal() {
@@ -4987,6 +5064,7 @@ function renderTechTree() {
   });
   graph.appendChild(svg);
   graph.appendChild(cols);
+  enableGraphZoom(graph, cols, techGraphZoom, () => drawTechEdges(graph, svg, tree, nodeEls));
   wrap.appendChild(graph);
   const detailBox = el("div");
   detailBox.appendChild(renderTechDetail(tree.find(t => t.id === selectedTechId)));
@@ -5006,6 +5084,11 @@ function renderTechTree() {
 // даже когда курсор уходит ЗА пределы .tech-graph во время быстрого перетаскивания -
 // а слушать эти события нужно на window, а не на самом графе.
 let graphPanState = null; // { graph, startX, startY, scrollLeft, scrollTop } | null
+// Текущий зум графа техов/квестов - см. enableGraphZoom. Раздельные переменные
+// (а не одна общая), потому что обе модалки могут быть открыты для разных
+// целей в разное время и не должны делить один и тот же уровень приближения.
+let techGraphZoom = { value: 1 };
+let questGraphZoom = { value: 1 };
 
 // mousedown вешается ЗАНОВО на каждый свежий .tech-graph (renderTechTree()
 // пересоздаёт граф с нуля при каждой перерисовке) - это не течёт, старый
@@ -5017,7 +5100,7 @@ let graphPanState = null; // { graph, startX, startY, scrollLeft, scrollTop } | 
 function enableGraphPanning(graph) {
   graph.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return; // только левая кнопка мыши
-    if (e.target.closest(".tech-node")) return; // клик по узлу - это выбор технологии, не панорамирование
+    if (e.target.closest(".tech-node, .quest-node")) return; // клик по узлу - это выбор технологии/квеста, не панорамирование
     graphPanState = {
       graph, startX: e.clientX, startY: e.clientY,
       scrollLeft: graph.scrollLeft, scrollTop: graph.scrollTop,
@@ -5025,6 +5108,51 @@ function enableGraphPanning(graph) {
     graph.classList.add("panning");
     e.preventDefault(); // не выделять текст на графе во время перетаскивания
   });
+}
+
+// Зум колесом мыши для .tech-graph (и .tech-graph.quest-graph). Масштабируется
+// ТОЛЬКО .tech-cols (сами колонки/узлы) - .tech-edges (SVG рёбер) намеренно
+// остаётся вне transform: drawTechEdges/drawQuestEdges и так честно перечитывают
+// geometry узлов через getBoundingClientRect ПОСЛЕ скейла, поэтому рёбра просто
+// сами оказываются в новых координатах без единой строчки, знающей про zoom.
+// GRAPH_ZOOM_MIN/MAX подобраны на глаз: ниже 0.5 узлы превращаются в нечитаемую
+// кашу, выше 2 увеличивать уже незачем - обычный текст на узле и так короткий.
+const GRAPH_ZOOM_MIN = 0.5;
+const GRAPH_ZOOM_MAX = 2;
+const GRAPH_ZOOM_STEP = 1.12;
+
+function applyGraphZoom(cols, zoom) {
+  cols.style.transform = `scale(${zoom})`;
+}
+
+// zoomState - {value}, а не голое число: содержимое модалки (renderTechTree/
+// renderQuestGraph) пересобирается с нуля при КАЖДОМ действии игрока, пока
+// модалка открыта (см. openTechTreeModal/openQuestsModal, вызываются заново
+// из renderAll()) - объект-обёртка живёт СНАРУЖИ рендер-функции (как
+// selectedTechId/questsActiveEra) и переживает эту пересборку, поэтому зум не
+// сбрасывается на 1 при каждом клике "Исследовать"/"Забрать награду".
+function enableGraphZoom(graph, cols, zoomState, redraw) {
+  applyGraphZoom(cols, zoomState.value);
+  graph.addEventListener("wheel", (e) => {
+    e.preventDefault(); // колесо теперь целиком отдано зуму, не скроллу графа
+    const rect = graph.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+    const oldZoom = zoomState.value;
+    // Точка контента под курсором (в масштабе .tech-cols, transform-origin: 0 0) -
+    // остаётся под курсором и после смены zoom, иначе граф "уезжал" бы при каждом
+    // тике колеса вместо приближения именно к тому месту, где стоит мышь.
+    const contentX = (graph.scrollLeft + offsetX) / oldZoom;
+    const contentY = (graph.scrollTop + offsetY) / oldZoom;
+    const factor = e.deltaY < 0 ? GRAPH_ZOOM_STEP : 1 / GRAPH_ZOOM_STEP;
+    const newZoom = Math.min(GRAPH_ZOOM_MAX, Math.max(GRAPH_ZOOM_MIN, oldZoom * factor));
+    if (newZoom === oldZoom) return;
+    zoomState.value = newZoom;
+    applyGraphZoom(cols, newZoom);
+    graph.scrollLeft = contentX * newZoom - offsetX;
+    graph.scrollTop = contentY * newZoom - offsetY;
+    redraw();
+  }, { passive: false });
 }
 
 function drawTechEdges(graph, svg, tree, nodeEls) {
@@ -5545,8 +5673,9 @@ function defaultQuestEra(eras, quests) {
 }
 
 function openQuestsModal() {
-  const prevModal = document.querySelector("#questsOverlay .modal");
-  const savedScroll = prevModal ? { left: prevModal.scrollLeft, top: prevModal.scrollTop } : null;
+  // См. openTechTreeModal - скроллится .tech-graph, не сам .modal.
+  const prevGraph = document.querySelector("#questsOverlay .tech-graph");
+  const savedScroll = prevGraph ? { left: prevGraph.scrollLeft, top: prevGraph.scrollTop } : null;
   closeQuestsModal();
   const overlay = el("div", { class: "modal-overlay" });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeQuestsModal(); });
@@ -5593,7 +5722,10 @@ function openQuestsModal() {
   overlay.appendChild(modal);
   overlay.id = "questsOverlay";
   document.body.appendChild(overlay);
-  if (savedScroll) { modal.scrollLeft = savedScroll.left; modal.scrollTop = savedScroll.top; }
+  if (savedScroll) {
+    const newGraph = modal.querySelector(".tech-graph");
+    if (newGraph) { newGraph.scrollLeft = savedScroll.left; newGraph.scrollTop = savedScroll.top; }
+  }
 }
 
 function closeQuestsModal() {
@@ -5696,6 +5828,7 @@ function renderQuestGraph(era) {
   cols.appendChild(band);
   graph.appendChild(svg);
   graph.appendChild(cols);
+  enableGraphZoom(graph, cols, questGraphZoom, () => drawQuestEdges(graph, svg, quests, nodeEls));
   wrap.appendChild(graph);
   const detailBox = el("div");
   detailBox.appendChild(renderQuestDetail(quests.find(q => q.id === selectedQuestId)));
