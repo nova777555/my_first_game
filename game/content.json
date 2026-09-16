@@ -2964,6 +2964,25 @@
         }
       ]
     },
+    "necromancy": {
+      "name": "Некромантия",
+      "description": "Дополнительно к «Добыче» увеличивает именно шанс выбить душу с убитого моба.",
+      "applies_to_kind": "weapon",
+      "effect": {
+        "type": "soul_chance_multiplier"
+      },
+      "levels": [
+        {
+          "value": 1.5
+        },
+        {
+          "value": 2.5
+        },
+        {
+          "value": 4.0
+        }
+      ]
+    },
     "protection": {
       "name": "Защита",
       "description": "Увеличивает снижение входящего урона от брони.",

@@ -1272,7 +1272,7 @@ def validate(data: dict) -> list[str]:
     # tool_durability_remaining/_weapon_bonuses/_armor_bonuses в game/engine.py.
     _ENCHANT_EFFECT_TYPES = {
         "yield_multiplier", "durability_multiplier", "damage_bonus",
-        "drop_chance_multiplier", "armor_defense_bonus", "max_hp_bonus_add",
+        "drop_chance_multiplier", "soul_chance_multiplier", "armor_defense_bonus", "max_hp_bonus_add",
     }
     enchantments = data.get("enchantments", {})
     enchant_kinds = {t.get("enchant_kind") for t in tools.values() if t.get("enchant_kind")}

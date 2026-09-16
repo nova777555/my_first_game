@@ -2226,9 +2226,11 @@ def enchantment_pool(tool_id: str) -> list[dict]:
     return pool
 
 
-def enchantable_tools(state: GameState) -> list[str]:
+def enchantable_tools() -> list[str]:
     """Инструменты, у которых вообще есть enchant_kind (т.е. их можно понести на
-    стол зачарований) - используется UI для списка выбора."""
+    стол зачарований) - используется UI для списка выбора. Чистая функция от
+    контента - не завязана на конкретное состояние игрока (ЛЮБОЙ игрок видит
+    один и тот же список зачаровываемых линеек, владеет он ими пока или нет)."""
     return [tool_id for tool_id in TOOLS if TOOLS[tool_id].get("enchant_kind") is not None]
 
 
@@ -2384,11 +2386,13 @@ def _weapon_bonuses(state: GameState) -> dict:
     как обычно (tool_tier), но применяется НЕ через upgrade_tool-прогрессию урона
     напрямую, а через опциональные боевые поля НА КОНКРЕТНОМ тире:
     damage_multiplier/instant_kill_max_hp/loot_multiplier/soul_chance_multiplier,
-    плюс ДВА зачарования этой ЖЕ линейки (см. _enchant_effect_value): "Острота"
+    плюс ТРИ зачарования этой ЖЕ линейки (см. _enchant_effect_value): "Острота"
     (damage_bonus, ДОЛЯ добавки - domножает damage_multiplier ИМЕННО этого
-    оружия, ПРЕЖДЕ чем идти в максимум по линейкам) и "Добыча"
-    (drop_chance_multiplier - домножает И soul_chance_multiplier, И новое поле
-    loot_chance_multiplier ИМЕННО этого оружия). Сломанная линейка (tool_is_broken)
+    оружия, ПРЕЖДЕ чем идти в максимум по линейкам), "Добыча" (drop_chance_multiplier -
+    домножает И soul_chance_multiplier, И новое поле loot_chance_multiplier ИМЕННО
+    этого оружия) и "Некромантия" (soul_chance_multiplier - ДОПОЛНИТЕЛЬНО к
+    "Добыче" домножает ТОЛЬКО шанс души, не трогая loot_chance_multiplier - оба
+    зачарования на одном мече стакаются перемножением). Сломанная линейка (tool_is_broken)
     вообще пропускается - её бонусы (в т.ч. от зачарований) не участвуют, пока
     её не починят, но сам удар при этом не блокируется (в отличие от кирки) -
     останется хотя бы "голыми руками". Среди ОСТАЛЬНЫХ владеемых линеек оружия
@@ -2412,11 +2416,14 @@ def _weapon_bonuses(state: GameState) -> dict:
         tier = tiers[index]
         sharpness = _enchant_effect_value(state, tool_id, "damage_bonus", 0.0)
         looting = _enchant_effect_value(state, tool_id, "drop_chance_multiplier", 1.0)
+        necromancy = _enchant_effect_value(state, tool_id, "soul_chance_multiplier", 1.0)
         damage_multiplier = max(damage_multiplier, tier.get("damage_multiplier", 1.0) * (1 + sharpness))
         instant_kill_max_hp = max(instant_kill_max_hp, tier.get("instant_kill_max_hp", 0))
         loot_multiplier = max(loot_multiplier, tier.get("loot_multiplier", 1.0))
         loot_chance_multiplier = max(loot_chance_multiplier, looting)
-        soul_chance_multiplier = max(soul_chance_multiplier, tier.get("soul_chance_multiplier", 1.0) * looting)
+        soul_chance_multiplier = max(
+            soul_chance_multiplier, tier.get("soul_chance_multiplier", 1.0) * looting * necromancy
+        )
     return {
         "damage_multiplier": damage_multiplier,
         "instant_kill_max_hp": instant_kill_max_hp,

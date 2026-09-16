@@ -1083,6 +1083,14 @@ ENCHANTMENTS = {
         "effect": {"type": "drop_chance_multiplier"},
         "levels": [{"value": 2.0}],
     },
+    # Отдельное от test_looting зачарование, ТОЖЕ множащее soul_chance -
+    # для теста "стакается с Добычей перемножением" (см. game/engine.py:_weapon_bonuses).
+    "test_necromancy": {
+        "name": "Тестовая некромантия", "description": "Дополнительно множит ТОЛЬКО шанс души.",
+        "applies_to_kind": "weapon",
+        "effect": {"type": "soul_chance_multiplier"},
+        "levels": [{"value": 1.5}],
+    },
     "test_protection": {
         "name": "Тестовая защита", "description": "Добавка к снижению урона брони.",
         "applies_to_kind": "armor",
