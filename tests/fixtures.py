@@ -117,6 +117,10 @@ RESOURCES = [
     # Для тестов многоходовых ручных действий (game/engine.py:_process_manual_jobs,
     # manual_actions.*.duration_turns) - см. MANUAL_ACTIONS["craft_delayed"] ниже.
     {"id": "delayed_output", "name": "Отложенный выход"},
+    # Для теста "одна локация - одна активная многоходовая задача" (см.
+    # MANUAL_ACTIONS["craft_delayed_sibling"]/["craft_delayed_sub"] ниже).
+    {"id": "sibling_delayed_output", "name": "Соседний отложенный выход"},
+    {"id": "sub_delayed_output", "name": "Отложенный выход подлокации"},
     # Единственный ресурс фикстуры с настроенной вместимостью склада (game/engine.py:
     # storage_capacity) - остальные ресурсы намеренно без storage (хранятся без
     # ограничений, как до этой механики), чтобы существующие тесты, гоняющие
@@ -319,6 +323,24 @@ MANUAL_ACTIONS = {
         "cost": {"raw_a": 2}, "gain": {"delayed_output": 5},
         "duration_turns": 3,
     },
+    # Другое многоходовое действие В ТОЙ ЖЕ локации, что craft_delayed
+    # ("workshop_loc") - для теста "одна локация - одна активная многоходовая
+    # задача одновременно" (game/engine.py:do_manual_action): пока craft_delayed
+    # тикает, запустить ЭТО действие нельзя, хотя это другой action_id.
+    "craft_delayed_sibling": {
+        "name": "Соседний затяжной крафт", "requires_tech": None, "location": "workshop_loc",
+        "cost": {"raw_a": 1}, "gain": {"sibling_delayed_output": 3},
+        "duration_turns": 2,
+    },
+    # Многоходовое действие в ПОДЛОКАЦИИ "workshop_loc" (см. LOCATIONS["sub_workshop"])
+    # - ограничение НЕ рекурсивное по parent_location, так что оно должно спокойно
+    # запускаться параллельно с craft_delayed/craft_delayed_sibling в родительской
+    # локации (тот же принцип, что "охота в подлокации шахты не мешает добыче жилы").
+    "craft_delayed_sub": {
+        "name": "Затяжной крафт в подлокации", "requires_tech": None, "location": "sub_workshop",
+        "cost": {"raw_a": 1}, "gain": {"sub_delayed_output": 2},
+        "duration_turns": 2,
+    },
 }
 
 # Виды поломки (см. BUILDINGS["flaky_typed"] ниже) - "worn_gear" требует
@@ -386,6 +408,16 @@ BUILDINGS = {
         "requires_tech": None, "cost": {"raw_a": 1},
         "produces": {}, "consumes": {}, "breakdown_chance": 0.0,
         "repair_cost": {"raw_a": 1}, "lab_tier": 2,
+        "upgrades": [
+            # Для теста tech_research_turns()/game/engine.py:_farm_upgrade_multiplier -
+            # сокращает НА 2 ХОДА (АБСОЛЮТНО, не доля) техи ТИРА 2 (== lab_tier этой
+            # постройки), см. TECHS["tech_tier2_slow"].
+            {
+                "id": "lab2_speed", "name": "Ускоренные испытания",
+                "description": "-2 хода к исследованию технологий тира 2.",
+                "type": "research_speed", "value": 2, "requires_tech": None, "cost": {"raw_a": 2},
+            },
+        ],
     },
     # Три жёстко зашитых типа улучшений разом на ОДНОЙ постройке (она специально и
     # производит, и потребляет энергию) - для теста их совместной работы
@@ -709,6 +741,16 @@ BUILDINGS = {
             },
         ],
     },
+    # Стол зачарований (enchanting_table) - НЕ построена по умолчанию (тот же
+    # приём, что genetics_lab_building/crossing_station выше), см.
+    # tests/test_enchanting.py. cost попытки - raw_a (не заводим отдельный
+    # ресурс-книгу, фикстуре хватает уже существующего raw_a).
+    "ench_table": {
+        "name": "Стол зачарований (тест)", "description": "Тестовый стол зачарований (enchanting_table).",
+        "requires_tech": None, "cost": {"raw_a": 1},
+        "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {"raw_a": 1},
+        "enchanting_table": {"cost": {"raw_a": 1}},
+    },
 }
 
 ENERGY_RECIPES = {
@@ -766,25 +808,18 @@ GENETIC_TRAITS = {
         ],
     },
     # 6 id ЗАКРЫТЫ (tools/content_validation.py:_ENVIRONMENT_ALLELE_IDS) - как у
-    # active_period, значения тут не свободные. bonus_resource у каждой аллели -
-    # РАЗНЫЙ существующий ресурс фикстуры (для теста "бонус идёт именно в СВОЙ
-    # ресурс, не путается между средами"), bonus_chance - произвольные разные
-    # числа (сами тесты бонуса мокают random, а не полагаются на эти значения).
+    # active_period, значения тут не свободные. Аллели среды решают только КАКАЯ
+    # среда "благоприятна" для генотипа особи - САМ бонус (ресурс/количество/шанс)
+    # живёт на SPECIES ниже, не здесь (см. комментарий у SPECIES).
     "environment": {
         "name": "Тестовая среда обитания",
         "alleles": [
-            {"id": "forest", "name": "Лес", "dominant": True, "weight": 5,
-             "bonus_resource": "species_output", "bonus_amount": 1, "bonus_chance": 0.3},
-            {"id": "fields", "name": "Поля", "dominant": False, "weight": 5,
-             "bonus_resource": "critter_food", "bonus_amount": 1, "bonus_chance": 0.3},
-            {"id": "caves", "name": "Пещеры", "dominant": False, "weight": 3,
-             "bonus_resource": "raw_a", "bonus_amount": 1, "bonus_chance": 0.25},
-            {"id": "desert", "name": "Пустыня", "dominant": False, "weight": 3,
-             "bonus_resource": "raw_b", "bonus_amount": 1, "bonus_chance": 0.25},
-            {"id": "water", "name": "Вода", "dominant": False, "weight": 2,
-             "bonus_resource": "energy", "bonus_amount": 1, "bonus_chance": 0.2},
-            {"id": "space", "name": "Космос", "dominant": False, "weight": 1,
-             "bonus_resource": "rare_mineral", "bonus_amount": 1, "bonus_chance": 0.15},
+            {"id": "forest", "name": "Лес", "dominant": True, "weight": 5},
+            {"id": "fields", "name": "Поля", "dominant": False, "weight": 5},
+            {"id": "caves", "name": "Пещеры", "dominant": False, "weight": 3},
+            {"id": "desert", "name": "Пустыня", "dominant": False, "weight": 3},
+            {"id": "water", "name": "Вода", "dominant": False, "weight": 2},
+            {"id": "space", "name": "Космос", "dominant": False, "weight": 1},
         ],
     },
 }
@@ -794,15 +829,20 @@ GENETIC_TRAITS = {
 # critter_a - доминантный, ловится в диком виде (weight=5), без потребления.
 # critter_b - рецессивный, weight=0 (НЕ ловится в диком виде - только через
 # мутацию), требует critter_food (для теста "не хватает consumes - не
-# производит, но и не умирает").
+# производит, но и не умирает"). bonus_resource у каждого вида - СВОЙ, РАЗНЫЙ
+# ресурс (для теста "бонус зависит от вида, не от среды" - два вида в ОДНОЙ и
+# той же благоприятной среде дают разные ресурсы), bonus_chance - произвольные
+# числа (тесты бонуса мокают random, а не полагаются на эти значения).
 SPECIES = {
     "critter_a": {
         "description": "Тестовый вид А - доминантный, ловится в диком виде, без потребления.",
         "produces": {"species_output": 2}, "consumes": {}, "dominant": True, "weight": 5,
+        "bonus_resource": "species_output", "bonus_amount": 1, "bonus_chance": 0.3,
     },
     "critter_b": {
         "description": "Тестовый вид Б - рецессивный, требует корм, доступен только через мутацию.",
         "produces": {"species_output": 5}, "consumes": {"critter_food": 1}, "dominant": False, "weight": 0,
+        "bonus_resource": "raw_a", "bonus_amount": 1, "bonus_chance": 0.25,
     },
 }
 
@@ -826,6 +866,15 @@ MUTATIONS = [
 # среды подменяет это значение точечно (тем же приёмом, что и другие
 # вероятностные тесты - см. CLAUDE.md).
 GENETICS_SETTINGS = {"synthesis_cost": {"species_output": 10}, "environment_mutation_chance": 0.0}
+
+# HP игрока/дебафф "Ранен" (game/engine.py:player_max_hp/current_player_hp/
+# is_wounded/_process_combat) - player_base_hp=20 даёт круглые числа с
+# MOBS["test_mob"]["damage"]/["test_boss"]["damage"] ниже в тестах ответного
+# урона (см. tests/test_combat_and_souls.py).
+COMBAT_SETTINGS = {
+    "player_base_hp": 20, "hp_regen_per_turn": 3,
+    "wounded_turns": 5, "wounded_damage_multiplier": 0.5,
+}
 
 
 def make_genotype(species_id, *, lifespan="normal", output_multiplier="normal", active_period="day", environment="forest"):
@@ -862,17 +911,52 @@ TECHS = {
         "name": "Технология тира 2", "tier": 2, "description": "Тестовая технология 2 тира.",
         "requires": [], "cost": {"raw_a": 1}, "effects": [],
     },
+    # Для теста многоходового исследования (game/engine.py:research/
+    # _process_research/tech_research_turns) - отдельная от tech_tier2
+    # технология, чтобы не ломать существующие тесты LabTierTests, ожидающие
+    # МГНОВЕННОЕ завершение tech_tier2. research_turns=5, с BUILDINGS["lab2"]
+    # ["upgrades"] research_speed (value=2) сокращается до 3 (см. lab2 выше).
+    "tech_tier2_slow": {
+        "name": "Технология тира 2 (долгая)", "tier": 2,
+        "description": "Тестовая многоходовая технология 2 тира.",
+        "requires": [], "cost": {"raw_a": 1}, "effects": [], "research_turns": 5,
+    },
+    # Вторая многоходовая технология (тот же тир, другая цена) - для теста
+    # переключения МЕЖДУ ДВУМЯ многоходовыми исследованиями (game/engine.py:
+    # research() - "переключение в любой момент"), чтобы убедиться, что новый
+    # job заводится СВЕЖИМ (turns_done=0 от своего research_turns), а не
+    # донашивает счётчик отменённого.
+    "tech_tier2_slow_b": {
+        "name": "Технология тира 2 (долгая, вторая)", "tier": 2,
+        "description": "Тестовая многоходовая технология 2 тира, вторая линейка.",
+        "requires": [], "cost": {"raw_b": 1}, "effects": [], "research_turns": 4,
+    },
 }
 
 MINING_INFO = {
     "mineral": {
         "requires_tech": None, "required_tool": "pickaxe", "required_tier": 1,
-        "rarity": 1, "vein_size_range": [20, 30], "base_yield": 4,
+        "rarity": 1, "toughness": 2, "field_cluster_size": [2, 4], "base_yield": 4,
     },
     "rare_mineral": {
         "requires_tech": None, "required_tool": "pickaxe", "required_tier": 2,
-        "rarity": 5, "vein_size_range": [1, 2], "base_yield": 5,
+        "rarity": 5, "toughness": 6, "field_cluster_size": [1, 1], "base_yield": 5,
     },
+}
+
+MINE_FIELD = {
+    "size": 6,
+    "dig_tool": "pickaxe",
+    "cluster_budget": 4,
+    "scanner_tool": "ore_scanner",
+    "scanner_types_tier": 2,
+    "scanner_counts_tier": 3,
+    "scanner_reveal_all_tier": 4,
+    "rock_resource": "raw_a",
+    "rock_yield": 2,
+    "rock_toughness": 1,
+    "rock_icon": None,
+    "rock_broken_icon": None,
 }
 
 TIME = {"hours_per_turn": 3, "day_start_hour": 6, "day_end_hour": 21}
@@ -880,10 +964,11 @@ TIME = {"hours_per_turn": 3, "day_start_hour": 6, "day_end_hour": 21}
 TOOLS = {
     "pickaxe": {
         "name": "Кирка",
+        "enchant_kind": "mining",
         "tiers": [
-            {"name": "Тир 1", "cost": None, "requires_tech": None},
-            {"name": "Тир 2", "cost": {"raw_a": 10}, "requires_tech": None},
-            {"name": "Тир 3", "cost": {"raw_b": 10}, "requires_tech": "tech1"},
+            {"name": "Тир 1", "cost": None, "requires_tech": None, "mining_area": 1, "mining_power": 3},
+            {"name": "Тир 2", "cost": {"raw_a": 10}, "requires_tech": None, "mining_area": 1, "mining_power": 5},
+            {"name": "Тир 3", "cost": {"raw_b": 10}, "requires_tech": "tech1", "mining_area": 2, "mining_power": 7},
         ],
     },
     "drill": {
@@ -891,6 +976,19 @@ TOOLS = {
         "tiers": [
             {"name": "Ручная дрель", "cost": None, "requires_tech": None},
             {"name": "Электродрель", "cost": {"raw_a": 5}, "requires_tech": None},
+        ],
+    },
+    # Щуп-детектор шахты (mine_field.scanner_tool) - чисто информационный,
+    # никаких mining_area/mining_power. Тир 1 - дефолтный для всех, намеренно
+    # ничего не даёт (см. engine.py: scanner_tier/mine_field_view) - три порога
+    # детализации живут на MINE_FIELD, не на самих тирах.
+    "ore_scanner": {
+        "name": "Рудный щуп",
+        "tiers": [
+            {"name": "Тир 1", "cost": None, "requires_tech": None},
+            {"name": "Тир 2", "cost": {"raw_a": 3}, "requires_tech": None},
+            {"name": "Тир 3", "cost": {"raw_a": 6}, "requires_tech": None},
+            {"name": "Тир 4", "cost": {"raw_a": 10}, "requires_tech": None},
         ],
     },
     # Инструмент ремонта с прочностью (см. BREAKDOWN_TYPES/BUILDINGS["flaky_typed"]
@@ -913,7 +1011,7 @@ TOOLS = {
     # test_mob (hp=10) только вместе с уроном, но НЕ test_boss (hp=50) - см.
     # тесты на мгновенное убийство).
     "sword": {
-        "name": "Меч", "weapon": True,
+        "name": "Меч", "weapon": True, "enchant_kind": "weapon",
         "tiers": [
             {"name": "Без меча", "cost": None, "requires_tech": None},
             # damage_multiplier=2: при уровне навыка 1 (damage=3) даёт урон 6 -
@@ -936,6 +1034,66 @@ TOOLS = {
                 "unlocks_moves": ["power_strike", "pct_max_move", "pct_remaining_move", "execute_move"],
             },
         ],
+    },
+    # Броня (armor=true) - зеркало sword, для тестов _armor_bonuses/player_max_hp/
+    # attack_encounter (снижение входящего урона). Тир 2 даёт и max_hp_bonus, и
+    # damage_reduction разом - большинству тестов достаточно одного тира.
+    "armor": {
+        "name": "Броня", "armor": True, "enchant_kind": "armor",
+        "tiers": [
+            {"name": "Без брони", "cost": None, "requires_tech": None},
+            {
+                "name": "Броня", "cost": {"raw_a": 5}, "requires_tech": None,
+                "max_hp_bonus": 10, "damage_reduction": 2,
+            },
+        ],
+    },
+}
+
+# Зачарования (content.json["enchantments"]) - см. game/engine.py:enchantment_pool/
+# enchant_tool/_enchant_effect_value. НИ у одного инструмента фикстуры (pickaxe/
+# sword/armor/wrench/drill/ore_scanner выше) НЕТ enchant_kind - значит для ВСЕХ
+# существующих тестов enchantment_pool(...) пуст и _enchant_effect_value(...)
+# всегда возвращает нейтральный default, т.е. это ЦЕЛИКОМ инертное дополнение,
+# пока конкретный тест сам не патчит TOOLS[...]["enchant_kind"] через
+# mock.patch.dict (см. tests/test_enchanting.py) - тот же приём точечного патча,
+# что и у "качества жил" в MiningTests (см. докстринг модуля выше).
+ENCHANTMENTS = {
+    "test_luck": {
+        "name": "Тестовая удача", "description": "Множит выход руды.",
+        "applies_to_kind": "mining",
+        "effect": {"type": "yield_multiplier"},
+        "levels": [{"value": 2.0}, {"value": 3.0}],
+    },
+    "test_durability": {
+        "name": "Тестовая прочность", "description": "Универсальное - множит max_durability.",
+        "applies_to_kind": None,
+        "effect": {"type": "durability_multiplier"},
+        "levels": [{"value": 2.0}],
+    },
+    "test_sharpness": {
+        "name": "Тестовая острота", "description": "Добавка к урону оружия.",
+        "applies_to_kind": "weapon",
+        "effect": {"type": "damage_bonus"},
+        "levels": [{"value": 0.5}],
+    },
+    "test_looting": {
+        "name": "Тестовая добыча", "description": "Множит шанс дропа/души.",
+        "applies_to_kind": "weapon",
+        "effect": {"type": "drop_chance_multiplier"},
+        "levels": [{"value": 2.0}],
+    },
+    "test_protection": {
+        "name": "Тестовая защита", "description": "Добавка к снижению урона брони.",
+        "applies_to_kind": "armor",
+        "effect": {"type": "armor_defense_bonus"},
+        "levels": [{"value": 5}],
+    },
+    "test_vitality": {
+        "name": "Тестовая живучесть", "description": "Добавка к максимуму HP.",
+        "applies_to_kind": "armor",
+        "effect": {"type": "max_hp_bonus_add"},
+        "levels": [{"value": 7}],
     },
 }
 
@@ -970,13 +1128,13 @@ MOBS = {
     "test_mob": {
         "name": "Тестовый моб", "description": "Тестовый обычный моб.",
         "location": "hunting_loc", "requires_tech": None, "is_boss": False,
-        "rarity": 1, "hp": 10, "xp_reward": 5,
+        "rarity": 1, "hp": 10, "damage": 4, "xp_reward": 5,
         "loot": {"raw_a": 2}, "soul_id": "test_soul", "soul_chance": 1.0,
     },
     "test_boss": {
         "name": "Тестовый босс", "description": "Тестовый босс.",
         "location": "hunting_loc", "requires_tech": None, "is_boss": True,
-        "hp": 50, "xp_reward": 20,
+        "hp": 50, "damage": 15, "xp_reward": 20,
         "loot": {"raw_b": 3}, "summon_cost": {"raw_a": 5},
     },
 }
@@ -988,7 +1146,7 @@ SKILLS = {
         "name": "Тестовый боевой навык", "description": "Тестовая линейка.",
         "levels": [
             {"xp_required": 0, "effects": {"damage": 3}},
-            {"xp_required": 10, "effects": {"damage": 100}},
+            {"xp_required": 10, "effects": {"damage": 100, "max_hp": 15}},
         ],
     },
 }
@@ -1072,12 +1230,14 @@ def as_content_dict() -> dict:
         "buildings": copy.deepcopy(BUILDINGS),
         "techs": copy.deepcopy(TECHS),
         "mining_info": copy.deepcopy(MINING_INFO),
+        "mine_field": copy.deepcopy(MINE_FIELD),
         "tools": copy.deepcopy(TOOLS),
         "energy_recipes": copy.deepcopy(ENERGY_RECIPES),
         "species": copy.deepcopy(SPECIES),
         "genetic_traits": copy.deepcopy(GENETIC_TRAITS),
         "mutations": copy.deepcopy(MUTATIONS),
         "genetics": copy.deepcopy(GENETICS_SETTINGS),
+        "combat": copy.deepcopy(COMBAT_SETTINGS),
         "time": copy.deepcopy(TIME),
         "mobs": copy.deepcopy(MOBS),
         "skills": copy.deepcopy(SKILLS),
@@ -1086,6 +1246,7 @@ def as_content_dict() -> dict:
         "quests": copy.deepcopy(QUESTS),
         "combat_moves": copy.deepcopy(COMBAT_MOVES),
         "breakdown_types": copy.deepcopy(BREAKDOWN_TYPES),
+        "enchantments": copy.deepcopy(ENCHANTMENTS),
     }
 
 
@@ -1109,15 +1270,15 @@ def build_mutations_by_pair(mutations: list) -> dict:
     return by_pair
 
 
-_ENGINE_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "GENETICS_SETTINGS",
-                 "LOCATIONS", "MANUAL_ACTIONS", "MINING_INFO", "MUTATIONS", "SPECIES", "TOOLS",
+_ENGINE_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "GENETICS_SETTINGS", "COMBAT_SETTINGS",
+                 "LOCATIONS", "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "MUTATIONS", "SPECIES", "TOOLS",
                  "RESOURCE_NAMES", "TECHS", "TIME", "ENERGY_RECIPE_FOR_RESOURCE", "MUTATIONS_BY_PAIR",
                  "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "RESOURCE_SOUL_KIND", "MOBS", "SKILLS", "SOUL_RECIPES",
-                 "LOOT_CASES", "QUESTS", "COMBAT_MOVES", "BREAKDOWN_TYPES"]
+                 "LOOT_CASES", "QUESTS", "COMBAT_MOVES", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
 _WEB_UI_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "LOCATIONS",
-                 "MANUAL_ACTIONS", "MINING_INFO", "TOOLS", "RESOURCE_ICONS", "RESOURCE_NAMES",
+                 "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "TOOLS", "RESOURCE_ICONS", "RESOURCE_NAMES",
                  "RESOURCE_ORDER", "TECHS", "RESOURCE_STORAGE", "MOBS", "SKILLS", "SOUL_RECIPES",
-                 "LOOT_CASES", "QUESTS", "BREAKDOWN_TYPES"]
+                 "LOOT_CASES", "QUESTS", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
 
 
 def _fixture_values() -> dict:
@@ -1126,9 +1287,11 @@ def _fixture_values() -> dict:
         "ENERGY_RECIPES": ENERGY_RECIPES,
         "GENETIC_TRAITS": GENETIC_TRAITS,
         "GENETICS_SETTINGS": GENETICS_SETTINGS,
+        "COMBAT_SETTINGS": COMBAT_SETTINGS,
         "LOCATIONS": LOCATIONS,
         "MANUAL_ACTIONS": MANUAL_ACTIONS,
         "MINING_INFO": MINING_INFO,
+        "MINE_FIELD": MINE_FIELD,
         "MUTATIONS": MUTATIONS,
         "SPECIES": SPECIES,
         "TOOLS": TOOLS,
@@ -1149,6 +1312,7 @@ def _fixture_values() -> dict:
         "QUESTS": QUESTS,
         "COMBAT_MOVES": COMBAT_MOVES,
         "BREAKDOWN_TYPES": BREAKDOWN_TYPES,
+        "ENCHANTMENTS": ENCHANTMENTS,
     }
 
 

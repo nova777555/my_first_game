@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from pathlib import Path
 
 import webview
@@ -41,10 +42,10 @@ sys.path.insert(0, str(ROOT))
 
 from game import engine  # noqa: E402
 from game.content import (  # noqa: E402
-    BREAKDOWN_TYPES, BUILDINGS, DEFAULT_ACTION_DELAY_MS, ENERGY_RECIPES,
-    GENETIC_TRAITS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS, MINING_INFO, MOBS,
-    QUESTS, RESOURCE_ICONS, RESOURCE_NAMES, RESOURCE_ORDER, RESOURCE_STORAGE,
-    SKILLS, SOUL_RECIPES, SPECIES, TECHS, TOOLS, UI_SOUNDS,
+    BREAKDOWN_TYPES, BUILDINGS, COMBAT_SETTINGS, DEFAULT_ACTION_DELAY_MS,
+    ENCHANTMENTS, ENERGY_RECIPES, ERAS, GENETIC_TRAITS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
+    MINE_FIELD, MINING_INFO, MOBS, QUESTS, RESOURCE_ICONS, RESOURCE_NAMES, RESOURCE_ORDER,
+    RESOURCE_STORAGE, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TOOLS, UI_SOUNDS,
 )
 from game.state import GameState  # noqa: E402
 
@@ -622,8 +623,8 @@ def tools_view(state: GameState) -> list[dict]:
     """Статус + цена открытия (разблокировки технологией) и улучшения КАЖДОГО
     инструмента из content.json["tools"] - было раньше жёстко про одну кирку
     (VIEW.pickaxe), теперь генерично для любого числа инструментов. Строго про
-    инструменты, БЕЗ добычи - активные жилы показываются только в Шахте
-    (categories.mining), по прямому пожеланию не дублировать это здесь.
+    инструменты, БЕЗ добычи - поле шахты показывается отдельным блоком
+    (mine_field), по прямому пожеланию не дублировать это здесь.
     next_tier_name/next_cost показываются, ПОКА ЕСТЬ следующий тир, даже если его
     ещё нельзя купить (не хватает технологии) - чтобы игрок видел, что дальше есть
     куда расти и чего это будет стоить, а не только то, что уже доступно прямо
@@ -702,6 +703,18 @@ def hunting_view(state: GameState) -> dict:
     return {
         "active_encounter": encounter, "mobs": entries, "combat_skill": combat_skill,
         "combat_moves": engine.combat_moves_view(state),
+        # HP игрока/дебафф "Ранен" - см. game/engine.py:current_player_hp/
+        # player_max_hp/is_wounded. wounded_turns_left - сколько ходов ЕЩЁ
+        # действует дебафф (0, если не ранен - is_wounded уже сам сверяет
+        # state.turn <= wounded_until_turn, тут просто разница для UI-текста).
+        "player_hp": engine.current_player_hp(state),
+        "player_max_hp": engine.player_max_hp(state),
+        "wounded": engine.is_wounded(state),
+        "wounded_turns_left": max(0, state.wounded_until_turn - state.turn) if state.wounded_until_turn is not None else 0,
+        # Для подсказки при наведении на бейдж "Ранен" (см. tools/web_ui.html:
+        # renderEncounterModalBody) - берём из content.json, а не хардкодим
+        # процент на клиенте, чтобы текст не разошёлся с балансом при правке.
+        "wounded_damage_multiplier": COMBAT_SETTINGS.get("wounded_damage_multiplier", 1.0),
     }
 
 
@@ -852,6 +865,23 @@ def autocraft_view(state: GameState) -> dict:
     }
 
 
+def active_research_view(state: GameState) -> dict | None:
+    """Данные для панели "Исследование" (state.active_research, см.
+    game/engine.py:research/_process_research) - резолвит имя технологии по id,
+    как manual_jobs_view резолвит имя действия. None, если сейчас ничего не
+    исследуется (или технология мгновенная - тир 1/без research_turns - и уже
+    завершилась в самом research())."""
+    job = state.active_research
+    if job is None:
+        return None
+    return {
+        "tech_id": job["tech_id"],
+        "name": TECHS[job["tech_id"]]["name"],
+        "turns_done": job["turns_done"],
+        "turns_total": job["turns_total"],
+    }
+
+
 def manual_jobs_view(state: GameState) -> list[dict]:
     """Данные для панели "Долгие действия" (manual_actions.*.duration_turns > 1,
     см. game/engine.py:_process_manual_jobs) - резолвит имя действия по id, как
@@ -887,6 +917,57 @@ def repair_blocked_view(state: GameState, building_id: str) -> list[dict]:
     return result
 
 
+def _condition_progress_text(condition: dict, state: GameState) -> str:
+    """Человекочитаемая строка "что сделать" + текущий прогресс для ОДНОГО
+    условия квеста (game/engine.py: _condition_met) - держать типы в паре с
+    ним и с tools/content_validation.py: CONDITION_FIELDS."""
+    kind = condition["type"]
+    amount = condition.get("amount")
+    if kind == "resource_at_least":
+        name = RESOURCE_NAMES.get(condition["resource"], condition["resource"])
+        current = state.resources.get(condition["resource"], 0)
+        return f"{name}: {current}/{amount}"
+    if kind == "building_count_at_least":
+        name = BUILDINGS.get(condition["building"], {}).get("name", condition["building"])
+        current = state.buildings.get(condition["building"], 0)
+        return f"Построить «{name}»: {current}/{amount}"
+    if kind == "total_buildings_at_least":
+        current = sum(state.buildings.values())
+        return f"Построек всего: {current}/{amount}"
+    if kind == "tech_researched":
+        name = TECHS.get(condition["tech"], {}).get("name", condition["tech"])
+        done = condition["tech"] in state.techs
+        return f"Исследовать «{name}»" + (" (готово)" if done else "")
+    if kind == "tech_count_at_least":
+        return f"Исследовано технологий: {len(state.techs)}/{amount}"
+    if kind == "all_techs_researched":
+        done = engine.all_techs_researched(state)
+        return "Исследовать все технологии" + (" (готово)" if done else "")
+    if kind == "turn_at_least":
+        return f"Дожить до хода {amount} (сейчас {state.turn})"
+    if kind == "tool_tier_at_least":
+        name = TOOLS.get(condition["tool"], {}).get("name", condition["tool"])
+        current = engine.tool_tier(state, condition["tool"])
+        return f"Тир «{name}»: {current}/{amount}"
+    if kind == "species_discovered_at_least":
+        return f"Открыто видов существ: {len(state.species_discovered)}/{amount}"
+    if kind == "species_discovered":
+        name = RESOURCE_NAMES.get(condition["species"], condition["species"])
+        done = condition["species"] in state.species_discovered
+        return f"Вывести/поймать «{name}»" + (" (готово)" if done else "")
+    if kind == "manual_action_performed_at_least":
+        name = MANUAL_ACTIONS.get(condition["action"], {}).get("name", condition["action"])
+        current = state.action_performed_count.get(condition["action"], 0)
+        return f"Выполнить «{name}»: {current}/{amount}"
+    if kind == "building_upgrade_purchased":
+        building_name = BUILDINGS.get(condition["building"], {}).get("name", condition["building"])
+        upgrade_defs = {u["id"]: u for u in BUILDINGS.get(condition["building"], {}).get("upgrades", [])}
+        upgrade_name = upgrade_defs.get(condition["upgrade"], {}).get("name", condition["upgrade"])
+        done = engine.is_building_upgrade_purchased(state, condition["building"], condition["upgrade"])
+        return f"Купить улучшение «{upgrade_name}» для «{building_name}»" + (" (готово)" if done else "")
+    return kind
+
+
 def build_view(state: GameState) -> dict:
     stock, gen, cons = engine.energy_breakdown(state)
     capacity = engine.energy_capacity(state)
@@ -903,6 +984,11 @@ def build_view(state: GameState) -> dict:
             "name": b["name"],
             "description": b.get("description", ""),
             "icon_label": b.get("icon_label") or b["name"][:2].upper(),
+            # Произвольные теги (buildings.*.tags, назначаются в редакторе
+            # контента) - НЕ хардкод, чисто для фильтра по типу постройки в
+            # панели "Производственные мощности" (см. web_ui.html: renderBuildings/
+            # buildingsTagFilter), движок их вообще не читает.
+            "tags": b.get("tags", []),
             "count": count,
             "max_count": b.get("max_count"),
             "broken": state.broken.get(bid, 0),
@@ -974,6 +1060,19 @@ def build_view(state: GameState) -> dict:
         scale_cap = engine.mechanism_scale_cap(building_id, state) if building_id else 1
         cost, gain = engine.effective_manual_action_stats(aid, state, chosen_scale=1)
         running_job = state.manual_jobs.get(aid)
+        # Другой многоходовой job, занявший ЭТУ ЖЕ локацию (см. do_manual_action,
+        # "Многоходовое ручное действие" в CLAUDE.md) - блокирует запуск ЭТОГО
+        # действия, даже если сам aid ещё ни разу не запускался. Сравнение по
+        # duration (не по одному только наличию duration_turns в контенте) - те же
+        # правила сокращения длительности (апгрейды), что и в do_manual_action, иначе
+        # карточка могла бы разойтись с реальным ответом сервера на клик.
+        blocked_by = None
+        if running_job is None and engine.manual_action_duration(aid, state) > 1:
+            location = action.get("location")
+            for other_id, other_job in state.manual_jobs.items():
+                if MANUAL_ACTIONS[other_id].get("location") == location:
+                    blocked_by = MANUAL_ACTIONS[other_id]["name"]
+                    break
         manual.append({
             "id": aid, "name": action["name"], "location": action.get("location"),
             "cost": manual_action_cost_list(cost, action.get("cost_chance", {}), state),
@@ -983,6 +1082,7 @@ def build_view(state: GameState) -> dict:
             "sound_url": sound_url(action.get("sound")),
             "duration_turns": action.get("duration_turns"),
             "already_running": running_job is not None,
+            "blocked_by": blocked_by,
             # Прогресс уже идущего job'а ПРЯМО на карточке действия (см. actionCard в
             # web_ui.html) - дублирует то, что уже есть в панели "Долгие действия"
             # (manual_jobs выше), т.к. панель не всегда на виду (действие может быть
@@ -1037,23 +1137,12 @@ def build_view(state: GameState) -> dict:
             "upgrades": None if BUILDINGS[bid].get("breeding_slots") else building_upgrades_view(bid, state),
         })
     tech = [
-        {"id": tid, "name": TECHS[tid]["name"], "cost": cost_list(TECHS[tid]["cost"], state)}
+        {
+            "id": tid, "name": TECHS[tid]["name"], "cost": cost_list(TECHS[tid]["cost"], state),
+            "research_turns": engine.tech_research_turns(tid, state),
+        }
         for tid in engine.available_techs(state)
     ]
-    mining = []
-    for rid, remaining in state.veins.items():
-        quality_tiers = MINING_INFO[rid].get("quality_tiers")
-        quality_index = state.vein_quality.get(rid)
-        quality = quality_tiers[quality_index] if quality_tiers and quality_index is not None else None
-        mining.append({
-            "kind": "mine", "resource_id": rid, "name": RESOURCE_NAMES[rid],
-            "remaining": remaining, "per_turn": engine.mining_yield_per_turn(rid, state),
-            "click_delay_ms": MINING_INFO[rid].get("click_delay_ms"),
-            "quality_name": quality["name"] if quality else None,
-            "quality_multiplier": quality["size_multiplier"] if quality else None,
-        })
-    mining.append({"kind": "search_any", "available": engine.can_search_for_vein(state)})
-
     converter = converter_view(state)
     tools = tools_view(state)
 
@@ -1077,6 +1166,7 @@ def build_view(state: GameState) -> dict:
             "cost": cost_list(t["cost"], state),
             "requires": t["requires"],
             "tier": t["tier"],
+            "research_turns": engine.tech_research_turns(tid, state),
             "lab_built": t["tier"] <= lab_tier_capacity,
             "status": status,
             "unlocks": {
@@ -1125,6 +1215,7 @@ def build_view(state: GameState) -> dict:
         "energy_priorities": energy_priority_view(state),
         "energy_jobs": energy_jobs_view(state),
         "manual_jobs": manual_jobs_view(state),
+        "active_research": active_research_view(state),
         "energy_converter_capacity": engine.energy_converter_capacity(state),
         "farms": farms_view(state),
         "creature_bank": creature_bank_view(state),
@@ -1146,11 +1237,11 @@ def build_view(state: GameState) -> dict:
         "storage": storage_view(state),
         "techs_researched": len(state.techs),
         "techs_total": len(TECHS),
-        "all_researched": engine.all_techs_researched(state),
         "categories": {
             "manual": manual, "build": build, "tech": tech,
-            "mining": mining, "converter": converter,
+            "converter": converter,
         },
+        "mine_field": engine.mine_field_view(state),
         "tech_tree": tech_tree,
         "icons": {
             "resources": RESOURCE_ICONS,
@@ -1160,14 +1251,25 @@ def build_view(state: GameState) -> dict:
                 for tool_id, tool in TOOLS.items()
             },
             "mobs": {mid: m["icon"] for mid, m in MOBS.items() if m.get("icon")},
+            # Иконка ЖИЛЫ на поле шахты - НЕЗАВИСИМА от icons.resources того же id
+            # (добытый ресурс может выглядеть иначе, чем сама жила в забое), см.
+            # mining_info.*.icon. Отсутствует по умолчанию - клиент сам откатывается
+            # на resourceIcon(rid), см. web_ui.html: veinIcon().
+            "mining_veins": {rid: info["icon"] for rid, info in MINING_INFO.items() if info.get("icon")},
         },
+        "eras": ERAS,
         "quests": [
             {
                 "id": qid,
                 "name": q["name"],
                 "description": q["description"],
                 "era": q["era"],
+                "icon": q.get("icon"),
+                "bg": q.get("bg"),
+                "border": q.get("border"),
+                "tooltip_color": q.get("tooltip_color"),
                 "requires": q.get("requires", []),
+                "conditions": [_condition_progress_text(c, state) for c in q.get("conditions", [])],
                 # Тот же принцип status, что у tech_tree ниже (researched/available/
                 # locked) - только 4 состояния вместо 3, потому что у квеста есть
                 # ещё "награда не забрана" ПОСЛЕ выполнения (claimed/completed), а у
@@ -1214,10 +1316,6 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
         return engine.repair(state, action_id)
     if action_type == "repair_tool":
         return engine.repair_tool(state, action_id)
-    if action_type == "mining_search":
-        return engine.search_vein_any(state)
-    if action_type == "mining_mine":
-        return engine.mine_vein(state, action_id)
     if action_type == "hunt_search":
         # action_id - id локации-"Охоты" (mobs.*.location) - несколько таких
         # локаций могут существовать одновременно, в отличие от единственной шахты.
@@ -1576,6 +1674,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = engine.cancel_energy_job(STATE, payload.get("index"))
             elif kind == "manual":
                 result = engine.cancel_manual_job(STATE, payload.get("action_id"))
+            elif kind == "research":
+                result = engine.cancel_research(STATE)
             else:
                 self._json(400, {"error": "неизвестный тип задачи"})
                 return
@@ -1596,6 +1696,24 @@ class Handler(BaseHTTPRequestHandler):
             # Добровольный отказ от текущей цели - как toggle_pin/cancel_job, НЕ
             # тратит ход (см. engine.abandon_encounter).
             result = engine.abandon_encounter(STATE)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/mining_new_field":
+            # "Обновить шахту" - как hunt_abandon/insert_soul, НЕ тратит ход
+            # (см. engine.new_mine_field) - клики по полю шахты вообще не должны
+            # двигать игровые часы, иначе исследование тумана съедало бы десятки
+            # ходов за одно посещение шахты.
+            result = engine.new_mine_field(STATE)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/mining_hit_cell":
+            try:
+                r = int(payload.get("r"))
+                c = int(payload.get("c"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "r и c должны быть целыми числами"})
+                return
+            result = engine.hit_mine_field(STATE, r, c)
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/insert_soul":
@@ -1731,6 +1849,17 @@ class _SingleInstanceHTTPServer(HTTPServer):
     allow_reuse_address = False
 
 
+class _ThreadedTestHTTPServer(ThreadingMixIn, _SingleInstanceHTTPServer):
+    # ТОЛЬКО для --server-only (автотесты). Обычный клиент - одна вкладка
+    # pywebview, которая шлёт запросы по одному; Playwright же держит несколько
+    # параллельных соединений разом (heartbeat-таймер + сам запрос действия +
+    # статика) - однопоточный HTTPServer их сериализует и на этом ощутимо
+    # стопорится. В штатном режиме (реальный игрок) НЕ используется намеренно:
+    # мутация STATE в обработчиках не потокобезопасна, а один игрок и так не
+    # шлёт запросы параллельно сам себе.
+    daemon_threads = True
+
+
 def _serve(server: HTTPServer) -> None:
     try:
         server.serve_forever()
@@ -1740,8 +1869,10 @@ def _serve(server: HTTPServer) -> None:
 
 def main() -> None:
     url = f"http://127.0.0.1:{PORT}/"
+    server_only = "--server-only" in sys.argv
+    server_cls = _ThreadedTestHTTPServer if server_only else _SingleInstanceHTTPServer
     try:
-        server = _SingleInstanceHTTPServer(("127.0.0.1", PORT), Handler)
+        server = server_cls(("127.0.0.1", PORT), Handler)
     except OSError:
         _show_error(
             f"Не получилось занять порт {PORT} - возможно, игра уже открыта в другом окне.\n"
@@ -1750,15 +1881,27 @@ def main() -> None:
         return
 
     print(f"Игра запущена: {url}")
-    print("Закрой окно игры, когда закончишь - прогресс уже сохранён в save.json.")
     global _last_heartbeat
     with _heartbeat_lock:
         _last_heartbeat = time.monotonic()
+    threading.Thread(target=_watchdog, args=(server,), daemon=True).start()
+
+    if server_only:
+        # Без нативного окна pywebview - для автотестов (Playwright и т.п.),
+        # которые подключаются своим браузером к тому же серверу. Открывать
+        # ЕЩЁ и pywebview-окно поверх этого бессмысленно (playwright всё равно
+        # не умеет им управлять) и просто удваивает время старта - see CLAUDE.md.
+        print("Режим без окна: подключайся сам (напр. Playwright) к адресу выше.")
+        print("Сервер сам остановится через 45с без heartbeat (см. _watchdog).")
+        _serve(server)
+        print("Остановлено.")
+        return
+
+    print("Закрой окно игры, когда закончишь - прогресс уже сохранён в save.json.")
     # serve_forever() уходит в фоновый поток - webview.start() ниже занимает
     # главный поток сам (нативный GUI-цикл окна обязан работать в главном
     # потоке, иначе пустой экран/падение на некоторых бэкендах Windows).
     threading.Thread(target=_serve, args=(server,), daemon=True).start()
-    threading.Thread(target=_watchdog, args=(server,), daemon=True).start()
 
     webview.create_window(
         "Майнкрафт на минималках", url, width=1280, height=800, min_size=(1024, 700), maximized=True

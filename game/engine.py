@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import math
 import random
+from collections import Counter
 from dataclasses import dataclass, field
 
 from .content import (
-    BREAKDOWN_TYPES, BUILDINGS, COMBAT_MOVES, ENERGY_RECIPES, GENETIC_TRAITS,
-    GENETICS_SETTINGS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS, MINING_INFO, MOBS,
-    MUTATIONS, QUESTS, RESOURCE_FRACTIONAL, RESOURCE_NAMES, RESOURCE_SOUL_KIND,
-    RESOURCE_STORAGE, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TIME, TOOLS,
+    BREAKDOWN_TYPES, BUILDINGS, COMBAT_MOVES, COMBAT_SETTINGS, ENCHANTMENTS, ENERGY_RECIPES,
+    GENETIC_TRAITS, GENETICS_SETTINGS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
+    MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, RESOURCE_FRACTIONAL, RESOURCE_NAMES,
+    RESOURCE_SOUL_KIND, RESOURCE_STORAGE, SKILLS, SOUL_RECIPES, SPECIES, TECHS,
+    TIME, TOOLS,
 )
 from .state import HISTORY_MAX_ENTRIES, GameState
 
@@ -229,7 +231,8 @@ def _roll_range_amounts(amounts: dict[str, int | float | dict]) -> dict[str, int
 # Действия с duration_turns > 1 (см. state.manual_jobs/_process_manual_jobs) тоже
 # исключены - их "прокрутка" физически растянута на несколько ходов и не укладывается
 # в бухгалтерию fires/autocraft_speed_capacity (рассчитанную на мгновенный результат
-# каждой попытки), а на action_id уже и так допустима только ОДНА активная задача.
+# каждой попытки), а в одной локации уже и так допустима только ОДНА активная
+# многоходовая задача (см. do_manual_action).
 # manual_actions.*.excluded_from_autocraft: true - явный ручной запрет автору контента,
 # НЕ связанный с детерминизмом/длительностью выше: действие может быть полностью
 # гарантированным и мгновенным и всё равно не годиться для автокрафта (например, "убить
@@ -354,6 +357,11 @@ class ActionResult:
     # принцип, что prize: сообщение message уже содержит то же самое текстом,
     # но фронтенду нужны отдельные машиночитаемые числа, а не парсинг строки.
     combat: dict | None = None
+    # Результат попытки зачарования (enchant_tool) - {"tool_id", "circles": [{"enchant_id",
+    # "level"}, x3], "success", "applied": {"enchant_id","level"} | None} или None у ЛЮБОГО
+    # другого действия. Сервер решает исход СРАЗУ (тот же принцип, что prize/_roll_loot_case_prize) -
+    # UI анимирует раскрытие трёх кругов до уже готового результата, не подделывая его сам.
+    enchant: dict | None = None
 
 
 @dataclass
@@ -1384,8 +1392,7 @@ def effective_manual_action_stats(
     нет). gain может содержать диапазон {"min","max"} (см.
     effective_building_stats) - роняет бросок на do_manual_action, не сюда, по
     той же причине. tool_scaling - необязательное generic-поле {"tool": id}
-    (см. CLAUDE.md): домножает ТОЛЬКО gain (cost не трогает, по аналогии с тем,
-    как тир инструмента в шахте домножает base_yield, а не cost добычи) на
+    (см. CLAUDE.md): домножает ТОЛЬКО gain (cost не трогает) на
     ТЕКУЩИЙ тир указанного инструмента (tool_tier, дефолт тира без инструмента
     = 1, то есть без какого-либо инструмента множитель нейтрален) - применяется
     ДО апгрейдов постройки, но т.к. оба шага чисто мультипликативные, порядок
@@ -1696,113 +1703,374 @@ def tech_unlocks(tech_id: str) -> dict[str, list[str]]:
     }
 
 
-def is_mining_unlocked(resource_id: str, state: GameState) -> bool:
-    info = MINING_INFO[resource_id]
-    if info["requires_tech"] and info["requires_tech"] not in state.techs:
-        return False
-    # Добыча руды сознательно НЕ переведена на requires_tool_tiers (галочки на
-    # конкретные тиры) - по смыслу это как было, порог "начиная с тира N", просто
-    # теперь ссылается на инструмент по id (required_tool), а не жёстко на кирку.
-    return tool_tier(state, info["required_tool"]) >= info["required_tier"]
+def _mining_researched(resource_id: str, state: GameState) -> bool:
+    """Гейт СПАВНА руды на поле шахты - только технология. Тир инструмента
+    решает не появление руды на поле, а возможность её сломать (см.
+    hit_mine_field) - недоступная по тиру руда всё равно видна на поле (с
+    замочком), просто не поддаётся удару, пока кирка не подрастёт."""
+    requires_tech = MINING_INFO[resource_id]["requires_tech"]
+    return not requires_tech or requires_tech in state.techs
 
 
-def available_mining(state: GameState) -> list[str]:
-    return [r for r in MINING_INFO if is_mining_unlocked(r, state)]
+def _researched_ores(state: GameState) -> list[str]:
+    return [rid for rid in MINING_INFO if _mining_researched(rid, state)]
 
 
-def mining_yield_per_turn(resource_id: str, state: GameState) -> int:
-    """Скорость добычи руды из активной жилы за один клик - зависит ТОЛЬКО от
-    тира требуемого инструмента (в будущем сюда может добавиться навык копания).
-    Качество жилы на скорость НЕ влияет - оно домножает только итоговый размер
-    жилы в момент находки, см. _pick_vein_quality_tier/search_vein_any."""
-    info = MINING_INFO[resource_id]
-    tier_bonus = tool_tier(state, info["required_tool"]) - info["required_tier"] + 1
-    return info["base_yield"] * max(1, tier_bonus)
+def mine_field_size() -> int:
+    return MINE_FIELD["size"]
 
 
-def _pick_vein_quality_tier(resource_id: str, state: GameState) -> int | None:
-    """Взвешенно выбирает индекс тира качества для только что найденной жилы
-    resource_id - НЕ ту же кандидатскую формулу, что у выбора самой руды (там
-    rarity, тут явный weight), но тот же инструмент random.choices. В пул попадают
-    только тиры, чей min_tool_tier не выше ТЕКУЩЕГО тира требуемого инструмента -
-    чем лучше инструмент, тем больше хороших тиров качества участвует в розыгрыше
-    (и тем выше их относительный вес после нормализации). Возвращает None, если у
-    ресурса вообще нет quality_tiers - тогда search_vein_any не трогает базовый
-    случайный размер жилы (множитель 1, старое поведение)."""
-    quality_tiers = MINING_INFO[resource_id].get("quality_tiers")
-    if not quality_tiers:
-        return None
-    current_tier = tool_tier(state, MINING_INFO[resource_id]["required_tool"])
-    eligible = [
-        (i, q) for i, q in enumerate(quality_tiers) if current_tier >= q.get("min_tool_tier", 1)
-    ]
-    if not eligible:
-        # Защитный случай (не должен наступать при валидном контенте - валидатор
-        # требует хотя бы один тир с min_tool_tier <= required_tier) - берём первый
-        # тир списка, чтобы не падать.
-        eligible = [(0, quality_tiers[0])]
-    weights = [q["weight"] for _, q in eligible]
-    chosen_index, _ = random.choices(eligible, weights=weights, k=1)[0]
-    return chosen_index
+def _dig_tool_id() -> str:
+    return MINE_FIELD["dig_tool"]
 
 
-def can_search_for_vein(state: GameState) -> bool:
-    return bool(available_mining(state))
+def pickaxe_area(state: GameState) -> int:
+    """Сторона N x N зоны удара - тир инструмента MINE_FIELD['dig_tool']."""
+    tool_id = _dig_tool_id()
+    tier = tool_tier(state, tool_id)
+    return TOOLS[tool_id]["tiers"][tier - 1].get("mining_area", 1)
 
 
-def search_vein_any(state: GameState) -> ActionResult:
-    """Единая кнопка поиска жилы в шахте. Активна ВСЕГДА только одна жила: новый
-    поиск полностью заменяет предыдущую находку (даже неисчерпанную) - предыдущая
-    жила просто теряется, если её не докопали. Шанс на каждую руду (по rarity, чем
-    МЕНЬШЕ rarity - тем чаще) считается заново из ВСЕХ разведанных руд (доступных
-    текущим тиром нужного инструмента и технологией) при КАЖДОМ поиске, включая те, что уже
-    находились раньше - поиск может повторно найти тот же ресурс сколько угодно
-    раз подряд. Это осознанно: если бы уже найденные руды исключались из выбора
-    (как раньше), редкая руда гарантированно находилась бы, как только все более
-    частые руды уже были найдены хотя бы по разу - шанс наткнуться на неё должен
-    оставаться прежним при любом отдельном поиске, а не расти по мере "исчерпания"
-    остальных вариантов. Качество жилы (если у руды заданы quality_tiers)
-    домножает БАЗОВЫЙ случайный запас (size_multiplier, округление вверх - руда
-    целочисленный ресурс) - на скорость добычи за ход качество не влияет,
-    только на итоговый запас."""
-    candidates = available_mining(state)
-    if not candidates:
-        return ActionResult(False, "Искать пока нечего: ни одна руда ещё не разведана.")
-    weights = [1 / MINING_INFO[rid]["rarity"] for rid in candidates]
-    resource_id = random.choices(candidates, weights=weights, k=1)[0]
-    size = random.randint(*MINING_INFO[resource_id]["vein_size_range"])
-    quality_index = _pick_vein_quality_tier(resource_id, state)
-    if quality_index is None:
-        state.veins = {resource_id: size}
-        state.vein_quality = {}
-        return ActionResult(True, f"Найдена жила: {RESOURCE_NAMES[resource_id]} (запас: {size}).")
-    quality_tiers = MINING_INFO[resource_id]["quality_tiers"]
-    size = math.ceil(size * quality_tiers[quality_index]["size_multiplier"])
-    state.veins = {resource_id: size}
-    state.vein_quality = {resource_id: quality_index}
-    quality_name = quality_tiers[quality_index]["name"]
-    return ActionResult(
-        True, f"Найдена жила: {RESOURCE_NAMES[resource_id]} ({quality_name}, запас: {size})."
+def pickaxe_power(state: GameState) -> int:
+    """Урон по прочности клетки за один удар - тот же тир, что и pickaxe_area."""
+    tool_id = _dig_tool_id()
+    tier = tool_tier(state, tool_id)
+    return TOOLS[tool_id]["tiers"][tier - 1].get("mining_power", 1)
+
+
+def _mine_field_idx(size: int, r: int, c: int) -> int:
+    return r * size + c
+
+
+def _mine_field_neighbors(size: int, r: int, c: int, *, orthogonal_only: bool) -> list[tuple[int, int]]:
+    deltas = (
+        [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        if orthogonal_only
+        else [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
+    )
+    out = []
+    for dr, dc in deltas:
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < size and 0 <= nc < size:
+            out.append((nr, nc))
+    return out
+
+
+def _reveal_around(field: dict, r: int, c: int) -> None:
+    """Открывает клетку (r, c) и радиус 1 (все 8 соседей) вокруг неё - именно
+    так поле "рассеивает туман" вокруг каждой сломанной клетки."""
+    size = field["size"]
+    cells = field["cells"]
+    cells[_mine_field_idx(size, r, c)]["revealed"] = True
+    for nr, nc in _mine_field_neighbors(size, r, c, orthogonal_only=False):
+        cells[_mine_field_idx(size, nr, nc)]["revealed"] = True
+
+
+def _has_orthogonal_broken_neighbor(field: dict, r: int, c: int) -> bool:
+    """Ортогональная (НЕ диагональная) смежность со сломанной клеткой - именно
+    она решает, можно ли ЛОМАТЬ клетку (r, c) в одиночку. Диагональный сосед
+    сломанной клетки при этом уже ВИДЕН (см. _reveal_around, радиус 8-связный),
+    просто не ломается сам по себе, пока к нему не подойти сбоку."""
+    size = field["size"]
+    cells = field["cells"]
+    return any(
+        cells[_mine_field_idx(size, nr, nc)]["broken"]
+        for nr, nc in _mine_field_neighbors(size, r, c, orthogonal_only=True)
     )
 
 
-def mine_vein(state: GameState, resource_id: str) -> ActionResult:
-    if not is_mining_unlocked(resource_id, state):
-        return ActionResult(False, "Для этого ресурса ещё не хватает технологии или инструмента нужного тира.")
-    remaining = state.veins.get(resource_id)
-    if remaining is None:
-        return ActionResult(False, "Сначала нужно найти жилу.")
-    name = RESOURCE_NAMES[resource_id]
-    extracted = min(remaining, mining_yield_per_turn(resource_id, state))
-    _add_resource(state.resources, resource_id, extracted)
-    remaining -= extracted
-    if remaining <= 0:
-        del state.veins[resource_id]
-        note = " Жила истощена, нужно искать новую."
-    else:
-        state.veins[resource_id] = remaining
-        note = f" (осталось в жиле: {remaining})"
-    return ActionResult(True, f"Добыто: +{extracted} {name}.{note}")
+def _roll_field_cluster_counts(state: GameState) -> dict[str, int]:
+    """Состав поля - взвешенная лотерея, а не гарантированный спавн ВСЕХ
+    исследованных видов. cluster_budget (общий на всё поле, не растёт с числом
+    видов руды) разыгрывается между исследованными видами С ПОВТОРАМИ, вес
+    каждого - 1/rarity (та же семантика rarity, что раньше: чем больше число,
+    тем реже руда). Сколько раз вид выпал в бюджете - столько у него кластеров
+    на этом поле; вид, которому ни разу не повезло, в этот раз просто не
+    заспавнится вовсе - именно этого и не хватало (при большом числе видов
+    руды старая формула гарантировала минимум 1 кластер КАЖДОМУ, что не
+    масштабируется и убивает азарт "что тут вообще есть")."""
+    researched = _researched_ores(state)
+    if not researched:
+        return {}
+    weights = [1 / MINING_INFO[rid]["rarity"] for rid in researched]
+    picks = random.choices(researched, weights=weights, k=MINE_FIELD["cluster_budget"])
+    return dict(Counter(picks))
+
+
+def _generate_mine_field(state: GameState) -> dict:
+    """Новое поле шахты: вся сетка - порода, центр уже пройден (игрок как бы
+    появляется там). Состав руды решает _roll_field_cluster_counts (см. её
+    докстринг) - тирный гейт кирки тут ни при чём (см. hit_mine_field), спавн
+    зависит только от requires_tech (см. _researched_ores) и результата
+    лотереи. Каждый доставшийся кластер кладётся случайным блужданием по
+    свободным клеткам, размер - field_cluster_size (min-max клеток)."""
+    size = mine_field_size()
+    # variant_count - чисто косметический разброс внешнего вида ПОРОДЫ (не руды):
+    # rock_icon + rock_icon_variants образуют общий пул спрайтов, index в него
+    # кладётся один раз при генерации клетки и просто ездит с ней (см.
+    # mine_field_view/web_ui.html: mineFieldCellEl) - никакого влияния на геймплей,
+    # только чтобы поле не выглядело одним и тем же тайлом 400 раз подряд.
+    variant_count = 1 + len(MINE_FIELD.get("rock_icon_variants", []))
+    cells = [
+        {
+            "resource": None,
+            "hp": MINE_FIELD["rock_toughness"],
+            "hp_max": MINE_FIELD["rock_toughness"],
+            "broken": False,
+            "revealed": False,
+            "icon_variant": random.randrange(variant_count),
+        }
+        for _ in range(size * size)
+    ]
+    center = size // 2
+    center_idx = _mine_field_idx(size, center, center)
+
+    def free_orthogonal_neighbors(r: int, c: int) -> list[tuple[int, int]]:
+        return [
+            (nr, nc)
+            for nr, nc in _mine_field_neighbors(size, r, c, orthogonal_only=True)
+            if cells[_mine_field_idx(size, nr, nc)]["resource"] is None and _mine_field_idx(size, nr, nc) != center_idx
+        ]
+
+    for resource_id, cluster_count in _roll_field_cluster_counts(state).items():
+        info = MINING_INFO[resource_id]
+        cluster_min, cluster_max = info["field_cluster_size"]
+        for _ in range(cluster_count):
+            free_cells = [
+                (r, c)
+                for r in range(size)
+                for c in range(size)
+                if cells[_mine_field_idx(size, r, c)]["resource"] is None and _mine_field_idx(size, r, c) != center_idx
+            ]
+            if not free_cells:
+                break
+            start = random.choice(free_cells)
+            target_size = random.randint(cluster_min, cluster_max)
+            visited = [start]
+            cells[_mine_field_idx(size, *start)]["resource"] = resource_id
+            frontier = start
+            for _ in range(target_size - 1):
+                options = free_orthogonal_neighbors(*frontier)
+                if not options:
+                    found = False
+                    for prior in reversed(visited):
+                        options = free_orthogonal_neighbors(*prior)
+                        if options:
+                            frontier = prior
+                            found = True
+                            break
+                    if not found:
+                        break
+                nxt = random.choice(options)
+                cells[_mine_field_idx(size, *nxt)]["resource"] = resource_id
+                visited.append(nxt)
+                frontier = nxt
+            for (r, c) in visited:
+                cell = cells[_mine_field_idx(size, r, c)]
+                cell["hp"] = info["toughness"]
+                cell["hp_max"] = info["toughness"]
+
+    cells[center_idx]["broken"] = True
+    cells[center_idx]["hp"] = 0
+    field = {"size": size, "cells": cells}
+    _reveal_around(field, center, center)
+    return field
+
+
+def _ensure_mine_field(state: GameState) -> dict:
+    """Идемпотентно заводит поле при первом обращении - тот же приём, что
+    _ensure_farm_instances, только тут слот один на всю игру (как active_encounter),
+    а не словарь экземпляров."""
+    if state.active_mine_field is None:
+        state.active_mine_field = _generate_mine_field(state)
+    return state.active_mine_field
+
+
+def new_mine_field(state: GameState) -> ActionResult:
+    """"Обновить шахту" - полностью выбрасывает текущее поле (недокопанный
+    остаток теряется без возврата) и генерирует новое. Как и весь этот блок -
+    обычный клик без хода, ничего не стоит (по образцу insert_soul)."""
+    state.active_mine_field = _generate_mine_field(state)
+    return ActionResult(True, "Заложен новый забой.")
+
+
+def _mine_field_area_coords(field: dict, area: int, r: int, c: int) -> list[tuple[int, int]]:
+    size = field["size"]
+    offset = (area - 1) // 2
+    coords = []
+    for rr in range(r - offset, r - offset + area):
+        for cc in range(c - offset, c - offset + area):
+            if 0 <= rr < size and 0 <= cc < size:
+                coords.append((rr, cc))
+    return coords
+
+
+def hit_mine_field(state: GameState, r: int, c: int) -> ActionResult:
+    """Один удар киркой, нацеленный на клетку (r, c) - реально задевает всю
+    площадь N x N вокруг неё (pickaxe_area), а не только саму клетку. Область
+    ломается ЦЕЛИКОМ, если хотя бы одна её клетка уже сломана или ортогонально
+    граничит со сломанной (_has_orthogonal_broken_neighbor) - то есть можно
+    "нырнуть" целым блоком в туман, если этот блок хоть где-то касается уже
+    пройденного, а не обязательно бить строго по одной клетке за раз. Если
+    область вообще не достижима - клик ничего не делает (ActionResult(False)).
+
+    Руда не по тиру кирки (required_tier выше текущего) НЕ ломается, но всё
+    равно открывается (видна дальше, с замочком в mine_field_view) - это
+    единственная защита от порчи недоступной руды широким ударом: если бы
+    клетка портилась без выдачи ресурса, широкая кирка могла бы уничтожать
+    ещё не открытую редкую руду впустую.
+
+    Прочность кирки (см. tool_is_broken/_consume_tool_durability) тратится
+    РОВНО ОДИН РАЗ ЗА УДАР (за сам клик), а не за каждый сломанный этим ударом
+    блок - кирка с площадью N x N (pickaxe_area) изнашивается МЕДЛЕННЕЕ в
+    пересчёте на блок, чем кирка с площадью 1x1, это и есть часть награды за
+    её прокачку (прямое пожелание, 2026-09-16). Сломанная кирка не бьёт вовсе -
+    удар отклоняется ДО того, как что-либо потрачено/сломано."""
+    field = _ensure_mine_field(state)
+    size = field["size"]
+    if not (0 <= r < size and 0 <= c < size):
+        return ActionResult(False, "Клетка вне поля.")
+
+    dig_tool_id = _dig_tool_id()
+    if tool_is_broken(state, dig_tool_id):
+        return ActionResult(False, f"«{TOOLS[dig_tool_id]['name']}» сломана - нужно сначала её починить.")
+
+    area = pickaxe_area(state)
+    coords = _mine_field_area_coords(field, area, r, c)
+    reachable = any(
+        field["cells"][_mine_field_idx(size, rr, cc)]["broken"] or _has_orthogonal_broken_neighbor(field, rr, cc)
+        for rr, cc in coords
+    )
+    if not reachable:
+        return ActionResult(False, "Слишком глубоко в тумане - нужно сначала прорубиться ближе.")
+
+    _consume_tool_durability(state, dig_tool_id)
+    luck = _enchant_effect_value(state, dig_tool_id, "yield_multiplier", 1.0)
+    power = pickaxe_power(state)
+    gained: dict[str, int] = {}
+    any_locked = False
+    for rr, cc in coords:
+        cell = field["cells"][_mine_field_idx(size, rr, cc)]
+        if cell["broken"]:
+            continue
+        resource_id = cell["resource"]
+        if resource_id is not None:
+            info = MINING_INFO[resource_id]
+            if tool_tier(state, info["required_tool"]) < info["required_tier"]:
+                cell["revealed"] = True
+                any_locked = True
+                continue
+        cell["revealed"] = True
+        cell["hp"] -= power
+        if cell["hp"] <= 0:
+            cell["broken"] = True
+            _reveal_around(field, rr, cc)
+            if resource_id is not None:
+                info = MINING_INFO[resource_id]
+                # Тир кирки решает ТОЛЬКО площадь/урон удара (pickaxe_area/
+                # _power) и порог доступности клетки (required_tier выше) -
+                # выход с клетки НЕ масштабируется тиром, всегда ровно
+                # base_yield * зачарование "Удача" (округление вверх, как и
+                # везде у целочисленных ресурсов). Раньше домножался на
+                # (tool_tier - required_tier + 1) - убрано по прямому
+                # пожеланию, 2026-09-16: "1 клетка должна давать 1 порцию
+                # руды, а не расти с прокачкой кирки".
+                gained[resource_id] = gained.get(resource_id, 0) + math.ceil(info["base_yield"] * luck)
+            else:
+                rock_id = MINE_FIELD["rock_resource"]
+                gained[rock_id] = gained.get(rock_id, 0) + MINE_FIELD["rock_yield"]
+
+    for resource_id, amount in gained.items():
+        _add_resource(state.resources, resource_id, amount)
+
+    if not gained:
+        message = "Тут пока не по зубам этой кирке." if any_locked else "Порода устояла."
+        return ActionResult(True, message)
+    parts = ", ".join(f"+{amount} {RESOURCE_NAMES[rid]}" for rid, amount in gained.items())
+    return ActionResult(True, f"Добыто: {parts}.")
+
+
+def scanner_tier(state: GameState) -> int:
+    return tool_tier(state, MINE_FIELD["scanner_tool"])
+
+
+def mine_field_view(state: GameState) -> dict:
+    """Сериализуемый вид поля шахты для UI: по клетке - либо просто "в тумане",
+    либо {broken, damage_fraction?, resource?, locked?}, плюс текущие
+    характеристики кирки и справочник всех видов добычи (для модалки-
+    справочника руд, независимо от того, что сейчас реально на поле).
+
+    Щуп (mine_field.scanner_tool) - ЧИСТО ИНФОРМАЦИОННЫЙ инструмент, три
+    независимых порога тира на три уровня детализации (сам тир 1, дефолтный
+    для всех, ничего не даёт - см. CLAUDE.md про тир 1 = "не откалиброван"):
+      >= scanner_types_tier       - какие виды руды вообще есть на поле (без
+                                     повторов, catalog[].present_on_field)
+      >= scanner_counts_tier      - сколько именно КЛЕТОК этой руды на поле
+                                     (catalog[].field_count) - только руда,
+                                     порода (rock_resource) сюда не входит по
+                                     прямому пожеланию, 2026-09-16
+      >= scanner_reveal_all_tier  - клетки руды видны ДАЖЕ в тумане
+                                     (cells[].sensed_resource) - подсказка "где
+                                     копать", сама клетка при этом остаётся
+                                     нетронутой fog-of-war логикой (revealed
+                                     всё ещё False, ломать нельзя, пока не
+                                     дойдёшь обычным путём)."""
+    field = _ensure_mine_field(state)
+    tier = scanner_tier(state)
+    reveal_all = tier >= MINE_FIELD["scanner_reveal_all_tier"]
+    cells_view = []
+    for cell in field["cells"]:
+        if not cell["revealed"]:
+            entry: dict = {"revealed": False}
+            if reveal_all and cell["resource"] is not None:
+                entry["sensed_resource"] = cell["resource"]
+            cells_view.append(entry)
+            continue
+        entry = {"revealed": True, "broken": cell["broken"]}
+        if not cell["broken"] and cell["hp"] < cell["hp_max"]:
+            entry["damage_fraction"] = 1 - cell["hp"] / cell["hp_max"]
+        if cell["resource"] is not None and not cell["broken"]:
+            info = MINING_INFO[cell["resource"]]
+            entry["resource"] = cell["resource"]
+            entry["locked"] = tool_tier(state, info["required_tool"]) < info["required_tier"]
+        elif not cell["broken"]:
+            entry["icon_variant"] = cell.get("icon_variant", 0)
+        cells_view.append(entry)
+
+    show_types = tier >= MINE_FIELD["scanner_types_tier"]
+    show_counts = tier >= MINE_FIELD["scanner_counts_tier"]
+    field_counts: dict[str, int] = {}
+    if show_types:
+        for cell in field["cells"]:
+            if cell["resource"] is not None:
+                field_counts[cell["resource"]] = field_counts.get(cell["resource"], 0) + 1
+    catalog = []
+    for rid, info in MINING_INFO.items():
+        entry = {
+            "id": rid,
+            "name": RESOURCE_NAMES[rid],
+            "required_tier": info["required_tier"],
+            "rarity": info["rarity"],
+            "field_cluster_size": info["field_cluster_size"],
+            "researched": _mining_researched(rid, state),
+        }
+        if show_types:
+            entry["present_on_field"] = rid in field_counts
+        if show_counts:
+            entry["field_count"] = field_counts.get(rid, 0)
+        catalog.append(entry)
+
+    return {
+        "size": field["size"],
+        "cells": cells_view,
+        "pickaxe": {"tier": tool_tier(state, _dig_tool_id()), "area": pickaxe_area(state), "power": pickaxe_power(state)},
+        "scanner_tier": tier,
+        "ore_catalog": catalog,
+        "rock_resource": MINE_FIELD["rock_resource"],
+        "rock_icon": MINE_FIELD.get("rock_icon"),
+        "rock_icons": [MINE_FIELD.get("rock_icon")] + list(MINE_FIELD.get("rock_icon_variants", [])),
+        "rock_broken_icon": MINE_FIELD.get("rock_broken_icon"),
+    }
 
 
 def tool_tier(state: GameState, tool_id: str) -> int:
@@ -1860,11 +2128,16 @@ def _current_tool_tier_def(state: GameState, tool_id: str) -> dict:
 def tool_durability_remaining(state: GameState, tool_id: str) -> int | None:
     """Остаток прочности инструмента на ТЕКУЩЕМ тире - None, если у тира вовсе
     нет max_durability (инструмент не изнашивается, как топор/кирка/меч без
-    этого поля). См. content.json tools.*.tiers[].max_durability."""
+    этого поля). См. content.json tools.*.tiers[].max_durability. Зачарование
+    "Прочность" (effect.type == durability_multiplier, универсальное - см.
+    enchantment_pool) домножает МАКСИМУМ - уже потраченный остаток (state.
+    tool_durability, если он есть) не пересчитывается задним числом, растёт
+    только "потолок" для следующего полного ремонта/дефолта."""
     max_durability = _current_tool_tier_def(state, tool_id).get("max_durability")
     if max_durability is None:
         return None
-    return state.tool_durability.get(tool_id, max_durability)
+    effective_max = math.ceil(max_durability * _enchant_effect_value(state, tool_id, "durability_multiplier", 1.0))
+    return state.tool_durability.get(tool_id, effective_max)
 
 
 def tool_is_broken(state: GameState, tool_id: str) -> bool:
@@ -1904,6 +2177,135 @@ def repair_tool(state: GameState, tool_id: str) -> ActionResult:
         return deferred
     state.tool_durability.pop(tool_id, None)
     return ActionResult(True, f"«{tool_name}» отремонтирован.")
+
+
+def tool_enchant_level(state: GameState, tool_id: str, enchant_id: str) -> int:
+    """Текущий уровень зачарования enchant_id на ЭТОЙ линейке инструмента - 0,
+    если оно не применено (см. state.tool_enchantments/enchant_tool)."""
+    return state.tool_enchantments.get(tool_id, {}).get(enchant_id, 0)
+
+
+def _enchant_effect_value(state: GameState, tool_id: str, effect_type: str, default: float) -> float:
+    """Значение эффекта effect_type, действующее на tool_id ПРЯМО СЕЙЧАС - максимум
+    среди применённых зачарований этого инструмента, чей content.json enchantments.*.
+    effect.type совпадает (обычно ровно одно совпадение, т.к. каждый effect.type
+    закреплён за одним зачарованием, но код не полагается на это специально - тот
+    же принцип "сильнейшее побеждает", что у building upgrades), иначе default
+    (нейтральное значение для этого эффекта - 1.0 для множителей, 0 для добавок)."""
+    best = None
+    for enchant_id, level in state.tool_enchantments.get(tool_id, {}).items():
+        enchant = ENCHANTMENTS.get(enchant_id)
+        if not enchant or enchant.get("effect", {}).get("type") != effect_type:
+            continue
+        levels = enchant.get("levels", [])
+        if not (1 <= level <= len(levels)):
+            continue
+        value = levels[level - 1].get("value", default)
+        if best is None or value > best:
+            best = value
+    return default if best is None else best
+
+
+def enchantment_pool(tool_id: str) -> list[dict]:
+    """Все (enchant_id, level, value) зачарования, доступные ДЛЯ ЭТОГО инструмента -
+    те, чей applies_to_kind совпадает с tools.*.enchant_kind этой линейки, плюс
+    универсальные (applies_to_kind is None, например "Прочность"). Пусто, если у
+    инструмента вовсе нет enchant_kind (не зачаровываемый) - см. content.json
+    tools.*.enchant_kind. Это и есть "барабан" трёх магических кругов
+    (enchant_tool) - порядок совпадает с ENCHANTMENTS/levels в контенте."""
+    kind = TOOLS.get(tool_id, {}).get("enchant_kind")
+    if kind is None:
+        return []
+    pool = []
+    for enchant_id, enchant in ENCHANTMENTS.items():
+        applies_to_kind = enchant.get("applies_to_kind")
+        if applies_to_kind is not None and applies_to_kind != kind:
+            continue
+        for i, lvl in enumerate(enchant.get("levels", []), start=1):
+            pool.append({"enchant_id": enchant_id, "level": i, "value": lvl.get("value")})
+    return pool
+
+
+def enchantable_tools(state: GameState) -> list[str]:
+    """Инструменты, у которых вообще есть enchant_kind (т.е. их можно понести на
+    стол зачарований) - используется UI для списка выбора."""
+    return [tool_id for tool_id in TOOLS if TOOLS[tool_id].get("enchant_kind") is not None]
+
+
+def _enchanting_table_config(state: GameState) -> dict | None:
+    """Конфиг (buildings.*.enchanting_table) первой РАБОТАЮЩЕЙ постройки-стола
+    зачарований - generic-флаг, НЕ хардкод id (тот же принцип, что genetics_lab/
+    breeding_station). None, если ни одна копия ни одного такого стола не
+    работает - тогда enchant_tool недоступен вовсе."""
+    for building_id, building in BUILDINGS.items():
+        config = building.get("enchanting_table")
+        if config and working_count(state, building_id) > 0:
+            return config
+    return None
+
+
+def enchanting_table_available(state: GameState) -> bool:
+    return _enchanting_table_config(state) is not None
+
+
+def _roll_enchant_circles(pool: list[dict]) -> list[dict]:
+    """Три круга - три НЕЗАВИСИМЫХ равновероятных броска по всему барабану
+    (enchantment_pool), без корреляции между ними (в отличие от демо-мокапа,
+    который специально подыгрывал совпадениям ради наглядности - здесь честная
+    механика). Совпадение всех трёх (enchant_id И level) - удача, которую игрок
+    видит РЕДКО, если барабан большой."""
+    return [random.choice(pool) for _ in range(3)]
+
+
+def enchant_tool(state: GameState, tool_id: str) -> ActionResult:
+    """Одна попытка зачарования - списывает цену ЦЕЛИКОМ (buildings.*.
+    enchanting_table.cost, обычно книга зачарований) и СРАЗУ решает исход (тот
+    же принцип, что claim_quest_reward/_roll_loot_case_prize - сервер бросает
+    кости один раз, ActionResult.enchant несёт уже готовый результат для
+    анимации, а не семя для клиента). Успех (все 3 круга показали ОДИНАКОВЫЙ
+    enchant_id И level) применяет его - см. tool_enchant_level/_enchant_effect_value,
+    никогда не ПОНИЖАЕТ уже стоящий более сильный уровень того же зачарования.
+    Провал СНИМАЕТ с инструмента ВСЕ его зачарования разом. Не тратит ход - это
+    манипуляция с предметом, как insert_soul/repair_tool."""
+    if tool_id not in TOOLS:
+        return ActionResult(False, "Неизвестный инструмент.")
+    tool_name = TOOLS[tool_id]["name"]
+    config = _enchanting_table_config(state)
+    if config is None:
+        return ActionResult(False, "Нет работающего стола зачарований.")
+    pool = enchantment_pool(tool_id)
+    if not pool:
+        return ActionResult(False, f"«{tool_name}» нельзя зачаровать.")
+    cost = config.get("cost", {})
+    missing = _direct_shortfall(state, cost)
+    if missing:
+        return ActionResult(False, f"Не хватает ресурсов: {_format_shortfall(missing)}.")
+    for resource_id, amount in cost.items():
+        state.resources[resource_id] -= amount
+
+    circles = _roll_enchant_circles(pool)
+    first = circles[0]
+    success = all(c["enchant_id"] == first["enchant_id"] and c["level"] == first["level"] for c in circles)
+    circles_out = [{"enchant_id": c["enchant_id"], "level": c["level"]} for c in circles]
+
+    if success:
+        enchant_id, level = first["enchant_id"], first["level"]
+        enchant_name = ENCHANTMENTS[enchant_id]["name"]
+        applied = state.tool_enchantments.setdefault(tool_id, {})
+        new_level = max(applied.get(enchant_id, 0), level)
+        applied[enchant_id] = new_level
+        message = f"«{tool_name}» зачарован: {enchant_name} {level}."
+        result = {"tool_id": tool_id, "circles": circles_out, "success": True,
+                  "applied": {"enchant_id": enchant_id, "level": new_level}}
+    else:
+        had_any = bool(state.tool_enchantments.get(tool_id))
+        state.tool_enchantments.pop(tool_id, None)
+        message = (
+            f"Неудача - с «{tool_name}» сняты все зачарования." if had_any
+            else f"Неудача зачарования «{tool_name}»."
+        )
+        result = {"tool_id": tool_id, "circles": circles_out, "success": False, "applied": None}
+    return ActionResult(True, message, enchant=result)
 
 
 def skill_level(state: GameState, skill_id: str) -> int:
@@ -1981,34 +2383,122 @@ def _weapon_bonuses(state: GameState) -> dict:
     инструментов ни на что конкретное не завязано). Тир каждой линейки читается
     как обычно (tool_tier), но применяется НЕ через upgrade_tool-прогрессию урона
     напрямую, а через опциональные боевые поля НА КОНКРЕТНОМ тире:
-    damage_multiplier/instant_kill_max_hp/loot_multiplier/soul_chance_multiplier.
-    Среди ВСЕХ владеемых линеек оружия действует максимум по каждому полю
-    независимо (тот же принцип "сильнейшее побеждает", что у building upgrades) -
-    так уникальный меч-ваншот (свой tool_id с ОДНИМ тиром) и обычный прогрессивный
-    меч работают одновременно, не мешая друг другу: у одного из них может быть
-    выше damage_multiplier, у другого - instant_kill_max_hp."""
+    damage_multiplier/instant_kill_max_hp/loot_multiplier/soul_chance_multiplier,
+    плюс ДВА зачарования этой ЖЕ линейки (см. _enchant_effect_value): "Острота"
+    (damage_bonus, ДОЛЯ добавки - domножает damage_multiplier ИМЕННО этого
+    оружия, ПРЕЖДЕ чем идти в максимум по линейкам) и "Добыча"
+    (drop_chance_multiplier - домножает И soul_chance_multiplier, И новое поле
+    loot_chance_multiplier ИМЕННО этого оружия). Сломанная линейка (tool_is_broken)
+    вообще пропускается - её бонусы (в т.ч. от зачарований) не участвуют, пока
+    её не починят, но сам удар при этом не блокируется (в отличие от кирки) -
+    останется хотя бы "голыми руками". Среди ОСТАЛЬНЫХ владеемых линеек оружия
+    действует максимум по каждому полю независимо (тот же принцип "сильнейшее
+    побеждает", что у building upgrades) - так уникальный меч-ваншот (свой
+    tool_id с ОДНИМ тиром) и обычный прогрессивный меч работают одновременно,
+    не мешая друг другу: у одного из них может быть выше damage_multiplier, у
+    другого - instant_kill_max_hp."""
     damage_multiplier = 1.0
     instant_kill_max_hp = 0
     loot_multiplier = 1.0
+    loot_chance_multiplier = 1.0
     soul_chance_multiplier = 1.0
     for tool_id, tool in TOOLS.items():
-        if not tool.get("weapon"):
+        if not tool.get("weapon") or tool_is_broken(state, tool_id):
             continue
         tiers = tool.get("tiers", [])
         index = tool_tier(state, tool_id) - 1
         if not (0 <= index < len(tiers)):
             continue
         tier = tiers[index]
-        damage_multiplier = max(damage_multiplier, tier.get("damage_multiplier", 1.0))
+        sharpness = _enchant_effect_value(state, tool_id, "damage_bonus", 0.0)
+        looting = _enchant_effect_value(state, tool_id, "drop_chance_multiplier", 1.0)
+        damage_multiplier = max(damage_multiplier, tier.get("damage_multiplier", 1.0) * (1 + sharpness))
         instant_kill_max_hp = max(instant_kill_max_hp, tier.get("instant_kill_max_hp", 0))
         loot_multiplier = max(loot_multiplier, tier.get("loot_multiplier", 1.0))
-        soul_chance_multiplier = max(soul_chance_multiplier, tier.get("soul_chance_multiplier", 1.0))
+        loot_chance_multiplier = max(loot_chance_multiplier, looting)
+        soul_chance_multiplier = max(soul_chance_multiplier, tier.get("soul_chance_multiplier", 1.0) * looting)
     return {
         "damage_multiplier": damage_multiplier,
         "instant_kill_max_hp": instant_kill_max_hp,
         "loot_multiplier": loot_multiplier,
+        "loot_chance_multiplier": loot_chance_multiplier,
         "soul_chance_multiplier": soul_chance_multiplier,
     }
+
+
+def _armor_bonuses(state: GameState) -> dict:
+    """Зеркало _weapon_bonuses для защиты - броня это любой tools.*, помеченный
+    armor=true, с полями max_hp_bonus (добавка к максимуму HP игрока) и
+    damage_reduction (плоское вычитание из входящего урона моба, см.
+    attack_encounter), плюс ДВА зачарования этой ЖЕ линейки: "Защита"
+    (armor_defense_bonus - добавка к damage_reduction ИМЕННО этой брони) и
+    "Живучесть" (max_hp_bonus_add - добавка к max_hp_bonus ИМЕННО этой брони).
+    Сломанная линейка пропускается целиком (та же логика, что у оружия). Среди
+    ОСТАЛЬНЫХ владеемых линеек брони действует максимум по каждому полю
+    независимо - тот же принцип "сильнейшее побеждает", что у оружия."""
+    max_hp_bonus = 0
+    damage_reduction = 0
+    for tool_id, tool in TOOLS.items():
+        if not tool.get("armor") or tool_is_broken(state, tool_id):
+            continue
+        tiers = tool.get("tiers", [])
+        index = tool_tier(state, tool_id) - 1
+        if not (0 <= index < len(tiers)):
+            continue
+        tier = tiers[index]
+        protection = _enchant_effect_value(state, tool_id, "armor_defense_bonus", 0.0)
+        vitality = _enchant_effect_value(state, tool_id, "max_hp_bonus_add", 0.0)
+        max_hp_bonus = max(max_hp_bonus, tier.get("max_hp_bonus", 0) + vitality)
+        damage_reduction = max(damage_reduction, tier.get("damage_reduction", 0) + protection)
+    return {"max_hp_bonus": max_hp_bonus, "damage_reduction": damage_reduction}
+
+
+def _consume_weapon_durability(state: GameState) -> None:
+    """Прочность ВСЕХ владеемых линеек оружия (weapon=true) тратится за КАЖДЫЙ
+    удар (attack_encounter), не только за победный - зеркало прочности кирки,
+    но без понятия "площади": оружие тут ровно одно "попадание" за раз, так что
+    масштабировать нечего. Уже сломанная линия просто остаётся на 0 (см.
+    _consume_tool_durability) - лишний вызов на неё безвреден."""
+    for tool_id, tool in TOOLS.items():
+        if tool.get("weapon"):
+            _consume_tool_durability(state, tool_id)
+
+
+def _consume_armor_durability(state: GameState) -> None:
+    """Зеркало _consume_weapon_durability для брони - тратится, когда броня
+    реально "поучаствовала" (игрок получил ответный удар моба, см.
+    attack_encounter), а не на каждый удар игрока по мобу."""
+    for tool_id, tool in TOOLS.items():
+        if tool.get("armor"):
+            _consume_tool_durability(state, tool_id)
+
+
+def player_max_hp(state: GameState) -> int:
+    """Максимум HP игрока = база (content.json["combat"].player_base_hp) +
+    бонус боевого навыка (skills.combat.levels[].effects.max_hp - в отличие
+    от effects["damage"], который ЗАМЕНЯЕТ базовый урон на текущем уровне,
+    max_hp АДДИТИВЕН к базе игрока) + лучшая владеемая броня (_armor_bonuses)."""
+    base = COMBAT_SETTINGS.get("player_base_hp", 20)
+    skill_bonus = skill_level_effects(state, COMBAT_SKILL_ID).get("max_hp", 0)
+    return base + skill_bonus + _armor_bonuses(state)["max_hp_bonus"]
+
+
+def current_player_hp(state: GameState) -> int:
+    """Текущее HP игрока - НИКОГДА не читай state.player_hp напрямую (тот же
+    принцип, что tool_tier у state.tool_tiers): None разворачивается в максимум
+    (свежая игра/старый сейв без этого поля), значение клампится в
+    [0, player_max_hp(state)] на случай, если максимум мог измениться."""
+    hp = state.player_hp
+    if hp is None:
+        hp = player_max_hp(state)
+    return max(0, min(hp, player_max_hp(state)))
+
+
+def is_wounded(state: GameState) -> bool:
+    """Действует ли сейчас дебафф "Ранен" (см. attack_encounter - выставляется
+    при поражении в схватке, снимает урон игрока, блокирует новую схватку при
+    0 HP). Тот же принцип сравнения, что deadline_turn у боссов."""
+    return state.wounded_until_turn is not None and state.turn <= state.wounded_until_turn
 
 
 def unlocked_attack_moves(state: GameState) -> set[str]:
@@ -2086,11 +2576,16 @@ def can_search_for_mob(location_id: str, state: GameState) -> bool:
 
 
 def search_mob_any(state: GameState, location_id: str) -> ActionResult:
-    """Единая кнопка поиска цели в локации-"Охоте" - зеркало search_vein_any:
-    рандом по rarity (чем МЕНЬШЕ - тем чаще), активна ВСЕГДА только ОДНА цель на
+    """Единая кнопка поиска цели в локации-"Охоте" - рандом по rarity (чем
+    МЕНЬШЕ - тем чаще, тот же принцип, что вес кластеров руды на поле шахты,
+    см. _generate_mine_field), активна ВСЕГДА только ОДНА цель на
     ВСЮ игру (state.active_encounter, не по локациям) - новый поиск заменяет
     предыдущую находку целиком, даже недобитую, и даже если это был призванный
-    босс (уже потраченный на призыв предмет не возвращается - см. summon_boss)."""
+    босс (уже потраченный на призыв предмет не возвращается - см. summon_boss).
+    При 0 HP (см. current_player_hp) отказывает - см. attack_encounter/
+    is_wounded про то, откуда берётся 0 HP и как из него выйти."""
+    if current_player_hp(state) <= 0:
+        return ActionResult(False, "Нужно сперва восстановить здоровье.")
     candidates = huntable_mobs_at(location_id, state)
     if not candidates:
         return ActionResult(False, "Тут пока некого искать.")
@@ -2108,12 +2603,16 @@ def summon_boss(state: GameState, boss_id: str) -> ActionResult:
     mobs.*.turn_limit (необязателен, есть только у боссов - см.
     content_validation.py) даёт схватке дедлайн: если общий счётчик хода
     (state.turn) перевалит за него раньше, чем босс убит, схватка обрывается
-    сама (см. _process_combat в advance_turn) - "не добил вовремя, босс сбежал"."""
+    сама (см. _process_combat в advance_turn) - "не добил вовремя, босс сбежал".
+    При 0 HP отказывает, как search_mob_any - тем же сообщением, ДО списания
+    summon_cost (чтобы не платить за призыв, который тут же откажет)."""
     mob = MOBS.get(boss_id)
     if mob is None or not mob.get("is_boss"):
         return ActionResult(False, "Такого босса не существует.")
     if not is_mob_unlocked(boss_id, state):
         return ActionResult(False, "Этот босс ещё не открыт.")
+    if current_player_hp(state) <= 0:
+        return ActionResult(False, "Нужно сперва восстановить здоровье.")
     deferred = _pay_or_defer(state, mob.get("summon_cost", {}), f"призыв «{mob['name']}»", "summon_boss", boss_id)
     if deferred is not None:
         return deferred
@@ -2156,20 +2655,25 @@ def _move_damage(state: GameState, mob: dict, remaining_hp: int, move: dict | No
         instant_kill_max_hp); иначе - обычный расчёт по навыку/оружию, домноженный на
         необязательный move["damage_multiplier"] (по умолчанию 1.0, т.е. как без приёма).
     Возвращает (damage, forced_kill) - damage всегда >= 1 (кроме forced_kill, где damage
-    - весь remaining_hp, чтобы вызов "снял remaining - damage" тоже давал 0 без спецкейса)."""
+    - весь remaining_hp, чтобы вызов "снял remaining - damage" тоже давал 0 без спецкейса).
+    Дебафф "Ранен" (is_wounded) домножает ИТОГОВЫЙ урон игрока НА ЛЮБОЙ mode (в т.ч.
+    forced_kill - добивание раненым игроком всё ещё добивание, просто урон обычной
+    ветки перед этим уже снижен) - единственная точка, куда встроен этот множитель,
+    как и остальные бонусы урона."""
     bonuses = _weapon_bonuses(state)
     base_damage = skill_level_effects(state, COMBAT_SKILL_ID).get("damage", 1)
+    wound_multiplier = COMBAT_SETTINGS.get("wounded_damage_multiplier", 1.0) if is_wounded(state) else 1.0
     mode = move.get("mode", "multiplier") if move else "multiplier"
     if mode == "percent_max_hp":
-        return max(1, math.ceil(move["percent"] * mob["hp"])), False
+        return max(1, math.ceil(move["percent"] * mob["hp"] * wound_multiplier)), False
     if mode == "percent_remaining_hp":
-        return max(1, math.ceil(move["percent"] * remaining_hp)), False
+        return max(1, math.ceil(move["percent"] * remaining_hp * wound_multiplier)), False
     if mode == "execute" and remaining_hp <= move["execute_threshold_percent"] * mob["hp"]:
         return remaining_hp, True
     move_multiplier = 1.0
     if move is not None:
         move_multiplier = move.get("damage_multiplier", 1.0) if mode == "execute" else move["damage_multiplier"]
-    return max(1, math.ceil(base_damage * bonuses["damage_multiplier"] * move_multiplier)), False
+    return max(1, math.ceil(base_damage * bonuses["damage_multiplier"] * move_multiplier * wound_multiplier)), False
 
 
 def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResult:
@@ -2205,18 +2709,53 @@ def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResu
         cooldown_turns = move.get("cooldown_turns", 0)
         if cooldown_turns > 0:
             state.move_cooldowns[move_id] = cooldown_turns
+    _consume_weapon_durability(state)
     if not killed:
+        _consume_armor_durability(state)
         encounter["remaining_hp"] = remaining - damage
+        # Ответка - моб бьёт в ответ ТОЛЬКО если пережил удар (убивающий удар,
+        # в т.ч. instant_kill, ответки не получает - см. CLAUDE.md-заметку про
+        # риск/reward боя). Броня (_armor_bonuses.damage_reduction) снижает
+        # входящий урон плоским вычитанием, до 0 включительно - сильная броня
+        # может полностью аннулировать слабого моба, зеркало instant_kill_max_hp
+        # у оружия.
+        armor = _armor_bonuses(state)
+        retaliation = max(0, mob.get("damage", 0) - armor["damage_reduction"])
+        max_hp = player_max_hp(state)
+        player_hp_before = current_player_hp(state)
+        player_hp_after = max(0, player_hp_before - retaliation)
+        state.player_hp = player_hp_after
+        combat_info = {
+            "damage": damage, "killed": False, "instant_kill": False,
+            "remaining_hp": encounter["remaining_hp"], "max_hp": mob["hp"],
+            "player_damage_taken": retaliation, "player_hp": player_hp_after,
+            "player_max_hp": max_hp, "defeated": False,
+        }
+        if player_hp_after <= 0:
+            state.active_encounter = None
+            wounded_turns = COMBAT_SETTINGS.get("wounded_turns", 0)
+            state.wounded_until_turn = state.turn + wounded_turns
+            combat_info["defeated"] = True
+            return ActionResult(
+                True,
+                f"{mob['name']} чуть не прикончил тебя - пришлось отступить ни с чем. "
+                f"Ранен на {wounded_turns} х.",
+                combat=combat_info,
+            )
         return ActionResult(
-            True, f"Урон: -{damage} HP. Осталось: {encounter['remaining_hp']}/{mob['hp']}.",
-            combat={"damage": damage, "killed": False, "instant_kill": False,
-                    "remaining_hp": encounter["remaining_hp"], "max_hp": mob["hp"]},
+            True,
+            f"Урон: -{damage} HP. Осталось: {encounter['remaining_hp']}/{mob['hp']}."
+            + (f" В ответ: -{retaliation} HP." if retaliation > 0 else ""),
+            combat=combat_info,
         )
 
     loot = dict(mob.get("loot", {}))
     loot_chance = mob.get("loot_chance")
     if loot_chance:
-        loot = _roll_chance_amounts(loot, loot_chance)
+        boosted_chance = {
+            r: min(1.0, chance * bonuses["loot_chance_multiplier"]) for r, chance in loot_chance.items()
+        }
+        loot = _roll_chance_amounts(loot, boosted_chance)
     if bonuses["loot_multiplier"] != 1.0:
         loot = _round_amounts({r: v * bonuses["loot_multiplier"] for r, v in loot.items()})
     _gain(state.resources, loot)
@@ -2236,7 +2775,11 @@ def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResu
         message += f" Выбита душа: {RESOURCE_NAMES.get(soul_id, soul_id)}!"
     return ActionResult(
         True, message,
-        combat={"damage": damage, "killed": True, "instant_kill": instant, "remaining_hp": 0, "max_hp": mob["hp"]},
+        combat={
+            "damage": damage, "killed": True, "instant_kill": instant, "remaining_hp": 0,
+            "max_hp": mob["hp"], "player_damage_taken": 0, "player_hp": current_player_hp(state),
+            "player_max_hp": player_max_hp(state), "defeated": False,
+        },
     )
 
 
@@ -3623,7 +4166,16 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
     ДО оплаты (списывается/докрафчивается уже РЕЗУЛЬТАТ броска - не удался бросок,
     ресурс в эту попытку вообще не требуется), выход - ПОСЛЕ успешной оплаты. Бросок
     заново на КАЖДЫЙ вызов, включая повторную попытку отложенного действия
-    (_PENDING_RETRY["manual"]) - каждая попытка независима."""
+    (_PENDING_RETRY["manual"]) - каждая попытка независима.
+
+    Многоходовое действие (duration > 1) дополнительно занимает СВОЮ ЛОКАЦИЮ
+    целиком (action["location"], сравнение по значению - None тоже валидная
+    "локация", корень дерева): пока в ней уже тикает любой другой многоходовой
+    job, запустить ещё один (другим action_id) нельзя, даже если оба действия
+    формально доступны игроку одновременно. Проверка НЕ рекурсивная - дочерние
+    локации (parent_location) под ограничение не подпадают, только точное
+    совпадение location (так что, например, охота в подлокации шахты спокойно
+    идёт параллельно с многоходовой добычей в самой шахте)."""
     action = MANUAL_ACTIONS[action_id]
     if not is_manual_action_unlocked(action_id, state):
         return ActionResult(False, "Это действие ещё не открыто.")
@@ -3631,8 +4183,14 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
     # action_duration_reduction (см. CLAUDE.md) - настолько сильное сокращение,
     # что итог <= 1, делает действие фактически мгновенным (ветка ниже).
     duration = manual_action_duration(action_id, state)
-    if duration > 1 and action_id in state.manual_jobs:
-        return ActionResult(False, f"«{action['name']}» уже выполняется.")
+    if duration > 1:
+        location = action.get("location")
+        for other_id, other_job in state.manual_jobs.items():
+            if MANUAL_ACTIONS[other_id].get("location") != location:
+                continue
+            if other_id == action_id:
+                return ActionResult(False, f"«{action['name']}» уже выполняется.")
+            return ActionResult(False, f"В этой локации уже выполняется другое действие: «{MANUAL_ACTIONS[other_id]['name']}».")
     resolved_scale = None
     building_id = action.get("requires_building")
     if building_id and scale is not None:
@@ -3672,6 +4230,7 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
         # успешной оплаты) - одна особь на клик, gain (если тоже задан) и
         # spawn_species применяются НЕЗАВИСИМО друг от друга.
         spawn_creature(state, _roll_wild_genotype(spawn_species), identified=False)
+    state.action_performed_count[action_id] = state.action_performed_count.get(action_id, 0) + 1
     return ActionResult(True, f"Выполнено: {action['name']}.")
 
 
@@ -3737,9 +4296,56 @@ def build(state: GameState, building_id: str) -> ActionResult:
     return ActionResult(True, f"Стадия {stage['number']} из {stage['total']} постройки «{building['name']}» готова: {stage['description']}.")
 
 
+def tech_research_turns(tech_id: str, state: GameState) -> int:
+    """Реальная длительность исследования технологии в ходах - тот же общий принцип,
+    что manual_action_duration, но сокращение устроено иначе: апгрейд типа
+    "research_speed" вычитает АБСОЛЮТНОЕ число ходов (не долю, как
+    action_duration_reduction), и берётся не с постройки, от которой действие
+    зависит (requires_building - у технологии такого поля нет), а с ЛЮБОЙ
+    РАБОТАЮЩЕЙ лаборатории (BUILDINGS с полем lab_tier), чей lab_tier РАВЕН
+    (не >=, как у lab_tier_capacity) тиру самой технологии - "лаборатория той
+    же эры". Тир 1 не имеет своей лаборатории (см. lab_tier_capacity) -
+    сократить тир-1 технологии нельзя. Среди нескольких подходящих лабораторий
+    и нескольких купленных апгрейдов этого типа действует только самое сильное
+    сокращение (тот же принцип "сильнейшее побеждает", см.
+    _apply_building_upgrades/_farm_upgrade_multiplier). Минимум 1 ход, как и у
+    manual_action_duration - отсутствие research_turns в контенте (как и
+    duration_turns у ручных действий) значит "1 ход", т.е. исследование
+    завершается сразу же, без прохода через state.active_research вовсе (см.
+    research())."""
+    duration = TECHS[tech_id].get("research_turns") or 1
+    if duration <= 1:
+        return duration
+    tier = TECHS[tech_id].get("tier", 1)
+    reduction = 0
+    for building_id, data in BUILDINGS.items():
+        if data.get("lab_tier") != tier or working_count(state, building_id) <= 0:
+            continue
+        reduction = max(reduction, _farm_upgrade_multiplier(state, building_id, "research_speed", default=0))
+    return max(1, duration - reduction)
+
+
 def research(state: GameState, tech_id: str) -> ActionResult:
+    """Запускает исследование технологии - как и раньше, ОДНИМ вызовом списывает
+    tech["cost"] целиком, но теперь может не завершиться тут же: если
+    tech_research_turns > 1, взамен заводится state.active_research (ГЛОБАЛЬНЫЙ
+    слот, один на всю игру - как active_encounter/veins, НЕ как manual_jobs,
+    у которого своя задача на каждый action_id) и тикает в _process_research
+    каждый ход, пока не наберёт нужное число ходов.
+
+    Переключиться на ДРУГОЕ исследование можно В ЛЮБОЙ момент, одним и тем же
+    вызовом - если слот занят чем-то ещё, старое исследование тихо отменяется
+    (cancel_research, cost возвращается целиком) и тут же стартует новое, без
+    отдельного явного шага "сначала отмените". Порядок намеренный: отмена
+    происходит ТОЛЬКО ПОСЛЕ того, как cost НОВОЙ технологии уже успешно списан
+    (после is_tech_available/lab_tier_capacity/_pay_or_defer) - иначе неудачная
+    попытка переключения (не хватило условий/ресурсов на новую) впустую стёрла
+    бы прогресс старой. Повторный клик на ТУ ЖЕ технологию, что уже идёт, ничего
+    не переигрывает - явный отказ, как и раньше."""
     if tech_id in state.techs:
         return ActionResult(False, "Уже изучено.")
+    if state.active_research is not None and state.active_research["tech_id"] == tech_id:
+        return ActionResult(False, "Уже исследуется.")
     if not is_tech_available(tech_id, state):
         return ActionResult(False, "Не выполнены условия для исследования.")
     tech = TECHS[tech_id]
@@ -3754,8 +4360,32 @@ def research(state: GameState, tech_id: str) -> ActionResult:
     deferred = _pay_or_defer(state, tech["cost"], f"исследование «{tech['name']}»", "tech", tech_id)
     if deferred is not None:
         return deferred
-    state.techs.add(tech_id)
-    return ActionResult(True, f"Изучено: {tech['name']}.")
+    switch_prefix = ""
+    if state.active_research is not None:
+        cancelled_name = TECHS[state.active_research["tech_id"]]["name"]
+        cancel_research(state)
+        switch_prefix = f"«{cancelled_name}» отменено, затраты возвращены. "
+    duration = tech_research_turns(tech_id, state)
+    if duration <= 1:
+        state.techs.add(tech_id)
+        return ActionResult(True, f"{switch_prefix}Изучено: {tech['name']}.")
+    state.active_research = {"tech_id": tech_id, "turns_total": duration, "turns_done": 0}
+    return ActionResult(True, f"{switch_prefix}Начато исследование «{tech['name']}» (займётся {duration} х.).")
+
+
+def cancel_research(state: GameState) -> ActionResult:
+    """Снимает активное исследование немедленно, БЕЗ траты хода - как
+    cancel_manual_job. cost уже списан целиком в момент старта (см. research()),
+    поэтому отмена возвращает его игроку через _gain; уже накопленные тики
+    (turns_done) возврату не подлежат сами по себе - тот же принцип, что у
+    cancel_manual_job (тикали "бесплатно", ничего не расходовали)."""
+    job = state.active_research
+    if job is None:
+        return ActionResult(False, "Сейчас ничего не исследуется.")
+    tech = TECHS[job["tech_id"]]
+    state.active_research = None
+    _gain(state.resources, tech["cost"])
+    return ActionResult(True, f"Исследование «{tech['name']}» отменено, затраты возвращены.")
 
 
 def repair(state: GameState, building_id: str) -> ActionResult:
@@ -3909,6 +4539,11 @@ class ProductionReport:
     # же ActionResult.message, что получил бы игрок за обычный клик/запуск
     # рецепта) - для UI-обратной связи в логе хода.
     automation_fired: list[dict] = field(default_factory=list)
+    # tech_id технологии, чьё исследование (state.active_research) завершилось
+    # именно в этот ход - см. _process_research. None в любой другой ход
+    # (включая ход, где research() сама мгновенно завершила тир-1/безапгрейдную
+    # технологию без прохода через active_research вовсе).
+    research_completed: str | None = None
 
 
 def _is_active_period_now(active_period: str, daytime: bool) -> bool:
@@ -3937,9 +4572,14 @@ def _process_habitat(state: GameState, report: ProductionReport) -> None:
 
     Сразу следом (внутри affordable) - бонусная продукция промышленной пасеки:
     если экземпляр эмулирует среду (_instance_environment_id), совпадающую с
-    геном ЭТОЙ особи (phenotype["environment_id"]), с вероятностью bonus_chance
-    аллели среды начисляется bonus_amount её bonus_resource - независимо от
-    обычной продукции вида (свой бросок, не участвует в output_multiplier).
+    геном ЭТОЙ особи (phenotype["environment_id"]) - т.е. среда "благоприятная" -
+    с вероятностью bonus_chance начисляется bonus_amount её bonus_resource.
+    Эти три поля живут на species[species_id] (вкладка «Виды»), НЕ на аллели
+    среды - какая среда благоприятна, решает генотип (общий для всех видов
+    признак "environment"), а ЧТО именно за это дают - решает вид: два разных
+    вида в ОДНОЙ и той же благоприятной среде дают РАЗНЫЕ бонусные ресурсы.
+    Бонус независим от обычной продукции вида (свой отдельный бросок, не
+    участвует в output_multiplier).
 
     Иначе turns_alive растёт на 1 (само по себе не опознаёт особь - единственный
     способ опознания это analyze_creature, автоматического опознания по времени
@@ -3976,10 +4616,9 @@ def _process_habitat(state: GameState, report: ProductionReport) -> None:
                 _add_resource(state.resources, r, scaled)
             active_env = _instance_environment_id(state, farm_id)
             if active_env is not None and phenotype["environment_id"] == active_env:
-                allele = trait_alleles("environment").get(active_env, {})
-                resource = allele.get("bonus_resource")
-                if resource and random.random() < allele.get("bonus_chance", 0):
-                    amount = allele.get("bonus_amount", 0)
+                resource = species.get("bonus_resource")
+                if resource and random.random() < species.get("bonus_chance", 0):
+                    amount = species.get("bonus_amount", 0)
                     if not RESOURCE_FRACTIONAL.get(resource, False):
                         amount = math.ceil(amount)
                     _add_resource(state.resources, resource, amount)
@@ -4154,6 +4793,7 @@ def _process_manual_jobs(state: GameState, report: ProductionReport) -> None:
         _gain(state.resources, gain)
         if job["spawn_species"]:
             spawn_creature(state, _roll_wild_genotype(job["spawn_species"]), identified=False)
+        state.action_performed_count[action_id] = state.action_performed_count.get(action_id, 0) + 1
         del state.manual_jobs[action_id]
         report.manual_completed.append(action_id)
 
@@ -4166,6 +4806,23 @@ def manual_jobs_view(state: GameState) -> list[dict]:
         {"action_id": aid, "turns_done": j["turns_done"], "turns_total": j["turns_total"]}
         for aid, j in state.manual_jobs.items()
     ]
+
+
+def _process_research(state: GameState, report: ProductionReport) -> None:
+    """Тикает активное исследование (state.active_research, см. research()) на один
+    ход - в отличие от _process_manual_jobs, слот ГЛОБАЛЬНО один на всю игру (как
+    active_encounter/veins), поэтому здесь нечего перебирать: не больше одной
+    записи. cost уже списан целиком в момент старта - тиканье не ограничено никаким
+    сырьём/бюджетом, просто +1 turns_done безусловно."""
+    job = state.active_research
+    if job is None:
+        return
+    job["turns_done"] += 1
+    if job["turns_done"] < job["turns_total"]:
+        return
+    state.techs.add(job["tech_id"])
+    report.research_completed = job["tech_id"]
+    state.active_research = None
 
 
 def cancel_manual_job(state: GameState, action_id: str) -> ActionResult:
@@ -4220,10 +4877,11 @@ def _process_pending_actions(state: GameState, report: ProductionReport) -> None
 
 
 def _process_combat(state: GameState, report: ProductionReport) -> None:
-    """Тикает кулдауны приёмов боя (state.move_cooldowns, см. attack_encounter) и
-    проверяет дедлайн активного босса (mobs.*.turn_limit, см. summon_boss) - вызывается
-    из advance_turn ПОСЛЕ state.turn += 1, чтобы сверяться уже с НОВЫМ номером хода.
-    Кулдауны тикают КАЖДЫЙ ход, а не только во время боя - тот же принцип, что и
+    """Тикает кулдауны приёмов боя (state.move_cooldowns, см. attack_encounter),
+    реген HP игрока и дебафф "Ранен", и проверяет дедлайн активного босса
+    (mobs.*.turn_limit, см. summon_boss) - вызывается из advance_turn ПОСЛЕ
+    state.turn += 1, чтобы сверяться уже с НОВЫМ номером хода. Кулдауны/реген
+    тикают КАЖДЫЙ ход, а не только во время боя - тот же принцип, что и
     остальные счётчики хода в advance_turn."""
     for move_id in list(state.move_cooldowns):
         remaining = state.move_cooldowns[move_id] - 1
@@ -4231,6 +4889,19 @@ def _process_combat(state: GameState, report: ProductionReport) -> None:
             del state.move_cooldowns[move_id]
         else:
             state.move_cooldowns[move_id] = remaining
+
+    # Реген HP - ТОЛЬКО вне схватки (по прямому пожеланию: тянуть бой, уходя
+    # в другую локацию, не должно бесплатно чинить игрока) - см. player_max_hp/
+    # current_player_hp. "Ранен" сам снимается, как только ход перевалил за
+    # wounded_until_turn - гигиена сейва, тот же принцип, что удаление
+    # истёкших move_cooldowns (без этого число просто вечно лежало бы в
+    # save.json без дальнейшего смысла).
+    if state.active_encounter is None:
+        regen = COMBAT_SETTINGS.get("hp_regen_per_turn", 0)
+        if regen:
+            state.player_hp = min(player_max_hp(state), current_player_hp(state) + regen)
+    if state.wounded_until_turn is not None and state.turn > state.wounded_until_turn:
+        state.wounded_until_turn = None
 
     encounter = state.active_encounter
     if encounter is None:
@@ -4388,6 +5059,7 @@ def advance_turn(state: GameState) -> ProductionReport:
     _process_energy_jobs(state, report)
     _process_autocraft_jobs(state, report)
     _process_manual_jobs(state, report)
+    _process_research(state, report)
     process_automation_rules(state, report, daytime)
     _process_pending_actions(state, report)
 
@@ -4457,6 +5129,12 @@ def _condition_met(condition: dict, state: GameState) -> bool:
         return tool_tier(state, condition["tool"]) >= condition["amount"]
     if kind == "species_discovered_at_least":
         return len(state.species_discovered) >= condition["amount"]
+    if kind == "species_discovered":
+        return condition["species"] in state.species_discovered
+    if kind == "manual_action_performed_at_least":
+        return state.action_performed_count.get(condition["action"], 0) >= condition["amount"]
+    if kind == "building_upgrade_purchased":
+        return is_building_upgrade_purchased(state, condition["building"], condition["upgrade"])
     return False
 
 

@@ -82,7 +82,52 @@
     },
     {
       "id": "ore",
-      "name": "Руда"
+      "name": "Руда",
+      "icon": {
+        "grid": [
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          "..................DDAADDDD......",
+          "..................DDAADDDD......",
+          "........EE....EEBBCCBBDDBBBB....",
+          "........EE....EEBBCCBBDDBBBB....",
+          "......EEEEAAAAEEEEBBCCDDBBBB....",
+          "......EEEEAAAAEEEEBBCCDDBBBB....",
+          "....EEEEEEEEAAAAEEEECCCCCCCC....",
+          "....EEEEEEEEAAAAEEEECCCCCCCC....",
+          "....EEAAAAAAFFGGGGGGCCCCCCCCBB..",
+          "....EEAAAAAAFFGGGGGGCCCCCCCCBB..",
+          "..AAAAAAFFFFGGGGCCBBDDAAAAFFCC..",
+          "..AAAAAAFFFFGGGGCCBBDDAAAAFFCC..",
+          "..EEAAFFGGGGCCBBBBAABBAAFFGGCC..",
+          "..EEAAFFGGGGCCBBBBAABBAAFFGGCC..",
+          "..AAAAEEAAAADDAABBCCAABBAACCCC..",
+          "..AAAAEEAAAADDAABBCCAABBAACCCC..",
+          "EEAADDDDDDAADDDDDDFFFFBBDDBBCC..",
+          "EEAADDDDDDAADDDDDDFFFFBBDDBBCC..",
+          "EEDDFFFFGGBBDDFFFFCCCCCCBBEECC..",
+          "EEDDFFFFGGBBDDFFFFCCCCCCBBEECC..",
+          "EEAAFFGGBBAABBBBBBGGCCCCCCAACC..",
+          "EEAAFFGGBBAABBBBBBGGCCCCCCAACC..",
+          "..FFGGDDBBBBAADDBBBBGGCCAAAA....",
+          "..FFGGDDBBBBAADDBBBBGGCCAAAA....",
+          "......EEDDBBBBDDCCDDAABBDD......",
+          "......EEDDBBBBDDCCDDAABBDD......"
+        ],
+        "palette": {
+          "A": "#929292",
+          "B": "#666666",
+          "C": "#67452c",
+          "D": "#757575",
+          "E": "#a3a3a3",
+          "F": "#cba686",
+          "G": "#9b714c"
+        }
+      }
     },
     {
       "id": "metal",
@@ -90,7 +135,50 @@
     },
     {
       "id": "uranium",
-      "name": "Уран"
+      "name": "Уран",
+      "icon": {
+        "grid": [
+          "................................",
+          "................................",
+          "................................",
+          "................................",
+          "................C...............",
+          "...............BCC..............",
+          "..............BACCC.............",
+          ".............BAACCCC............",
+          "............BAADDDCCB...........",
+          "...........BAADEEDDCAB..........",
+          "...........BADEEEEDDAB..........",
+          "...........BADEEEEDDAC..........",
+          ".......C...BADDEEDDDACCC........",
+          "......BCCB..BADDDDDABACCCC......",
+          "......BCCCCBBAADDDCABACCCCBB....",
+          ".....BAACCCABAAAACABAACCCCAB....",
+          "....BAAACCCABAAAACABAACCCCAB....",
+          "....BAAACCCABAAAACABAAACCCAB....",
+          "....BAAACCCABAAAAAABAAACCAAB....",
+          "....BAAACCAABBAAAAABAAACCAAB....",
+          "....BAAACCAABBAAAAABAAACCAB.....",
+          ".....BAAACAB.BAAAAABBAAACAB.....",
+          ".....BAAACAB.BBBBBBBBAAACAB.....",
+          ".....BAAACAB........BAAAAAB.....",
+          ".....BAAAAAB........BAAAAAB.....",
+          ".....BBAAAAB........BBBBAAB.....",
+          ".......BBBAB............BBB.....",
+          "..........BB....................",
+          "................................",
+          "................................",
+          "................................",
+          "................................"
+        ],
+        "palette": {
+          "A": "#3a5c28",
+          "B": "#182810",
+          "C": "#6cb040",
+          "D": "#b0e860",
+          "E": "#ceff8c"
+        }
+      }
     },
     {
       "id": "bee",
@@ -175,6 +263,10 @@
     {
       "id": "mana_crystal",
       "name": "Кристалл маны"
+    },
+    {
+      "id": "enchant_book",
+      "name": "Книга зачарований"
     }
   ],
   "locations": {
@@ -225,16 +317,6 @@
         "tool": "axe"
       },
       "sound": "wood_chop.ogg"
-    },
-    "gather_stone": {
-      "name": "Добывать камень",
-      "requires_tech": null,
-      "location": "shaft",
-      "cost": {},
-      "gain": {
-        "stone": 2
-      },
-      "sound": "rock_break.ogg"
     },
     "craft_planks": {
       "name": "Напилить досок вручную",
@@ -368,6 +450,20 @@
         "mana_crystal": 1
       },
       "sound": "mana_crystal.ogg"
+    },
+    "craft_enchant_book": {
+      "name": "Написать книгу зачарований",
+      "requires_tech": null,
+      "location": "workbench",
+      "requires_building": "enchanting_table",
+      "cost": {
+        "planks": 8,
+        "wolf_pelt": 2
+      },
+      "gain": {
+        "enchant_book": 1
+      },
+      "sound": "hammer_hit.wav"
     }
   },
   "buildings": {
@@ -389,7 +485,10 @@
         "wood": 2
       },
       "icon_label": "ДГ",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "генератор"
+      ]
     },
     "solar_panel": {
       "name": "Солнечная панель",
@@ -410,7 +509,10 @@
       },
       "icon_label": "С1",
       "active_period": "day",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "генератор"
+      ]
     },
     "battery": {
       "name": "Аккумулятор",
@@ -429,7 +531,10 @@
       },
       "icon_label": "АК",
       "energy_storage": 20,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "накопитель энергии"
+      ]
     },
     "lumber_camp": {
       "name": "Лесозаготовка",
@@ -449,7 +554,10 @@
         "wood": 3
       },
       "icon_label": "ЛЗ",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "добыча"
+      ]
     },
     "quarry": {
       "name": "Каменоломня",
@@ -469,7 +577,10 @@
         "wood": 3
       },
       "icon_label": "КМ",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "добыча"
+      ]
     },
     "sawmill": {
       "name": "Лесопилка",
@@ -532,6 +643,9 @@
             "tools": 35
           }
         }
+      ],
+      "tags": [
+        "переработка"
       ]
     },
     "charcoal_pit": {
@@ -555,6 +669,9 @@
       "icon_label": "УЯ",
       "unlocks_autocraft": [
         "charcoal"
+      ],
+      "tags": [
+        "переработка"
       ]
     },
     "workshop": {
@@ -581,6 +698,9 @@
       "icon_label": "МС",
       "unlocks_autocraft": [
         "tools"
+      ],
+      "tags": [
+        "переработка"
       ]
     },
     "recipe_board": {
@@ -596,7 +716,10 @@
       "breakdown_chance": 0,
       "repair_cost": {},
       "icon_label": "РК",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "механизм"
+      ]
     },
     "processor": {
       "name": "Процессор",
@@ -616,7 +739,10 @@
       },
       "icon_label": "ЦП",
       "compute_power": 5,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "автокрафт"
+      ]
     },
     "autocraft_accelerator": {
       "name": "Ускоритель автокрафта",
@@ -636,7 +762,10 @@
       },
       "icon_label": "УА",
       "autocraft_speed": 8,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "автокрафт"
+      ]
     },
     "precision_workshop": {
       "name": "Прецизионная мастерская",
@@ -690,6 +819,9 @@
             "tools": 35
           }
         }
+      ],
+      "tags": [
+        "механизм"
       ]
     },
     "coal_generator": {
@@ -726,6 +858,9 @@
             "stone": 10
           }
         }
+      ],
+      "tags": [
+        "генератор"
       ]
     },
     "battery_bank": {
@@ -745,7 +880,10 @@
       },
       "icon_label": "ББ",
       "energy_storage": 60,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "накопитель энергии"
+      ]
     },
     "mine": {
       "name": "Шахта",
@@ -766,7 +904,10 @@
         "tools": 2
       },
       "icon_label": "ШХ",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "добыча"
+      ]
     },
     "furnace": {
       "name": "Печь",
@@ -806,6 +947,9 @@
             "tools": 10
           }
         }
+      ],
+      "tags": [
+        "переработка"
       ]
     },
     "solar_panel_mk2": {
@@ -827,7 +971,10 @@
       },
       "icon_label": "С2",
       "active_period": "day",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "генератор"
+      ]
     },
     "energy_extractor": {
       "name": "Синтезатор руды",
@@ -849,7 +996,10 @@
         "tools": 2
       },
       "icon_label": "СР",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "добыча"
+      ]
     },
     "battery_array": {
       "name": "Промышленный накопитель",
@@ -868,7 +1018,10 @@
       },
       "icon_label": "ПН",
       "energy_storage": 200,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "накопитель энергии"
+      ]
     },
     "processor_mk2": {
       "name": "Процессор Мк2",
@@ -889,7 +1042,10 @@
       },
       "icon_label": "Ц2",
       "compute_power": 20,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "автокрафт"
+      ]
     },
     "energy_converter": {
       "name": "Энергетический преобразователь",
@@ -949,6 +1105,9 @@
             "tools": 80
           }
         }
+      ],
+      "tags": [
+        "преобразователь энергии"
       ]
     },
     "uranium_mine": {
@@ -970,7 +1129,10 @@
         "tools": 2
       },
       "icon_label": "УР",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "добыча"
+      ]
     },
     "nuclear_reactor": {
       "name": "Ядерный реактор",
@@ -993,7 +1155,10 @@
         "tools": 5
       },
       "icon_label": "ЯР",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "генератор"
+      ]
     },
     "solar_panel_mk3": {
       "name": "Солнечная ферма",
@@ -1014,7 +1179,10 @@
       },
       "icon_label": "С3",
       "active_period": "day",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "генератор"
+      ]
     },
     "solar_panel_mk4": {
       "name": "Солнечная электростанция",
@@ -1035,7 +1203,10 @@
       },
       "icon_label": "С4",
       "active_period": "day",
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "генератор"
+      ]
     },
     "autocraft_dispatcher": {
       "name": "Диспетчерская автокрафта",
@@ -1058,7 +1229,10 @@
       "icon_label": "ДА",
       "autocraft_slots": 1,
       "max_count": 1,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "автокрафт"
+      ]
     },
     "lab_tier2": {
       "name": "Лаборатория II тира",
@@ -1076,7 +1250,24 @@
       "icon_label": "Л2",
       "lab_tier": 2,
       "max_count": 1,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "лаборатория"
+      ],
+      "upgrades": [
+        {
+          "id": "lab_tier2_research_speed",
+          "name": "Ускоренные испытания II",
+          "description": "Сокращает исследование технологий II тира на 2 хода.",
+          "type": "research_speed",
+          "value": 2,
+          "requires_tech": null,
+          "cost": {
+            "planks": 15,
+            "tools": 8
+          }
+        }
+      ]
     },
     "lab_tier3": {
       "name": "Лаборатория III тира",
@@ -1094,7 +1285,24 @@
       "icon_label": "Л3",
       "lab_tier": 3,
       "max_count": 1,
-      "unlocks_autocraft": []
+      "unlocks_autocraft": [],
+      "tags": [
+        "лаборатория"
+      ],
+      "upgrades": [
+        {
+          "id": "lab_tier3_research_speed",
+          "name": "Ускоренные испытания III",
+          "description": "Сокращает исследование технологий III тира на 3 хода.",
+          "type": "research_speed",
+          "value": 3,
+          "requires_tech": null,
+          "cost": {
+            "metal": 15,
+            "tools": 10
+          }
+        }
+      ]
     },
     "apiary": {
       "name": "Пасека",
@@ -1112,7 +1320,7 @@
       },
       "icon_label": "ПС",
       "breeding_slots": 2,
-      "breeding_accepts_family": "bee",
+      "breeding_accepts_family": "пчела",
       "upgrades": [
         {
           "id": "apiary_extra_slot",
@@ -1128,6 +1336,10 @@
           "repeatable": true,
           "cost_growth": 1.6
         }
+      ],
+      "tags": [
+        "ферма",
+        "пасека"
       ]
     },
     "mana_greenhouse": {
@@ -1146,7 +1358,7 @@
       },
       "icon_label": "ОР",
       "breeding_slots": 2,
-      "breeding_accepts_family": "flower",
+      "breeding_accepts_family": "цветок",
       "upgrades": [
         {
           "id": "greenhouse_extra_pot",
@@ -1162,6 +1374,10 @@
           "repeatable": true,
           "cost_growth": 1.6
         }
+      ],
+      "tags": [
+        "ферма",
+        "оранжерея"
       ]
     },
     "breeding_station": {
@@ -1192,6 +1408,9 @@
             "honey": 50
           }
         }
+      ],
+      "tags": [
+        "генетика"
       ]
     },
     "electric_apiary": {
@@ -1213,7 +1432,7 @@
       },
       "icon_label": "ЭП",
       "breeding_slots": 3,
-      "breeding_accepts_family": "bee",
+      "breeding_accepts_family": "пчела",
       "upgrades": [
         {
           "id": "electric_apiary_output",
@@ -1263,6 +1482,10 @@
           "repeatable": true,
           "cost_growth": 1.6
         }
+      ],
+      "tags": [
+        "ферма",
+        "пасека"
       ]
     },
     "industrial_apiary": {
@@ -1284,7 +1507,7 @@
       },
       "icon_label": "ПП",
       "breeding_slots": 4,
-      "breeding_accepts_family": "bee",
+      "breeding_accepts_family": "пчела",
       "upgrades": [
         {
           "id": "industrial_apiary_output",
@@ -1404,6 +1627,10 @@
             "tools": 40
           }
         }
+      ],
+      "tags": [
+        "ферма",
+        "пасека"
       ]
     },
     "genetics_lab": {
@@ -1421,7 +1648,11 @@
         "metal": 6
       },
       "icon_label": "ГЛ",
-      "genetics_lab": true
+      "genetics_lab": true,
+      "tags": [
+        "генетика",
+        "лаборатория"
+      ]
     },
     "soul_synthesizer": {
       "name": "Синтезатор душ",
@@ -1468,6 +1699,9 @@
             "metal": 20
           }
         }
+      ],
+      "tags": [
+        "синтезатор душ"
       ]
     },
     "guardian_altar": {
@@ -1504,6 +1738,9 @@
           "repeatable": true,
           "cost_growth": 1.7
         }
+      ],
+      "tags": [
+        "синтезатор душ"
       ]
     },
     "automation_center": {
@@ -1540,6 +1777,34 @@
           "repeatable": true,
           "cost_growth": 1.7
         }
+      ],
+      "tags": [
+        "автоматизация"
+      ]
+    },
+    "enchanting_table": {
+      "name": "Стол зачарований",
+      "description": "Зачаровывает кирку, оружие и броню - три магических круга решают, какое зачарование (и какого уровня) достанется инструменту. Промах снимает с инструмента все зачарования разом. Каждая попытка тратит книгу зачарований.",
+      "requires_tech": "metallurgy",
+      "cost": {
+        "wood": 50,
+        "metal": 30,
+        "tools": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 5
+      },
+      "icon_label": "СЗ",
+      "enchanting_table": {
+        "cost": {
+          "enchant_book": 1
+        }
+      },
+      "tags": [
+        "зачарование"
       ]
     }
   },
@@ -1547,6 +1812,7 @@
     "woodworking": {
       "name": "Деревообработка",
       "tier": 1,
+      "research_turns": 2,
       "description": "Базовая обработка древесины - открывает лесопилку, автоматически распиливающую брёвна на доски.",
       "requires": [],
       "cost": {
@@ -1557,6 +1823,7 @@
     "charcoal_burning": {
       "name": "Углежжение",
       "tier": 1,
+      "research_turns": 2,
       "description": "Выжигание угля из дерева - основа для выплавки металла и первых генераторов энергии.",
       "requires": [],
       "cost": {
@@ -1567,6 +1834,7 @@
     "toolmaking": {
       "name": "Инструменты",
       "tier": 1,
+      "research_turns": 2,
       "description": "Изготовление простых инструментов вручную - открывает дорогу к механизации и более сложным технологиям.",
       "requires": [
         "woodworking"
@@ -1579,6 +1847,7 @@
     "electrification": {
       "name": "Электрификация",
       "tier": 1,
+      "research_turns": 3,
       "description": "Генераторы промышленного масштаба - открывает угольный генератор и батарейный блок для накопления энергии.",
       "requires": [
         "charcoal_burning"
@@ -1592,6 +1861,7 @@
     "reliable_machines": {
       "name": "Надёжные механизмы",
       "tier": 2,
+      "research_turns": 4,
       "description": "Улучшенная сборка механизмов снижает шанс поломки у всех построек.",
       "requires": [
         "toolmaking"
@@ -1612,6 +1882,7 @@
     "mining": {
       "name": "Горное дело",
       "tier": 2,
+      "research_turns": 3,
       "description": "Разведка и добыча руды - открывает поиск рудных жил и ручную добычу камня в шахте.",
       "requires": [
         "toolmaking"
@@ -1625,6 +1896,7 @@
     "workshop_automation": {
       "name": "Автоматизация мастерской",
       "tier": 2,
+      "research_turns": 4,
       "description": "Открывает мастерскую - постройку, автоматически производящую инструменты.",
       "requires": [
         "toolmaking"
@@ -1638,6 +1910,7 @@
     "metallurgy": {
       "name": "Металлургия",
       "tier": 2,
+      "research_turns": 4,
       "description": "Выплавка металла из руды - открывает ручную плавку металла и металлическую кирку.",
       "requires": [
         "mining",
@@ -1652,6 +1925,7 @@
     "mechanized_mining": {
       "name": "Механизированная добыча",
       "tier": 2,
+      "research_turns": 5,
       "description": "Открывает шахту - постройку для автоматической добычи руды без ручного труда.",
       "requires": [
         "mining"
@@ -1665,6 +1939,7 @@
     "industrial_smelting": {
       "name": "Промышленная плавка",
       "tier": 3,
+      "research_turns": 6,
       "description": "Открывает печь - автоматическую выплавку металла из руды и угля.",
       "requires": [
         "metallurgy"
@@ -1678,6 +1953,7 @@
     "improved_saws": {
       "name": "Улучшенные пилы",
       "tier": 3,
+      "research_turns": 5,
       "description": "Более острые металлические пилы увеличивают выход досок с лесопилки.",
       "requires": [
         "woodworking",
@@ -1701,6 +1977,7 @@
     "mine_conveyor": {
       "name": "Конвейер шахты",
       "tier": 3,
+      "research_turns": 6,
       "description": "Механизированный вывоз породы увеличивает добычу руды на шахте.",
       "requires": [
         "mechanized_mining",
@@ -1723,6 +2000,7 @@
     "precision_engineering": {
       "name": "Точная инженерия",
       "tier": 3,
+      "research_turns": 6,
       "description": "Более точная сборка ещё немного снижает шанс поломки у всех построек.",
       "requires": [
         "reliable_machines",
@@ -1744,6 +2022,7 @@
     "advanced_solar": {
       "name": "Улучшенные солнечные панели",
       "tier": 2,
+      "research_turns": 5,
       "description": "Открывает солнечную панель Мк2 - более мощную и надёжную, чем первая модель.",
       "requires": [
         "electrification"
@@ -1757,6 +2036,7 @@
     "resource_synthesis": {
       "name": "Синтез ресурсов",
       "tier": 3,
+      "research_turns": 7,
       "description": "Открывает синтезатор руды и промышленный накопитель энергии большой ёмкости.",
       "requires": [
         "metallurgy",
@@ -1771,6 +2051,7 @@
     "uranium_prospecting": {
       "name": "Разведка урана",
       "tier": 3,
+      "research_turns": 7,
       "description": "Открывает урановый рудник и добычу урановых жил в шахте.",
       "requires": [
         "mechanized_mining"
@@ -1784,6 +2065,7 @@
     "nuclear_engineering": {
       "name": "Ядерная инженерия",
       "tier": 3,
+      "research_turns": 8,
       "description": "Открывает ядерный реактор - мощный источник энергии, работающий на уране.",
       "requires": [
         "uranium_prospecting",
@@ -1798,6 +2080,7 @@
     "photonics": {
       "name": "Фотоника",
       "tier": 2,
+      "research_turns": 6,
       "description": "Открывает солнечную ферму - следующее поколение солнечной энергетики.",
       "requires": [
         "advanced_solar"
@@ -1811,6 +2094,7 @@
     "advanced_photonics": {
       "name": "Продвинутая фотоника",
       "tier": 3,
+      "research_turns": 9,
       "description": "Открывает солнечную электростанцию - самый мощный из солнечных генераторов.",
       "requires": [
         "photonics",
@@ -1827,57 +2111,128 @@
     "ore": {
       "requires_tech": "mining",
       "rarity": 1,
-      "vein_size_range": [
-        30,
-        60
+      "toughness": 2,
+      "field_cluster_size": [
+        4,
+        8
       ],
       "base_yield": 4,
       "required_tool": "pickaxe",
-      "required_tier": 1,
-      "quality_tiers": [
-        {
-          "name": "Бедная",
-          "weight": 5,
-          "size_multiplier": 0.5,
-          "min_tool_tier": 1
-        },
-        {
-          "name": "Обычная",
-          "weight": 5,
-          "size_multiplier": 1,
-          "min_tool_tier": 1
-        },
-        {
-          "name": "Богатая",
-          "weight": 2,
-          "size_multiplier": 2,
-          "min_tool_tier": 2
-        },
-        {
-          "name": "Отличная",
-          "weight": 1,
-          "size_multiplier": 3,
-          "min_tool_tier": 3
-        },
-        {
-          "name": "Чистая",
-          "weight": 0.3,
-          "size_multiplier": 5,
-          "min_tool_tier": 5
-        }
-      ]
+      "required_tier": 1
     },
     "uranium": {
       "requires_tech": "uranium_prospecting",
       "rarity": 4,
-      "vein_size_range": [
-        3,
-        6
+      "toughness": 10,
+      "field_cluster_size": [
+        1,
+        2
       ],
       "base_yield": 2,
       "required_tool": "pickaxe",
       "required_tier": 3
     }
+  },
+  "mine_field": {
+    "size": 20,
+    "dig_tool": "pickaxe",
+    "rock_resource": "stone",
+    "rock_yield": 2,
+    "rock_toughness": 1,
+    "rock_icon": {
+      "grid": [
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "..................CCFFCCCC......",
+        "..................CCFFCCCC......",
+        "........BB....BBGGEEDDCCGGGG....",
+        "........BB....BBGGEEDDCCGGGG....",
+        "......BBBBAAAABBBBGGEECCGGGG....",
+        "......BBBBAAAABBBBGGEECCGGGG....",
+        "....BBBBBBBBAAAABBBBEEEEEEEE....",
+        "....BBBBBBBBAAAABBBBEEEEEEEE....",
+        "....BBFFFFAABBAAAADDBBEEEEEEGG..",
+        "....BBFFFFAABBAAAADDBBEEEEEEGG..",
+        "..AAFFFFFFAAAABBFFDDCCAAEEEEEE..",
+        "..AAFFFFFFAAAABBFFDDCCAAEEEEEE..",
+        "..BBAAFFAABBAADDGGAADDAAEEEEEE..",
+        "..BBAAFFAABBAADDGGAADDAAEEEEEE..",
+        "..AAFFBBAAAACCFFGGEEFFDDAAEEEE..",
+        "..AAFFBBAAAACCFFGGEEFFDDAAEEEE..",
+        "BBFFCCCCCCAACCCCFFGGBBDDCCGGEE..",
+        "BBFFCCCCCCAACCCCFFGGBBDDCCGGEE..",
+        "BBCCCCAAAADDCCGGCCAAGGBBDDBBEE..",
+        "BBCCCCAAAADDCCGGCCAAGGBBDDBBEE..",
+        "BBAACCDDDDAADDDDGGDDDDCCDDAAEE..",
+        "BBAACCDDDDAADDDDGGDDDDCCDDAAEE..",
+        "..AABBCCDDDDAACCDDDDCCDDFFFF....",
+        "..AABBCCDDDDAACCDDDDCCDDFFFF....",
+        "......BBCCDDDDCCEECCAADDCC......",
+        "......BBCCDDDDCCEECCAADDCC......"
+      ],
+      "palette": {
+        "A": "#969696",
+        "B": "#adadad",
+        "C": "#7c7c7c",
+        "D": "#6c6c6c",
+        "E": "#404040",
+        "F": "#8a8a8a",
+        "G": "#5d5d5d"
+      }
+    },
+    "rock_broken_icon": {
+      "grid": [
+        "................................",
+        "................................",
+        "..BBBBBBBBBBBBBBBBBBBBBBBBBBBB..",
+        "..BBBBBBBBBBBBBBBBBBBBBBBBBBBB..",
+        "..BBAAAAAAAAAAAAAAAAAAAAAAAABB..",
+        "..BBAAAAAAAAAAAAAAAAEAAAAAAABB..",
+        "..BBAAEAAAAAACCCAAAAAEEAAAAABB..",
+        "..BBAAAEAAAACDDCCAAAAACECAAABB..",
+        "..BBAAAAEAAACDDCCAAAACCCEEAABB..",
+        "..BBAAAAAEEACCCCCAAACCDDCCEABB..",
+        "..BBAACCCAAEACCCAAAACCDDCCCABB..",
+        "..BBACDDCCAAEAAAAAAACCCCCCCABB..",
+        "..BBACDDCCAAAAAAAAAAACCCCCAABB..",
+        "..BBACCCCCAAAAAAAAAAAACCCAAABB..",
+        "..BBAACCCAAAAAAAAAAAAAAAAAAABB..",
+        "..BBAAAAAAAAAAAAAAAAAAAAAAAABB..",
+        "..BBAAAAAAAAAAAAAAAAAAAAAAAABB..",
+        "..BBAAAAAAAAAAAAAAAAAAAAAAAABB..",
+        "..BBAAAACCCAAAAAAAAAACCCAAAABB..",
+        "..BBAAACCCCCAAAAAAAACDDCCAAABB..",
+        "..BBAACCDDCCCAAAAAAACDDCCAAABB..",
+        "..BBAACCDDCCCAAAAAAACCCCCAAABB..",
+        "..BBAECCCCCCCAAAACCCACCCAAAABB..",
+        "..BBAAECCCCCAAAACDDCCAAAAAAABB..",
+        "..BBAAAECCCAAAAACDDCCAAAAAAABB..",
+        "..BBAAAAEAAAAAAACCCCCAAAAAAABB..",
+        "..BBAAAAAEAAAAAAACCCAAAAAAAABB..",
+        "..BBAAAAAAEAAAAAAAAAAAAAAAAABB..",
+        "..BBBBBBBBBBBBBBBBBBBBBBBBBBBB..",
+        "..BBBBBBBBBBBBBBBBBBBBBBBBBBBB..",
+        "................................",
+        "................................"
+      ],
+      "palette": {
+        "A": "#080707",
+        "B": "#0e0c0c",
+        "C": "#4a4642",
+        "D": "#66615c",
+        "E": "#000000"
+      }
+    },
+    "rock_icon_variants": [],
+    "cluster_budget": 8,
+    "scanner_tool": "ore_scanner",
+    "scanner_types_tier": 2,
+    "scanner_counts_tier": 3,
+    "scanner_reveal_all_tier": 4
   },
   "mobs": {
     "wolf": {
@@ -1888,6 +2243,7 @@
       "is_boss": false,
       "rarity": 1,
       "hp": 15,
+      "damage": 3,
       "xp_reward": 5,
       "loot": {
         "wolf_pelt": 1
@@ -1961,6 +2317,7 @@
       "requires_tech": null,
       "is_boss": true,
       "hp": 200,
+      "damage": 10,
       "xp_reward": 100,
       "loot": {
         "boss_fang": 5,
@@ -2151,6 +2508,20 @@
       ]
     }
   },
+  "eras": {
+    "1": {
+      "name": "Эра 1",
+      "color": "#f0a030"
+    },
+    "2": {
+      "name": "Эра 2",
+      "color": "#4ac9a0"
+    },
+    "3": {
+      "name": "Эра 3",
+      "color": "#7fa4ef"
+    }
+  },
   "quests": {
     "quest_settle_in": {
       "name": "Обжились",
@@ -2295,11 +2666,14 @@
     },
     "pickaxe": {
       "name": "Кирка",
+      "enchant_kind": "mining",
       "tiers": [
         {
           "name": "Деревянная кирка",
           "cost": null,
-          "requires_tech": null
+          "requires_tech": null,
+          "mining_area": 1,
+          "mining_power": 3
         },
         {
           "name": "Каменная кирка",
@@ -2307,7 +2681,14 @@
             "wood": 10,
             "stone": 15
           },
-          "requires_tech": null
+          "requires_tech": null,
+          "mining_area": 1,
+          "mining_power": 5,
+          "max_durability": 25,
+          "repair_cost": {
+            "wood": 5,
+            "stone": 8
+          }
         },
         {
           "name": "Металлическая кирка",
@@ -2315,7 +2696,13 @@
             "tools": 10,
             "metal": 10
           },
-          "requires_tech": "metallurgy"
+          "requires_tech": "metallurgy",
+          "mining_area": 2,
+          "mining_power": 7,
+          "max_durability": 35,
+          "repair_cost": {
+            "metal": 8
+          }
         },
         {
           "name": "Прочная кирка",
@@ -2323,7 +2710,13 @@
             "metal": 30,
             "tools": 15
           },
-          "requires_tech": "industrial_smelting"
+          "requires_tech": "industrial_smelting",
+          "mining_area": 2,
+          "mining_power": 9,
+          "max_durability": 50,
+          "repair_cost": {
+            "metal": 15
+          }
         },
         {
           "name": "Промышленная кирка",
@@ -2331,13 +2724,21 @@
             "metal": 60,
             "tools": 30
           },
-          "requires_tech": "resource_synthesis"
+          "requires_tech": "resource_synthesis",
+          "mining_area": 3,
+          "mining_power": 12,
+          "max_durability": 70,
+          "repair_cost": {
+            "metal": 25,
+            "tools": 10
+          }
         }
       ]
     },
     "sword": {
       "name": "Меч",
       "weapon": true,
+      "enchant_kind": "weapon",
       "tiers": [
         {
           "name": "Кулаки",
@@ -2352,7 +2753,14 @@
           },
           "requires_tech": null,
           "damage_multiplier": 2,
-          "unlocks_moves": ["focused_strike", "finishing_blow"]
+          "unlocks_moves": [
+            "focused_strike",
+            "finishing_blow"
+          ],
+          "max_durability": 15,
+          "repair_cost": {
+            "wood": 5
+          }
         },
         {
           "name": "Металлический меч",
@@ -2362,13 +2770,21 @@
           },
           "requires_tech": "metallurgy",
           "damage_multiplier": 4,
-          "unlocks_moves": ["heavy_strike", "shatter_strike"]
+          "unlocks_moves": [
+            "heavy_strike",
+            "shatter_strike"
+          ],
+          "max_durability": 25,
+          "repair_cost": {
+            "metal": 6
+          }
         }
       ]
     },
     "guardian_slayer": {
       "name": "Клинок Стража",
       "weapon": true,
+      "enchant_kind": "weapon",
       "tiers": [
         {
           "name": "Не выковано",
@@ -2385,7 +2801,204 @@
           "instant_kill_max_hp": 250,
           "loot_multiplier": 1.5,
           "soul_chance_multiplier": 2,
-          "unlocks_moves": ["rending_strike"]
+          "unlocks_moves": [
+            "rending_strike"
+          ],
+          "max_durability": 40,
+          "repair_cost": {
+            "metal": 20
+          }
+        }
+      ]
+    },
+    "armor": {
+      "name": "Броня",
+      "armor": true,
+      "enchant_kind": "armor",
+      "tiers": [
+        {
+          "name": "Без брони",
+          "cost": null,
+          "requires_tech": null
+        },
+        {
+          "name": "Кожаная броня",
+          "cost": {
+            "wolf_pelt": 3,
+            "wood": 10
+          },
+          "requires_tech": null,
+          "max_hp_bonus": 10,
+          "damage_reduction": 1,
+          "max_durability": 20,
+          "repair_cost": {
+            "wolf_pelt": 1,
+            "wood": 5
+          }
+        },
+        {
+          "name": "Металлическая броня",
+          "cost": {
+            "metal": 25,
+            "tools": 5
+          },
+          "requires_tech": "metallurgy",
+          "max_hp_bonus": 20,
+          "damage_reduction": 3,
+          "max_durability": 30,
+          "repair_cost": {
+            "metal": 8
+          }
+        }
+      ]
+    },
+    "ore_scanner": {
+      "name": "Рудный щуп",
+      "tiers": [
+        {
+          "name": "Самодельный щуп",
+          "cost": null,
+          "requires_tech": null
+        },
+        {
+          "name": "Калиброванный щуп",
+          "cost": {
+            "planks": 10,
+            "tools": 3
+          },
+          "requires_tech": "mining"
+        },
+        {
+          "name": "Резонансный щуп",
+          "cost": {
+            "tools": 10,
+            "metal": 5
+          },
+          "requires_tech": "mechanized_mining"
+        },
+        {
+          "name": "Глубинный сканер",
+          "cost": {
+            "metal": 15,
+            "tools": 10
+          },
+          "requires_tech": "uranium_prospecting"
+        }
+      ]
+    }
+  },
+  "enchantments": {
+    "luck": {
+      "name": "Удача",
+      "description": "Увеличивает количество руды, выбиваемой с одного блока в шахте (округление вверх).",
+      "applies_to_kind": "mining",
+      "effect": {
+        "type": "yield_multiplier"
+      },
+      "levels": [
+        {
+          "value": 1.5
+        },
+        {
+          "value": 2.0
+        },
+        {
+          "value": 2.5
+        }
+      ]
+    },
+    "durability": {
+      "name": "Прочность",
+      "description": "Увеличивает максимальную прочность инструмента.",
+      "applies_to_kind": null,
+      "effect": {
+        "type": "durability_multiplier"
+      },
+      "levels": [
+        {
+          "value": 1.5
+        },
+        {
+          "value": 2.0
+        },
+        {
+          "value": 2.5
+        }
+      ]
+    },
+    "sharpness": {
+      "name": "Острота",
+      "description": "Увеличивает базовый урон оружия.",
+      "applies_to_kind": "weapon",
+      "effect": {
+        "type": "damage_bonus"
+      },
+      "levels": [
+        {
+          "value": 0.25
+        },
+        {
+          "value": 0.5
+        },
+        {
+          "value": 0.75
+        }
+      ]
+    },
+    "looting": {
+      "name": "Добыча",
+      "description": "Увеличивает шанс получить дроп и душу с убитого моба.",
+      "applies_to_kind": "weapon",
+      "effect": {
+        "type": "drop_chance_multiplier"
+      },
+      "levels": [
+        {
+          "value": 1.3
+        },
+        {
+          "value": 1.6
+        },
+        {
+          "value": 2.0
+        }
+      ]
+    },
+    "protection": {
+      "name": "Защита",
+      "description": "Увеличивает снижение входящего урона от брони.",
+      "applies_to_kind": "armor",
+      "effect": {
+        "type": "armor_defense_bonus"
+      },
+      "levels": [
+        {
+          "value": 2
+        },
+        {
+          "value": 4
+        },
+        {
+          "value": 6
+        }
+      ]
+    },
+    "vitality": {
+      "name": "Живучесть",
+      "description": "Увеличивает максимум HP игрока.",
+      "applies_to_kind": "armor",
+      "effect": {
+        "type": "max_hp_bonus_add"
+      },
+      "levels": [
+        {
+          "value": 8
+        },
+        {
+          "value": 15
+        },
+        {
+          "value": 25
         }
       ]
     }
@@ -2393,7 +3006,7 @@
   "skills": {
     "combat": {
       "name": "Боевой навык",
-      "description": "Растёт от ударов по мобам и боссам в охотничьих угодьях - повышает урон атаки.",
+      "description": "Растёт от ударов по мобам и боссам в охотничьих угодьях - повышает урон атаки и, начиная со 2 уровня, максимум HP игрока.",
       "levels": [
         {
           "xp_required": 0,
@@ -2404,19 +3017,22 @@
         {
           "xp_required": 30,
           "effects": {
-            "damage": 4
+            "damage": 4,
+            "max_hp": 10
           }
         },
         {
           "xp_required": 100,
           "effects": {
-            "damage": 8
+            "damage": 8,
+            "max_hp": 20
           }
         },
         {
           "xp_required": 300,
           "effects": {
-            "damage": 16
+            "damage": 16,
+            "max_hp": 35
           }
         }
       ]
@@ -2425,7 +3041,7 @@
   "species": {
     "bee": {
       "description": "Обычная лесная пчела - даёт немного мёда, пока живёт в ферме.",
-      "family": "bee",
+      "family": "пчела",
       "produces": {
         "honey": 2
       },
@@ -2435,7 +3051,7 @@
     },
     "royal_bee": {
       "description": "Редкая порода пчёл, появляющаяся при скрещивании - производит заметно больше мёда и маточное молочко.",
-      "family": "bee",
+      "family": "пчела",
       "produces": {
         "honey": 5,
         "royal_jelly": 1
@@ -2446,7 +3062,7 @@
     },
     "mana_flower_sunlight": {
       "description": "Обычный дикий манацвет - питается светом, ничего не тратит, даёт немного маны, пока живёт в оранжерее.",
-      "family": "flower",
+      "family": "цветок",
       "produces": {
         "mana": 2
       },
@@ -2456,7 +3072,7 @@
     },
     "mana_flower_ember": {
       "description": "Манацвет, появляющийся при скрещивании - разгорается, поедая уголь, и даёт заметно больше маны, чем солнечный.",
-      "family": "flower",
+      "family": "цветок",
       "produces": {
         "mana": 5
       },
@@ -2468,7 +3084,7 @@
     },
     "mana_flower_geode": {
       "description": "Редкий манацвет, появляющийся при скрещивании тлеющих цветов - прорастает камнем и рудой, даёт больше всего маны.",
-      "family": "flower",
+      "family": "цветок",
       "produces": {
         "mana": 9
       },
@@ -2570,55 +3186,37 @@
           "id": "forest",
           "name": "Лес",
           "dominant": true,
-          "weight": 5,
-          "bonus_resource": "wood",
-          "bonus_amount": 1,
-          "bonus_chance": 0.3
+          "weight": 5
         },
         {
           "id": "fields",
           "name": "Поля",
           "dominant": false,
-          "weight": 5,
-          "bonus_resource": "honey",
-          "bonus_amount": 1,
-          "bonus_chance": 0.3
+          "weight": 5
         },
         {
           "id": "caves",
           "name": "Пещеры",
           "dominant": false,
-          "weight": 3,
-          "bonus_resource": "ore",
-          "bonus_amount": 1,
-          "bonus_chance": 0.25
+          "weight": 3
         },
         {
           "id": "desert",
           "name": "Пустыня",
           "dominant": false,
-          "weight": 3,
-          "bonus_resource": "stone",
-          "bonus_amount": 1,
-          "bonus_chance": 0.25
+          "weight": 3
         },
         {
           "id": "water",
           "name": "Вода",
           "dominant": false,
-          "weight": 2,
-          "bonus_resource": "energy",
-          "bonus_amount": 1,
-          "bonus_chance": 0.2
+          "weight": 2
         },
         {
           "id": "space",
           "name": "Космос",
           "dominant": false,
-          "weight": 1,
-          "bonus_resource": "uranium",
-          "bonus_amount": 1,
-          "bonus_chance": 0.15
+          "weight": 1
         }
       ]
     }
@@ -2669,5 +3267,11 @@
       "honey": 50
     },
     "environment_mutation_chance": 0.01
+  },
+  "combat": {
+    "player_base_hp": 20,
+    "hp_regen_per_turn": 3,
+    "wounded_turns": 5,
+    "wounded_damage_multiplier": 0.5
   }
 }

@@ -33,6 +33,13 @@ class GameState:
     # удаляется) при смене тира (upgrade_tool) и при ремонте самого инструмента
     # (repair_tool) - в обоих случаях инструмент снова "полностью исправен".
     tool_durability: dict[str, int] = field(default_factory=dict)
+    # tool_id -> {enchant_id: level} - зачарования, применённые к ЭТОЙ линейке
+    # инструмента (см. game/engine.py:enchant_tool/tool_enchant_level). Уровень
+    # уже применённого зачарования никогда не понижается новой удачной попыткой
+    # (см. enchant_tool - тот же принцип "сильнейшее побеждает", что у улучшений
+    # построек); провал стирает у инструмента ВСЕ зачарования разом (ключ
+    # tool_id целиком удаляется из словаря, а не обнуляется значениями).
+    tool_enchantments: dict[str, dict[str, int]] = field(default_factory=dict)
     # building_id -> сколько РАБОТАЮЩИХ копий постройки игрок вручную выключил
     # ползунком "Механизмы" (только у построек с непустыми И produces, И consumes -
     # см. game/engine.py:is_disableable_building/set_building_active_count).
@@ -49,7 +56,12 @@ class GameState:
     # считается тиром 1 (стартовый тир любого инструмента бесплатен и есть у игрока
     # с самого начала, как раньше было с единственной киркой).
     tool_tiers: dict[str, int] = field(default_factory=dict)
-    veins: dict[str, int] = field(default_factory=dict)  # resource_id -> сколько осталось в найденной жиле
+    # Поле шахты (fog-of-war сетка, см. game/engine.py:_generate_mine_field/
+    # hit_mine_field) - ОДНО на всю игру, как active_encounter/active_research:
+    # {"size": N, "cells": [{"resource": id|None, "hp", "hp_max", "broken",
+    # "revealed"}, ...]} (row-major, длина size*size). None, пока игрок ни разу не
+    # заходил в шахту - создаётся лениво (_ensure_mine_field) при первом обращении.
+    active_mine_field: dict | None = None
     # Снимок по каждому ходу, для статистики за диапазон - не более HISTORY_MAX_ENTRIES
     # записей (старые вытесняются, см. engine.py:record_history_entry и from_dict ниже).
     history: list[dict] = field(default_factory=list)
@@ -119,12 +131,6 @@ class GameState:
     # Отсутствие ключа = 0 (только базовая вместимость, capacity.base_capacity) -
     # ровно как tool_tiers резолвится в тир 1, если инструмента ещё нет в словаре.
     storage_tier: dict[str, int] = field(default_factory=dict)
-    # resource_id -> индекс выбранного тира качества (content.json mining_info[...]
-    # ["quality_tiers"]) для ТЕКУЩЕЙ найденной жилы этого ресурса (см.
-    # game/engine.py:search_vein_any/mining_yield_per_turn). Заменяется целиком при
-    # каждом новом поиске, синхронно с state.veins - у ресурса без quality_tiers
-    # ключа тут не будет вовсе.
-    vein_quality: dict[str, int] = field(default_factory=dict)
     # ВСЕ особи игрока (пойманные, выведенные скрещиванием, синтезированные) -
     # словарь по уникальному id особи (не по species_id: у двух особей одного вида
     # могут быть разные гены). См. game/engine.py:spawn_creature/breed_creatures/
@@ -179,11 +185,20 @@ class GameState:
     # ровно как tool_tiers резолвится в тир 1, если инструмента ещё нет в словаре).
     skill_xp: dict[str, int] = field(default_factory=dict)
     # Текущая цель схватки (охота на моба/босса, content.json["mobs"]) - ГЛОБАЛЬНО
-    # одна на всю игру, как state.veins: {"mob_id", "remaining_hp"} или None, если
+    # одна на всю игру, как state.active_mine_field: {"mob_id", "remaining_hp"} или None, если
     # никого сейчас не ищут/не призвали. Новый поиск/призыв заменяет её целиком -
     # недобитая цель просто теряется (уже потраченный на призыв босса предмет не
     # возвращается) - см. game/engine.py:search_mob_any/summon_boss/attack_encounter.
     active_encounter: dict | None = None
+    # Текущее исследование "в процессе" (techs.*.research_turns > 1, см.
+    # game/engine.py:research/_process_research/tech_research_turns) - ГЛОБАЛЬНО
+    # одно на всю игру, как state.active_encounter/active_mine_field (НЕ как manual_jobs, где
+    # своя задача на каждый action_id): {"tech_id", "turns_total", "turns_done"}
+    # или None, если сейчас ничего не исследуется. cost уже списан целиком в
+    # момент старта (research()) - досрочная отмена (cancel_research) возвращает
+    # его игроку, накопленные turns_done - нет (тот же принцип, что
+    # manual_jobs/cancel_manual_job).
+    active_research: dict | None = None
     # building_id (постройка с полем soul_collector) -> список id вставленных душ
     # (порядок = порядок вставки, НЕ индексы фиксированных слотов - см.
     # game/engine.py:insert_soul/remove_soul/soul_collector_capacity). Душа
@@ -210,6 +225,22 @@ class GameState:
     # (tools.*.tiers[].unlocks_moves), не этот словарь - он только про кулдаун
     # уже открытых приёмов.
     move_cooldowns: dict[str, int] = field(default_factory=dict)
+    # Текущее HP игрока - None означает "на максимуме" (тот же приём, что
+    # tool_tiers: отсутствие явного значения = дефолт), НИКОГДА не читай
+    # напрямую - только через game/engine.py:current_player_hp (клампит в
+    # [0, player_max_hp(state)] и разворачивает None). Меняется только внутри
+    # схватки (ответный удар моба, см. attack_encounter) и реген вне схватки
+    # (см. _process_combat) - у самого поля нет верхней границы, чтобы не
+    # хранить дублирующийся max_hp в сейве (он всё равно пересчитывается из
+    # content.json + навыка + брони на каждый вызов).
+    player_hp: int | None = None
+    # Ход, до которого действует дебафф "Ранен" (входящий урон снижен, новая
+    # схватка недоступна при 0 HP - см. game/engine.py:is_wounded) - None, если
+    # дебаффа нет. Тот же паттерн сравнения, что state.active_encounter
+    # ["deadline_turn"] у босса (state.turn <= wounded_until_turn, а не тик
+    # отдельным счётчиком) - выставляется при поражении (attack_encounter),
+    # обнуляется в _process_combat, когда ход перевалил за это значение.
+    wounded_until_turn: int | None = None
     # building_id (постройка с полем automation_hub) -> список правил
     # автоматизации: [{"kind", "target_id", "conditions"}, ...]. "kind" -
     # "manual_action" (target_id - id из content.json["manual_actions"]) или
@@ -226,6 +257,14 @@ class GameState:
     # что soul_slots. В правило можно поставить действие/рецепт, которые ещё
     # не открыты - будет молча пропускаться, пока не откроется.
     automation_rules: dict[str, list[dict]] = field(default_factory=dict)
+    # action_id -> сколько раз это ручное действие УЖЕ дало результат (gain начислен) -
+    # растёт и на мгновенном клике (do_manual_action), и на завершении многоходовой
+    # задачи (_process_manual_jobs), но НЕ на самом клике/старте многоходовой задачи -
+    # только на реальном получении gain. Нужен исключительно для квестов
+    # (manual_action_performed_at_least, см. game/engine.py:_condition_met) - раньше
+    # факт "скрафтил хоть раз" ничем не отслеживался отдельно от текущего запаса
+    # ресурса, который мог быть уже потрачен.
+    action_performed_count: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -236,10 +275,13 @@ class GameState:
             "broken": self.broken,
             "broken_types": self.broken_types,
             "tool_durability": self.tool_durability,
+            "tool_enchantments": {
+                tid: dict(levels) for tid, levels in self.tool_enchantments.items()
+            },
             "building_disabled": self.building_disabled,
             "pinned": self.pinned,
             "tool_tiers": self.tool_tiers,
-            "veins": self.veins,
+            "active_mine_field": self.active_mine_field,
             "history": self.history,
             "energy_jobs": self.energy_jobs,
             "autocraft_jobs": self.autocraft_jobs,
@@ -252,7 +294,6 @@ class GameState:
             "action_priority": self.action_priority,
             "energy_priority": self.energy_priority,
             "storage_tier": self.storage_tier,
-            "vein_quality": self.vein_quality,
             "creatures": {
                 cid: {**c, "genotype": {t: list(pair) for t, pair in c["genotype"].items()}}
                 for cid, c in self.creatures.items()
@@ -267,10 +308,13 @@ class GameState:
             "next_farm_instance_id": self.next_farm_instance_id,
             "skill_xp": self.skill_xp,
             "active_encounter": self.active_encounter,
+            "active_research": self.active_research,
             "soul_slots": self.soul_slots,
             "completed_quests": self.completed_quests,
             "claimed_quests": sorted(self.claimed_quests),
             "move_cooldowns": self.move_cooldowns,
+            "player_hp": self.player_hp,
+            "wounded_until_turn": self.wounded_until_turn,
             "automation_rules": {
                 bid: [dict(r) for r in rules] for bid, rules in self.automation_rules.items()
             },
@@ -286,10 +330,13 @@ class GameState:
             broken=dict(data.get("broken", {})),
             broken_types={k: list(v) for k, v in data.get("broken_types", {}).items()},
             tool_durability=dict(data.get("tool_durability", {})),
+            tool_enchantments={
+                tid: dict(levels) for tid, levels in data.get("tool_enchantments", {}).items()
+            },
             building_disabled=dict(data.get("building_disabled", {})),
             pinned=list(data.get("pinned", [])),
             tool_tiers=dict(data.get("tool_tiers", {})),
-            veins=dict(data.get("veins", {})),
+            active_mine_field=data.get("active_mine_field"),
             history=list(data.get("history", []))[-HISTORY_MAX_ENTRIES:],
             energy_jobs=[dict(j) for j in data.get("energy_jobs", [])],
             autocraft_jobs={k: dict(v) for k, v in data.get("autocraft_jobs", {}).items()},
@@ -302,7 +349,6 @@ class GameState:
             action_priority=dict(data.get("action_priority", {})),
             energy_priority=dict(data.get("energy_priority", {})),
             storage_tier=dict(data.get("storage_tier", {})),
-            vein_quality=dict(data.get("vein_quality", {})),
             creatures={
                 cid: {
                     **{k: v for k, v in c.items() if k not in ("genotype", "farm_building_id")},
@@ -327,10 +373,13 @@ class GameState:
             next_farm_instance_id=data.get("next_farm_instance_id", 1),
             skill_xp=dict(data.get("skill_xp", {})),
             active_encounter=dict(data["active_encounter"]) if data.get("active_encounter") else None,
+            active_research=dict(data["active_research"]) if data.get("active_research") else None,
             soul_slots={k: list(v) for k, v in data.get("soul_slots", {}).items()},
             completed_quests=dict(data.get("completed_quests", {})),
             claimed_quests=set(data.get("claimed_quests", [])),
             move_cooldowns=dict(data.get("move_cooldowns", {})),
+            player_hp=data.get("player_hp"),
+            wounded_until_turn=data.get("wounded_until_turn"),
             automation_rules={
                 bid: [dict(r) for r in rules]
                 for bid, rules in data.get("automation_rules", {}).items()

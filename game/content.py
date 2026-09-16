@@ -40,10 +40,24 @@ MANUAL_ACTIONS: dict = _DATA["manual_actions"]
 BUILDINGS: dict = _DATA["buildings"]
 TECHS: dict = _DATA["techs"]
 MINING_INFO: dict = _DATA["mining_info"]
+# Настройки самого поля шахты (fog-of-war сетка) - необязательный верхнеуровневый
+# блок, тот же принцип, что GENETICS_SETTINGS/COMBAT_SETTINGS. size - сторона
+# квадратного поля; dig_tool - какой инструмент (tools.*) даёт зону/урон удара
+# (mining_area/mining_power НА ТИРЕ этого инструмента, см. game/engine.py:
+# pickaxe_area/pickaxe_power); rock_* - параметры пустой породы (раньше это было
+# ручное действие gather_stone, теперь просто "то, что не руда" на поле).
+MINE_FIELD: dict = _DATA.get("mine_field", {})
 # Инструменты (было "кирка" - единственный жёстко зашитый инструмент; теперь любое
 # число инструментов, каждый со своим списком тиров той же формы, что раньше был у
 # кирки: {name, cost, requires_tech, icon}). tool_id -> {"name": ..., "tiers": [...]}.
 TOOLS: dict = _DATA["tools"]
+# Зачарования (стол зачарований) - id -> {"name", "description", "applies_to_kind",
+# "effect": {"type"}, "levels": [{"value"}, ...]}. applies_to_kind - тег, который
+# должен совпадать с tools.*.enchant_kind (null = универсальное зачарование,
+# доступно ЛЮБОМУ инструменту с enchant_kind, например "Прочность") - тот же
+# generic-принцип тега, что RESOURCE_SOUL_KIND/soul_collector.accepts_kind. См.
+# game/engine.py: enchantment_pool/enchant_tool/tool_enchant_level.
+ENCHANTMENTS: dict = _DATA.get("enchantments", {})
 LOCATIONS: dict = _DATA["locations"]
 TIME: dict = _DATA["time"]
 # Рецепты крафта за энергию (см. buildings.*.energy_converter) - НЕ привязаны к
@@ -71,6 +85,11 @@ MUTATIONS: list = _DATA.get("mutations", [])
 # скрещивание, synthesis_cost - цена генетического шаблона), необязательный
 # верхнеуровневый раздел. См. game/engine.py:breed_creatures/synthesize_creature.
 GENETICS_SETTINGS: dict = _DATA.get("genetics", {})
+# Глобальные настройки боя (player_base_hp/hp_regen_per_turn/wounded_turns/
+# wounded_damage_multiplier) - тот же необязательный верхнеуровневый раздел,
+# что GENETICS_SETTINGS. См. game/engine.py:player_max_hp/current_player_hp/
+# is_wounded/attack_encounter.
+COMBAT_SETTINGS: dict = _DATA.get("combat", {})
 # Мобы и боссы (is_boss=true) для механики "Охота" (см. locations.*.hunting,
 # game/engine.py:search_mob_any/summon_boss/attack_encounter) - id ссылается на
 # СВОЁ пространство (не на resources, в отличие от mining_info/species): мобы -
@@ -116,6 +135,13 @@ LOOT_CASES: dict = _DATA.get("loot_cases", {})
 # с лутом (LOOT_CASES), который игрок открывает сам отдельным кликом после
 # выполнения условий (см. claim_quest_reward).
 QUESTS: dict = _DATA.get("quests", {})
+# Оформление эр квестбука - id (строка, тот же номер, что QUESTS[...]["era"]) ->
+# {"name", "color"} ("color" - '#rrggbb', цвет вкладки/фона графа этой эры).
+# Необязательный раздел - у era без записи здесь UI сам подставляет дефолтное
+# имя "Эра N" и цикличную палитру (см. tools/content_editor.html:
+# tierBandColorEditor, tools/web_ui.html:tierBandColor) - этот словарь тут
+# только прокидывается клиенту (web_ui.py), сама игровая логика era не касается.
+ERAS: dict = _DATA.get("eras", {})
 # Виды поломки построек (необязательный раздел) - id -> {"name", "description",
 # "required_tools"}. buildings.*.breakdown_types ссылается на эти id (список,
 # пусто/нет ключа = поломка без типа, старое поведение). required_tools -

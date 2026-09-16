@@ -17,6 +17,11 @@ _ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 # сущность content.json) - существование файла этот модуль не проверяет (см. модуль-докстринг).
 _SOUND_FILENAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.(wav|mp3|ogg)$")
 
+# Цвет темы эры квестбука (data["eras"][...]["color"]) и необязательный
+# per-квестовый оверрайд фона/рамки узла графа (quests.*.bg/border) - строго
+# '#rrggbb', тот же формат, что отдаёт HTML <input type="color">.
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
 # Должен совпадать с game.engine.MINE_LOCATION_ID и const MINE_LOCATION_ID в
 # tools/content_editor.html. Не импортируется отсюда напрямую: этот модуль намеренно
 # не знает о game.* (валидирует произвольный словарь-кандидат, а не текущий диск),
@@ -58,6 +63,9 @@ CONDITION_FIELDS = {
     "turn_at_least": ["amount"],
     "tool_tier_at_least": ["tool", "amount"],
     "species_discovered_at_least": ["amount"],
+    "species_discovered": ["species"],
+    "manual_action_performed_at_least": ["action", "amount"],
+    "building_upgrade_purchased": ["building", "upgrade"],
 }
 
 
@@ -509,6 +517,14 @@ def validate(data: dict) -> list[str]:
                     errors.append(f"Постройка '{bid}': soul_collector.accepts_kind должен быть непустой строкой (тег вида души, см. resources.*.soul_kind)")
                 elif accepts_kind not in soul_kinds:
                     errors.append(f"Постройка '{bid}': soul_collector.accepts_kind ссылается на тег '{accepts_kind}', которого нет ни у одного ресурса-души")
+        enchanting_table = b.get("enchanting_table")
+        if enchanting_table is not None:
+            if not isinstance(enchanting_table, dict):
+                errors.append(f"Постройка '{bid}': enchanting_table должен быть объектом")
+            else:
+                check_resource_dict(enchanting_table.get("cost", {}), f"Постройка '{bid}'.enchanting_table.cost")
+                if not enchanting_table.get("cost"):
+                    errors.append(f"Постройка '{bid}': enchanting_table.cost пуст - попытка зачарования должна что-то стоить (обычно книгу зачарований)")
         automation_hub = b.get("automation_hub")
         if automation_hub is not None:
             if not isinstance(automation_hub, dict):
@@ -658,13 +674,18 @@ def validate(data: dict) -> list[str]:
                             errors.append(f"{where}: value для automation_slots должен быть положительным числом (АБСОЛЮТНАЯ добавка к вместимости автоматизатора, уровни не складываются - см. game/engine.py:automation_slots_capacity)")
                         if not b.get("automation_hub"):
                             errors.append(f"{where}: automation_slots имеет смысл только у построек-автоматизаторов (automation_hub)")
+                    elif kind == "research_speed":
+                        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для research_speed должен быть положительным числом (АБСОЛЮТНОЕ сокращение времени исследования, В ХОДАХ, не доля - см. game/engine.py:tech_research_turns), уровни не складываются")
+                        if not b.get("lab_tier"):
+                            errors.append(f"{where}: research_speed имеет смысл только у построек-лабораторий (lab_tier) - действует на техи ТОГО ЖЕ тира, что lab_tier этой постройки")
                     else:
                         errors.append(
                             f"{where}: type должен быть 'scale', 'energy_efficiency', 'generation_efficiency', "
                             f"'breeding_output', 'breeding_slots_bonus', 'breeding_immortality', "
                             f"'breeding_mutation_chance', 'energy_converter_capacity', 'environment_emulation', "
                             f"'soul_collector_slots', 'soul_generation_efficiency', 'breakdown_immunity', "
-                            f"'action_duration_reduction' или 'automation_slots' (сейчас: {kind!r})"
+                            f"'action_duration_reduction', 'automation_slots' или 'research_speed' (сейчас: {kind!r})"
                         )
         if not b.get("name"):
             errors.append(f"Постройка '{bid}': не указано название")
@@ -674,6 +695,9 @@ def validate(data: dict) -> list[str]:
         if label is not None and (not isinstance(label, str) or not (1 <= len(label) <= 3)):
             errors.append(f"Постройка '{bid}': icon_label должен быть строкой из 1-3 символов")
         check_icon(b.get("icon"), f"Постройка '{bid}'")
+        tags = b.get("tags", [])
+        if not isinstance(tags, list) or not all(isinstance(t, str) and t for t in tags):
+            errors.append(f"Постройка '{bid}': tags должен быть списком непустых строк (произвольные теги для фильтра в панели «Производственные мощности»)")
 
     building_cyclic = find_building_requires_cycle(buildings)
     if building_cyclic:
@@ -701,6 +725,9 @@ def validate(data: dict) -> list[str]:
         tier = t.get("tier")
         if not isinstance(tier, int) or tier < 1:
             errors.append(f"Технология '{tid}': tier должен быть положительным целым числом (тир 1 доступен без лаборатории)")
+        research_turns = t.get("research_turns")
+        if research_turns is not None and (not isinstance(research_turns, int) or isinstance(research_turns, bool) or research_turns < 2):
+            errors.append(f"Технология '{tid}': research_turns должен быть null или целым числом >= 2 (сколько ходов занимает исследование сверх мгновенного - см. game/engine.py:tech_research_turns)")
         for req in t.get("requires", []):
             if req == tid:
                 errors.append(f"Технология '{tid}' требует сама себя")
@@ -742,47 +769,64 @@ def validate(data: dict) -> list[str]:
         rarity = info.get("rarity", 0)
         if not isinstance(rarity, (int, float)) or rarity <= 0:
             errors.append(f"Добыча '{rid}': rarity должен быть положительным числом (чем больше - тем реже встречается руда)")
-        vr = info.get("vein_size_range")
-        if not (isinstance(vr, list) and len(vr) == 2 and all(isinstance(x, int) for x in vr) and 0 < vr[0] <= vr[1]):
-            errors.append(f"Добыча '{rid}': vein_size_range должен быть парой [min, max], 0 < min <= max")
+        toughness = info.get("toughness")
+        if not isinstance(toughness, int) or isinstance(toughness, bool) or toughness <= 0:
+            errors.append(f"Добыча '{rid}': toughness должен быть положительным целым числом (сколько урона снять с клетки)")
+        cluster = info.get("field_cluster_size")
+        if not (
+            isinstance(cluster, list) and len(cluster) == 2 and all(isinstance(x, int) for x in cluster)
+            and 0 < cluster[0] <= cluster[1]
+        ):
+            errors.append(f"Добыча '{rid}': field_cluster_size должен быть парой [min, max], 0 < min <= max")
         yld = info.get("base_yield", 0)
         if not isinstance(yld, int) or yld <= 0:
             errors.append(f"Добыча '{rid}': base_yield должен быть положительным целым числом")
-        check_click_delay(info.get("click_delay_ms"), f"Добыча '{rid}'")
+        check_icon(info.get("icon"), f"Добыча '{rid}'")
 
-        quality_tiers = info.get("quality_tiers")
-        if quality_tiers is not None:
-            if not isinstance(quality_tiers, list) or not quality_tiers:
-                errors.append(f"Добыча '{rid}': quality_tiers должен быть непустым списком тиров качества (или отсутствовать вовсе)")
-            else:
-                required_tier_for_pool = info.get("required_tier", 1)
-                tool_tier_count = len(tools[required_tool]["tiers"]) if required_tool in tools else None
-                min_tiers_seen = []
-                for i, q in enumerate(quality_tiers, start=1):
-                    qwhere = f"Добыча '{rid}', тир качества {i}"
-                    if not isinstance(q, dict):
-                        errors.append(f"{qwhere}: должен быть объектом")
-                        continue
-                    if not q.get("name"):
-                        errors.append(f"{qwhere}: не указано название")
-                    weight = q.get("weight")
-                    if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
-                        errors.append(f"{qwhere}.weight: должен быть положительным числом")
-                    mult = q.get("size_multiplier")
-                    if not isinstance(mult, (int, float)) or isinstance(mult, bool) or mult <= 0:
-                        errors.append(f"{qwhere}.size_multiplier: должен быть положительным числом")
-                    min_tier = q.get("min_tool_tier", 1)
-                    if not isinstance(min_tier, int) or isinstance(min_tier, bool) or min_tier < 1:
-                        errors.append(f"{qwhere}.min_tool_tier: должен быть положительным целым числом")
-                    elif tool_tier_count is not None and min_tier > tool_tier_count:
-                        errors.append(f"{qwhere}.min_tool_tier: {min_tier} вне диапазона 1..{tool_tier_count}")
-                    else:
-                        min_tiers_seen.append(min_tier)
-                if min_tiers_seen and min(min_tiers_seen) > required_tier_for_pool:
-                    errors.append(
-                        f"Добыча '{rid}': ни один тир качества не доступен на пороге открытия добычи "
-                        f"(required_tier={required_tier_for_pool}) - розыгрыш качества окажется пустым"
-                    )
+    mine_field = data.get("mine_field", {})
+    if not isinstance(mine_field, dict):
+        errors.append("mine_field: должен быть объектом настроек поля шахты")
+    else:
+        size = mine_field.get("size")
+        if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+            errors.append("mine_field.size: должен быть положительным целым числом")
+        dig_tool = mine_field.get("dig_tool")
+        if dig_tool not in tools:
+            errors.append(f"mine_field.dig_tool: ссылается на неизвестный инструмент '{dig_tool}'")
+        budget = mine_field.get("cluster_budget")
+        if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
+            errors.append("mine_field.cluster_budget: должен быть положительным целым числом (общее число кластеров руды на поле)")
+        scanner_tool = mine_field.get("scanner_tool")
+        if scanner_tool not in tools:
+            errors.append(f"mine_field.scanner_tool: ссылается на неизвестный инструмент '{scanner_tool}'")
+        else:
+            scanner_tier_count = len(tools[scanner_tool]["tiers"])
+            prev_tier = 0
+            for key in ("scanner_types_tier", "scanner_counts_tier", "scanner_reveal_all_tier"):
+                value = mine_field.get(key)
+                if not isinstance(value, int) or isinstance(value, bool) or not (1 <= value <= scanner_tier_count):
+                    errors.append(f"mine_field.{key}: должен быть целым числом от 1 до {scanner_tier_count} (число тиров '{scanner_tool}')")
+                elif value < prev_tier:
+                    errors.append(f"mine_field.{key}: должен быть не меньше предыдущего порога щупа (иначе более высокий тир ничего не добавляет)")
+                else:
+                    prev_tier = value
+        rock_resource = mine_field.get("rock_resource")
+        if rock_resource not in resource_ids:
+            errors.append(f"mine_field.rock_resource: ссылается на неизвестный ресурс '{rock_resource}'")
+        rock_yield = mine_field.get("rock_yield")
+        if not isinstance(rock_yield, int) or isinstance(rock_yield, bool) or rock_yield <= 0:
+            errors.append("mine_field.rock_yield: должен быть положительным целым числом")
+        rock_toughness = mine_field.get("rock_toughness")
+        if not isinstance(rock_toughness, int) or isinstance(rock_toughness, bool) or rock_toughness <= 0:
+            errors.append("mine_field.rock_toughness: должен быть положительным целым числом")
+        check_icon(mine_field.get("rock_icon"), "mine_field.rock_icon")
+        check_icon(mine_field.get("rock_broken_icon"), "mine_field.rock_broken_icon")
+        rock_variants = mine_field.get("rock_icon_variants", [])
+        if not isinstance(rock_variants, list):
+            errors.append("mine_field.rock_icon_variants: должен быть списком иконок")
+        else:
+            for i, variant in enumerate(rock_variants):
+                check_icon(variant, f"mine_field.rock_icon_variants[{i}]")
 
     mobs = data.get("mobs", {})
     for mid, mob in mobs.items():
@@ -805,6 +849,9 @@ def validate(data: dict) -> list[str]:
         xp_reward = mob.get("xp_reward", 0)
         if not isinstance(xp_reward, (int, float)) or isinstance(xp_reward, bool) or xp_reward < 0:
             errors.append(f"{where}: xp_reward должен быть неотрицательным числом")
+        damage = mob.get("damage", 0)
+        if not isinstance(damage, (int, float)) or isinstance(damage, bool) or damage < 0:
+            errors.append(f"{where}: damage должен быть неотрицательным числом (ответный урон по игроку за НЕубивающий удар, см. game/engine.py:attack_encounter), по умолчанию 0")
         check_resource_dict(mob.get("loot", {}), f"{where}.loot")
         check_chance_dict(mob.get("loot_chance"), mob.get("loot", {}), f"{where}.loot_chance")
         is_boss = mob.get("is_boss", False)
@@ -856,7 +903,25 @@ def validate(data: dict) -> list[str]:
             errors.append(f"Вид '{sid}': weight должен быть неотрицательным числом (0 = недоступен для дикого улова, только через мутацию)")
         family = sp.get("family")
         if family is not None and (not isinstance(family, str) or not family):
-            errors.append(f"Вид '{sid}': family должен быть null или непустой строкой (например 'bee'/'flower') - см. buildings.*.breeding_accepts_family")
+            errors.append(f"Вид '{sid}': family должен быть null или непустой строкой (например 'пчела'/'цветок') - см. buildings.*.breeding_accepts_family")
+        # bonus_* - бонусная продукция промышленной пасеки (см. game/engine.py:
+        # _process_habitat): КАКОЙ ресурс зависит от ВИДА (тут), а СРАБОТАЕТ ли
+        # бонус в этот ход - от генотипа "environment" (см. genetic_traits ниже) -
+        # два разных вида в одной и той же благоприятной среде дают разные бонусы.
+        # bonus_resource - необязательное поле (null/отсутствует = у вида нет
+        # бонуса); amount/chance проверяются, только если он указан - пустых у
+        # вида без бонуса не требуем, тот же принцип, что у soul_id/soul_chance
+        # моба (см. validate mobs выше).
+        bonus_resource = sp.get("bonus_resource")
+        if bonus_resource is not None:
+            if bonus_resource not in resource_ids:
+                errors.append(f"Вид '{sid}'.bonus_resource: неизвестный ресурс '{bonus_resource}'")
+            bonus_amount = sp.get("bonus_amount")
+            if not isinstance(bonus_amount, (int, float)) or isinstance(bonus_amount, bool) or bonus_amount <= 0:
+                errors.append(f"Вид '{sid}'.bonus_amount: должен быть положительным числом, если указан bonus_resource")
+            bonus_chance = sp.get("bonus_chance")
+            if not isinstance(bonus_chance, (int, float)) or isinstance(bonus_chance, bool) or not (0 < bonus_chance <= 1):
+                errors.append(f"Вид '{sid}'.bonus_chance: должен быть числом от 0 (не включая) до 1, если указан bonus_resource")
 
     # 4 жёстко зашитых ГЛОБАЛЬНЫХ признака генотипа (species - отдельно, через
     # species[].dominant/weight выше) - держать в паре с GENOTYPE_TRAIT_IDS в
@@ -906,15 +971,6 @@ def validate(data: dict) -> list[str]:
             elif trait_id == "environment":
                 if aid not in _ENVIRONMENT_ALLELE_IDS:
                     errors.append(f"{awhere}: у признака environment id аллели должен быть одним из {sorted(_ENVIRONMENT_ALLELE_IDS)} (сейчас: '{aid}')")
-                bonus_resource = a.get("bonus_resource")
-                if bonus_resource is not None and bonus_resource not in resource_ids:
-                    errors.append(f"{awhere}.bonus_resource: неизвестный ресурс '{bonus_resource}'")
-                bonus_amount = a.get("bonus_amount")
-                if not isinstance(bonus_amount, (int, float)) or isinstance(bonus_amount, bool) or bonus_amount < 0:
-                    errors.append(f"{awhere}.bonus_amount: должен быть неотрицательным числом")
-                bonus_chance = a.get("bonus_chance")
-                if not isinstance(bonus_chance, (int, float)) or isinstance(bonus_chance, bool) or not (0 <= bonus_chance <= 1):
-                    errors.append(f"{awhere}.bonus_chance: должен быть числом от 0 до 1 (вероятность бонусной продукции за ход)")
             else:
                 value = a.get("value")
                 if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
@@ -993,6 +1049,24 @@ def validate(data: dict) -> list[str]:
             or not (0 <= env_mutation_chance <= 1)
         ):
             errors.append("genetics.environment_mutation_chance: должен быть числом от 0 до 1, если указан")
+
+    combat_settings = data.get("combat", {})
+    if not isinstance(combat_settings, dict):
+        errors.append("combat: должен быть объектом")
+    else:
+        # Необязательный раздел целиком (тот же принцип, что genetics) - у каждого
+        # поля есть защитный дефолт на стороне движка (game/content.py:COMBAT_SETTINGS,
+        # game/engine.py:player_max_hp/_process_combat/_move_damage), поэтому здесь
+        # проверяем только те поля, что реально заданы.
+        for field_name in ("player_base_hp", "hp_regen_per_turn", "wounded_turns"):
+            value = combat_settings.get(field_name)
+            if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0):
+                errors.append(f"combat.{field_name}: должен быть неотрицательным числом, если указан")
+        wound_mult = combat_settings.get("wounded_damage_multiplier")
+        if wound_mult is not None and (
+            not isinstance(wound_mult, (int, float)) or isinstance(wound_mult, bool) or not (0 < wound_mult <= 1)
+        ):
+            errors.append("combat.wounded_damage_multiplier: должен быть числом в диапазоне (0, 1], если указан")
 
     energy_recipes = data.get("energy_recipes", {})
     for rid, recipe in energy_recipes.items():
@@ -1099,6 +1173,12 @@ def validate(data: dict) -> list[str]:
         weapon = tool.get("weapon", False)
         if not isinstance(weapon, bool):
             errors.append(f"Инструмент '{tool_id}': weapon должен быть true или false")
+        armor = tool.get("armor", False)
+        if not isinstance(armor, bool):
+            errors.append(f"Инструмент '{tool_id}': armor должен быть true или false")
+        enchant_kind = tool.get("enchant_kind")
+        if enchant_kind is not None and (not isinstance(enchant_kind, str) or not enchant_kind):
+            errors.append(f"Инструмент '{tool_id}': enchant_kind должен быть null или непустой строкой (тег вида зачарования, см. enchantments.*.applies_to_kind)")
         for i, tier in enumerate(tiers, start=1):
             check_icon(tier.get("icon"), f"Инструмент '{tool_id}', тир №{i}")
             # Боевые поля тира (damage_multiplier/instant_kill_max_hp/loot_multiplier/
@@ -1123,6 +1203,28 @@ def validate(data: dict) -> list[str]:
                     errors.append(f"{twhere}.instant_kill_max_hp: должен быть неотрицательным числом, если указан")
                 if not weapon:
                     errors.append(f"{twhere}: instant_kill_max_hp имеет смысл только у оружия (weapon=true)")
+            # Зеркало боевых полей оружия для защиты (max_hp_bonus/damage_reduction) -
+            # необязательны, имеют смысл только у брони (armor=true), см.
+            # game/engine.py:_armor_bonuses. Несколько линеек брони действуют
+            # ОДНОВРЕМЕННО (максимум по каждому полю независимо), тот же принцип.
+            for field_name in ("max_hp_bonus", "damage_reduction"):
+                value = tier.get(field_name)
+                if value is None:
+                    continue
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                    errors.append(f"{twhere}.{field_name}: должен быть неотрицательным числом, если указан")
+                if not armor:
+                    errors.append(f"{twhere}: {field_name} имеет смысл только у брони (armor=true)")
+            # mining_area/mining_power - зона удара (N x N) и урон по клетке поля шахты
+            # за клик, необязательны, ни к какому флагу не привязаны (в отличие от
+            # weapon/armor полей выше) - какой именно инструмент их использует, решает
+            # content.json mine_field.dig_tool, не хардкод здесь.
+            mining_area = tier.get("mining_area")
+            if mining_area is not None and (not isinstance(mining_area, int) or isinstance(mining_area, bool) or mining_area <= 0):
+                errors.append(f"{twhere}.mining_area: должен быть положительным целым числом, если указан")
+            mining_power = tier.get("mining_power")
+            if mining_power is not None and (not isinstance(mining_power, int) or isinstance(mining_power, bool) or mining_power <= 0):
+                errors.append(f"{twhere}.mining_power: должен быть положительным целым числом, если указан")
             # unlocks_moves - приёмы боя, которые игрок получает, ДОСТИГНУВ этого тира
             # (кумулятивно с более ранними тирами той же линейки, см.
             # game/engine.py:unlocked_attack_moves) - в отличие от остальных боевых
@@ -1164,6 +1266,51 @@ def validate(data: dict) -> list[str]:
             effects = lvl.get("effects", {})
             if not isinstance(effects, dict):
                 errors.append(f"{lwhere}.effects: должен быть объектом (свободная форма - какую механику он прокачивает, решает не сама система навыков)")
+
+    # enchantments - стол зачарований (см. game/engine.py:enchantment_pool/enchant_tool) -
+    # закрытый список типов эффекта, держать в паре с _enchant_effect_value/
+    # tool_durability_remaining/_weapon_bonuses/_armor_bonuses в game/engine.py.
+    _ENCHANT_EFFECT_TYPES = {
+        "yield_multiplier", "durability_multiplier", "damage_bonus",
+        "drop_chance_multiplier", "armor_defense_bonus", "max_hp_bonus_add",
+    }
+    enchantments = data.get("enchantments", {})
+    enchant_kinds = {t.get("enchant_kind") for t in tools.values() if t.get("enchant_kind")}
+    for eid, ench in enchantments.items():
+        record_id(eid, "зачарование")
+        check_id("Зачарование", eid)
+        where = f"Зачарование '{eid}'"
+        if not ench.get("name"):
+            errors.append(f"{where}: не указано название")
+        if not ench.get("description"):
+            errors.append(f"{where}: не указано описание")
+        check_icon(ench.get("icon"), where)
+        applies_to_kind = ench.get("applies_to_kind")
+        if applies_to_kind is not None:
+            if not isinstance(applies_to_kind, str) or not applies_to_kind:
+                errors.append(f"{where}: applies_to_kind должен быть null (универсальное зачарование, доступно ЛЮБОМУ зачаровываемому инструменту) или непустой строкой (тег tools.*.enchant_kind)")
+            elif applies_to_kind not in enchant_kinds:
+                errors.append(f"{where}: applies_to_kind ссылается на тег '{applies_to_kind}', которого нет ни у одного инструмента (tools.*.enchant_kind)")
+        effect = ench.get("effect")
+        if not isinstance(effect, dict) or "type" not in effect:
+            errors.append(f"{where}: effect должен быть объектом с полем type")
+        elif effect["type"] not in _ENCHANT_EFFECT_TYPES:
+            errors.append(f"{where}.effect.type: должен быть одним из {sorted(_ENCHANT_EFFECT_TYPES)} (сейчас: {effect['type']!r})")
+        levels = ench.get("levels")
+        if not isinstance(levels, list) or not levels:
+            errors.append(f"{where}: levels должен быть непустым списком уровней (хотя бы один)")
+        else:
+            for i, lvl in enumerate(levels, start=1):
+                lwhere = f"{where}, уровень {i}"
+                if not isinstance(lvl, dict):
+                    errors.append(f"{lwhere}: должен быть объектом")
+                    continue
+                value = lvl.get("value")
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    errors.append(f"{lwhere}.value: должен быть числом")
+                weight = lvl.get("weight", 1)
+                if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
+                    errors.append(f"{lwhere}.weight: должен быть положительным числом (или отсутствовать - тогда 1)")
 
     # soul_recipes ключуется id ресурса (души) - тот же принцип, что species/mining_info
     # (словарь ДОБАВЛЯЕТ метаданные существующему ресурсу, отдельного id не заводит).
@@ -1210,6 +1357,12 @@ def validate(data: dict) -> list[str]:
                 errors.append(f"{where}: неизвестный инструмент '{c['tool']}'")
             if "species" in c and c["species"] not in species:
                 errors.append(f"{where}: неизвестный вид '{c['species']}'")
+            if "action" in c and c["action"] not in manual_actions:
+                errors.append(f"{where}: неизвестное ручное действие '{c['action']}'")
+            if "upgrade" in c and "building" in c and c["building"] in buildings:
+                upgrade_ids = {u.get("id") for u in buildings[c["building"]].get("upgrades", [])}
+                if c["upgrade"] not in upgrade_ids:
+                    errors.append(f"{where}: у постройки '{c['building']}' нет улучшения '{c['upgrade']}'")
             if "amount" in c and (not isinstance(c["amount"], (int, float)) or c["amount"] <= 0):
                 errors.append(f"{where}: amount должен быть положительным числом")
 
@@ -1246,10 +1399,42 @@ def validate(data: dict) -> list[str]:
             if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
                 errors.append(f"{pwhere}.weight: должен быть положительным числом (или отсутствовать - тогда 1)")
 
+    # eras - имя/главный цвет каждой эры квестбука (ключ - era квеста, как
+    # строка). НЕОБЯЗАТЕЛЬНЫЙ раздел: у era, для которой тут нет записи,
+    # UI-стороны (content_editor.html/web_ui.html) сами подставляют дефолтное
+    # имя "Эра N" и цикличную палитру - тут это НЕ ошибка, чтобы можно было
+    # завести у квеста новый номер era раньше, чем зайти и назвать её отдельно.
+    eras = data.get("eras", {})
+    if not isinstance(eras, dict):
+        errors.append("eras: ожидался словарь id_эры -> {name, color}")
+        eras = {}
+    else:
+        for eid, era_info in eras.items():
+            where = f"Эра '{eid}'"
+            if not isinstance(eid, str) or not eid.isdigit() or int(eid) < 1:
+                errors.append(f"{where}: ключ должен быть строкой положительного целого числа (как era квеста)")
+            if not isinstance(era_info, dict):
+                errors.append(f"{where}: должна быть объектом {{name, color}}")
+                continue
+            if not era_info.get("name"):
+                errors.append(f"{where}: не указано name")
+            color = era_info.get("color")
+            if not isinstance(color, str) or not _HEX_COLOR_RE.match(color):
+                errors.append(f"{where}: color должен быть цветом вида '#rrggbb'")
+
     # era квеста - ЧИСТО визуальная колонка графа (как tier у техов), никак не
-    # связана с технологиями - валидируется только как положительное целое.
-    # requires - граф, буквально как techs.*.requires (см. find_requires_cycle
-    # ниже) - только ссылается на ДРУГОЙ КВЕСТ, а не на технологию.
+    # связана с технологиями - валидируется только как положительное целое (само
+    # оформление этой era - см. eras выше). requires - граф, буквально как
+    # techs.*.requires (см. find_requires_cycle ниже) - только ссылается на
+    # ДРУГОЙ КВЕСТ, а не на технологию. icon/bg/border/tooltip_color -
+    # необязательные per-квестовые оверрайды оформления узла графа (icon -
+    # {grid,palette}, та же пиксель-иконка, что у ресурсов/построек/мобов, см.
+    # check_icon; подменяет центральный значок узла ЛЮБОГО статуса, включая
+    # locked - жетон статуса в углу узла отдельным значком остаётся всегда,
+    # см. web_ui.html:buildQuestNode; bg/border подменяют цвет узла целиком
+    # вместо цвета эры; tooltip_color - цвет текста всплывающей подсказки с
+    # именем квеста, НЕ общая настройка - каждый квест красит свою подсказку
+    # сам).
     quests = data.get("quests", {})
     for qid, q in quests.items():
         record_id(qid, "квест")
@@ -1262,6 +1447,11 @@ def validate(data: dict) -> list[str]:
         era = q.get("era")
         if not isinstance(era, int) or isinstance(era, bool) or era < 1:
             errors.append(f"{where}: era должен быть положительным целым числом")
+        check_icon(q.get("icon"), where)
+        for field in ("bg", "border", "tooltip_color"):
+            val = q.get(field)
+            if val is not None and (not isinstance(val, str) or not _HEX_COLOR_RE.match(val)):
+                errors.append(f"{where}: {field} должен быть цветом вида '#rrggbb' (или отсутствовать)")
         requires = q.get("requires", [])
         if not isinstance(requires, list):
             errors.append(f"{where}: requires должен быть списком id квестов (или отсутствовать)")
