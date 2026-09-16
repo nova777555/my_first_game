@@ -661,6 +661,52 @@ def tools_view(state: GameState) -> list[dict]:
     return items
 
 
+def enchanting_view(state: GameState) -> dict:
+    """Данные модалки "Стол зачарований" (см. game/engine.py: enchant_tool/
+    enchantment_pool/enchantable_tools). tools - только линейки с enchant_kind,
+    каждая со своим статусом прочности (то же, что tools_view) плюс applied
+    (уже наложенные зачарования) и pool (барабан - ЧЕМ ИМЕННО рискует игрок,
+    сгруппировано по зачарованию с уровнями и отметкой reached, для панели
+    "Доступно" справа)."""
+    applied_by_tool = state.tool_enchantments
+    tools = []
+    for tool_id in engine.enchantable_tools():
+        tool = TOOLS[tool_id]
+        current_tier = tool["tiers"][engine.tool_tier(state, tool_id) - 1]
+        max_durability = current_tier.get("max_durability")
+        own_applied = applied_by_tool.get(tool_id, {})
+        pool_by_enchant: dict[str, dict] = {}
+        for entry in engine.enchantment_pool(tool_id):
+            eid = entry["enchant_id"]
+            ench = ENCHANTMENTS[eid]
+            group = pool_by_enchant.setdefault(eid, {
+                "enchant_id": eid, "name": ench["name"], "description": ench.get("description", ""),
+                "levels": [],
+            })
+            group["levels"].append({
+                "level": entry["level"], "value": entry["value"],
+                "reached": own_applied.get(eid, 0) >= entry["level"],
+            })
+        tools.append({
+            "id": tool_id, "name": tool["name"], "kind": tool.get("enchant_kind"),
+            "tier": engine.tool_tier(state, tool_id), "tier_name": engine.tool_tier_name(state, tool_id),
+            "max_tier": len(tool["tiers"]),
+            "max_durability": max_durability,
+            "durability_remaining": engine.tool_durability_remaining(state, tool_id),
+            "is_broken": engine.tool_is_broken(state, tool_id),
+            "applied": [
+                {"enchant_id": eid, "name": ENCHANTMENTS[eid]["name"], "level": lvl}
+                for eid, lvl in own_applied.items() if eid in ENCHANTMENTS
+            ],
+            "pool": list(pool_by_enchant.values()),
+        })
+    return {
+        "available": engine.enchanting_table_available(state),
+        "cost": cost_list(engine.enchanting_table_cost(state), state),
+        "tools": tools,
+    }
+
+
 def hunting_view(state: GameState) -> dict:
     """Данные "Охоты" - глобальная активная схватка (state.active_encounter, ОДНА
     на всю игру, см. CLAUDE.md) + список открытых мобов/боссов КАЖДОЙ локации
@@ -1043,6 +1089,10 @@ def build_view(state: GameState) -> dict:
             # вставка/выемка живёт в своей модалке (soul_collectors/soul_bank
             # ниже), не тут - тот же приём, что is_farm.
             "is_soul_collector": bool(b.get("soul_collector")),
+            # Кнопка "Зачаровать" на карточке (см. web_ui.html: renderBuildings) -
+            # открывает общую модалку "Стол зачарований" (enchanting - см.
+            # enchanting_view выше), тот же приём, что is_soul_collector.
+            "is_enchanting_table": bool(b.get("enchanting_table")),
         })
 
     manual = []
@@ -1232,6 +1282,7 @@ def build_view(state: GameState) -> dict:
         "buildings": buildings,
         "locations": locations,
         "tools": tools,
+        "enchanting": enchanting_view(state),
         "hunting": hunting,
         "skills": engine.skills_view(state),
         "storage": storage_view(state),
@@ -1256,6 +1307,7 @@ def build_view(state: GameState) -> dict:
             # mining_info.*.icon. Отсутствует по умолчанию - клиент сам откатывается
             # на resourceIcon(rid), см. web_ui.html: veinIcon().
             "mining_veins": {rid: info["icon"] for rid, info in MINING_INFO.items() if info.get("icon")},
+            "enchantments": {eid: e["icon"] for eid, e in ENCHANTMENTS.items() if e.get("icon")},
         },
         "eras": ERAS,
         "quests": [
@@ -1731,6 +1783,15 @@ class Handler(BaseHTTPRequestHandler):
             result = engine.remove_soul(STATE, payload.get("building_id"), index)
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/enchant_tool":
+            # Попытка зачарования - управление имуществом, как insert_soul/
+            # remove_soul, НЕ тратит ход (см. engine.enchant_tool). result.enchant -
+            # уже готовый исход трёх кругов (три символа + успех/провал + что
+            # применилось), тот же принцип, что result.prize у лутбокса - сервер
+            # решает СРАЗУ, клиент только анимирует раскрытие кругов.
+            result = engine.enchant_tool(STATE, payload.get("tool_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "enchant": result.enchant, "state": build_view(STATE)})
         elif self.path == "/api/add_automation_rule":
             # Настройка правила автоматизации - управление имуществом, как
             # insert_soul/remove_soul, НЕ тратит ход (см. engine.add_automation_rule).

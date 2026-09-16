@@ -2250,6 +2250,13 @@ def enchanting_table_available(state: GameState) -> bool:
     return _enchanting_table_config(state) is not None
 
 
+def enchanting_table_cost(state: GameState) -> dict[str, int]:
+    """Цена ОДНОЙ попытки зачарования прямо сейчас - пустой словарь, если стол
+    зачарований вовсе недоступен (см. enchanting_table_available)."""
+    config = _enchanting_table_config(state)
+    return dict(config["cost"]) if config else {}
+
+
 def _roll_enchant_circles(pool: list[dict]) -> list[dict]:
     """Три круга - три НЕЗАВИСИМЫХ равновероятных броска по всему барабану
     (enchantment_pool), без корреляции между ними (в отличие от демо-мокапа,

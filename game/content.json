@@ -266,7 +266,23 @@
     },
     {
       "id": "enchant_book",
-      "name": "Книга зачарований"
+      "name": "Книга зачарований",
+      "icon": {
+        "grid": [
+          "AAAAAAAAA",
+          "ABBBCBBBA",
+          "ABBBCBBBA",
+          "ABBBCBBBA",
+          "ABBBCBBBA",
+          "ABBBCBBBA",
+          "AAAAAAAAA"
+        ],
+        "palette": {
+          "A": "#6b4423",
+          "B": "#c69a6d",
+          "C": "#8a5a34"
+        }
+      }
     }
   ],
   "locations": {
@@ -2616,7 +2632,8 @@
       "threshold": 100,
       "produces": {
         "metal": 5
-      }
+      },
+      "consumes": {}
     },
     "wood_from_energy": {
       "name": "Синтез древесины",
@@ -2625,7 +2642,8 @@
       "threshold": 20,
       "produces": {
         "wood": 5
-      }
+      },
+      "consumes": {}
     },
     "uranium_from_energy": {
       "name": "Синтез урана",
@@ -2634,7 +2652,8 @@
       "threshold": 6000,
       "produces": {
         "uranium": 1
-      }
+      },
+      "consumes": {}
     }
   },
   "tools": {
@@ -2743,7 +2762,8 @@
         {
           "name": "Кулаки",
           "cost": null,
-          "requires_tech": null
+          "requires_tech": null,
+          "unlocks_moves": []
         },
         {
           "name": "Деревянный меч",
@@ -2789,7 +2809,8 @@
         {
           "name": "Не выковано",
           "cost": null,
-          "requires_tech": null
+          "requires_tech": null,
+          "unlocks_moves": []
         },
         {
           "name": "Клинок Стража",
@@ -2891,6 +2912,22 @@
     "luck": {
       "name": "Удача",
       "description": "Увеличивает количество руды, выбиваемой с одного блока в шахте (округление вверх).",
+      "icon": {
+        "grid": [
+          ".AA...AA.",
+          "AAAA.AAAA",
+          "AAAA.AAAA",
+          ".AA...AA.",
+          "AAAA.AAAA",
+          "AAAA.AAAA",
+          ".AA...AA.",
+          "....B...."
+        ],
+        "palette": {
+          "A": "#3f9d5f",
+          "B": "#6b4423"
+        }
+      },
       "applies_to_kind": "mining",
       "effect": {
         "type": "yield_multiplier"
@@ -2900,7 +2937,7 @@
           "value": 1.5
         },
         {
-          "value": 2.0
+          "value": 2
         },
         {
           "value": 2.5
@@ -2910,6 +2947,22 @@
     "durability": {
       "name": "Прочность",
       "description": "Увеличивает максимальную прочность инструмента.",
+      "icon": {
+        "grid": [
+          "..AAAA..",
+          ".AAAAAA.",
+          "AABBBBAA",
+          "AABBBBAA",
+          "AABBBBAA",
+          "AABBBBAA",
+          "AAAAAAAA",
+          "A.AAAA.A"
+        ],
+        "palette": {
+          "A": "#2c5560",
+          "B": "#5fd0e8"
+        }
+      },
       "applies_to_kind": null,
       "effect": {
         "type": "durability_multiplier"
@@ -2919,7 +2972,7 @@
           "value": 1.5
         },
         {
-          "value": 2.0
+          "value": 2
         },
         {
           "value": 2.5
@@ -2929,6 +2982,24 @@
     "sharpness": {
       "name": "Острота",
       "description": "Увеличивает базовый урон оружия.",
+      "icon": {
+        "grid": [
+          "........A",
+          ".......AB",
+          "......ABB",
+          ".....ABB.",
+          "....ABB..",
+          "...ABB...",
+          "..ABB....",
+          ".AC......",
+          "C........"
+        ],
+        "palette": {
+          "A": "#e8ecef",
+          "B": "#c7ccd1",
+          "C": "#8a5a34"
+        }
+      },
       "applies_to_kind": "weapon",
       "effect": {
         "type": "damage_bonus"
@@ -2948,6 +3019,24 @@
     "looting": {
       "name": "Добыча",
       "description": "Увеличивает шанс получить дроп и душу с убитого моба.",
+      "icon": {
+        "grid": [
+          "..AAAA...",
+          ".AABBAA..",
+          ".AABBAA..",
+          "ABBBBBBA.",
+          "ABBBBBBA.",
+          "ABBCBBBA.",
+          "ABBBBBBA.",
+          ".ABBBBA..",
+          "..AAAA..."
+        ],
+        "palette": {
+          "A": "#6b4423",
+          "B": "#c69a6d",
+          "C": "#f4c430"
+        }
+      },
       "applies_to_kind": "weapon",
       "effect": {
         "type": "drop_chance_multiplier"
@@ -2960,13 +3049,28 @@
           "value": 1.6
         },
         {
-          "value": 2.0
+          "value": 2
         }
       ]
     },
     "necromancy": {
       "name": "Некромантия",
       "description": "Дополнительно к «Добыче» увеличивает именно шанс выбить душу с убитого моба.",
+      "icon": {
+        "grid": [
+          "..AAAAA..",
+          ".AAAAAAA.",
+          "AAAAAAAAA",
+          "AABAAABAA",
+          "AAAAAAAAA",
+          "AAAAAAAAA",
+          "A.A.A.A.A"
+        ],
+        "palette": {
+          "A": "#b48cf0",
+          "B": "#1f2226"
+        }
+      },
       "applies_to_kind": "weapon",
       "effect": {
         "type": "soul_chance_multiplier"
@@ -2979,13 +3083,30 @@
           "value": 2.5
         },
         {
-          "value": 4.0
+          "value": 4
         }
       ]
     },
     "protection": {
       "name": "Защита",
       "description": "Увеличивает снижение входящего урона от брони.",
+      "icon": {
+        "grid": [
+          "AAAAAAAAA",
+          "ABBBBBBBA",
+          "ABBBBBBBA",
+          "ABBBBBBBA",
+          ".ABBBBBA.",
+          ".ABBBBBA.",
+          "..ABBBA..",
+          "...ABA...",
+          "....A...."
+        ],
+        "palette": {
+          "A": "#5f6266",
+          "B": "#8b8f94"
+        }
+      },
       "applies_to_kind": "armor",
       "effect": {
         "type": "armor_defense_bonus"
@@ -3005,6 +3126,20 @@
     "vitality": {
       "name": "Живучесть",
       "description": "Увеличивает максимум HP игрока.",
+      "icon": {
+        "grid": [
+          "..AA.AA..",
+          ".AAAAAAA.",
+          ".AAAAAAA.",
+          "..AAAAA..",
+          "...AAA...",
+          "....A....",
+          "........."
+        ],
+        "palette": {
+          "A": "#d1453e"
+        }
+      },
       "applies_to_kind": "armor",
       "effect": {
         "type": "max_hp_bonus_add"
@@ -3292,5 +3427,6 @@
     "hp_regen_per_turn": 3,
     "wounded_turns": 5,
     "wounded_damage_multiplier": 0.5
-  }
+  },
+  "breakdown_types": {}
 }

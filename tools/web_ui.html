@@ -20,6 +20,12 @@
        вкладок) - см. CLAUDE.md, редизайн менюшек. Не заменяет --accent, живёт
        рядом с ним: голубой держит структуру/связи, янтарь - действие/цену. */
     --blueprint: #5fd0e8;
+    /* Уровень зачарования (стол зачарований) - I едва разогрета, II полная
+       структурная сила (--blueprint), III материализована (--accent) - та же
+       грамматика цвета, что у остального интерфейса. */
+    --lvl1: rgba(95, 208, 232, .55);
+    --lvl2: #5fd0e8;
+    --lvl3: #f0a030;
   }
   * { box-sizing: border-box; }
   body {
@@ -36,6 +42,13 @@
       linear-gradient(90deg, rgba(95,208,232,.05) 1px, transparent 1px) 0 0/22px 22px,
       var(--bg);
   }
+  /* Тот же тонкий скроллбар темы (см. .thin-scroll ниже), но на уровне
+     html/body - иначе скролл главного экрана остаётся стандартным браузерным. */
+  html { scrollbar-width: thin; scrollbar-color: rgba(95,208,232,.4) transparent; }
+  html::-webkit-scrollbar { width: 8px; height: 8px; }
+  html::-webkit-scrollbar-track { background: transparent; }
+  html::-webkit-scrollbar-thumb { background-color: rgba(95,208,232,.35); border: 2px solid var(--bg); background-clip: padding-box; }
+  html::-webkit-scrollbar-thumb:hover { background-color: rgba(95,208,232,.6); background-clip: padding-box; }
   .mono { font-family: Consolas, "Courier New", monospace; }
   /* Общий стиль ЛЮБОЙ кнопки в приложении - раньше кнопка без класса и вне
      специальных контейнеров (.tool-row/.tabs/...) оставалась голым браузерным
@@ -145,16 +158,6 @@
      фиксированная правая колонка 380px вместо резиновой 1fr - см. .dashboard. */
   main { padding: 24px; }
 
-  .win-banner {
-    background: var(--accent);
-    color: #1a1207;
-    padding: 12px 16px;
-    text-align: center;
-    font-weight: 700;
-    border-radius: 8px;
-    margin-bottom: 16px;
-  }
-
   .dashboard { display: grid; grid-template-columns: 1fr; gap: 20px; }
   @media (min-width: 980px) {
     .dashboard { grid-template-columns: 1fr 380px; align-items: start; }
@@ -258,8 +261,8 @@
      (animateResourceValue), а не прыгает мгновенно. */
   .res-tile.changed.up { animation: res-tile-pulse-up .8s ease-out; }
   .res-tile.changed.down { animation: res-tile-pulse-down .8s ease-out; }
-  @keyframes res-tile-pulse-up { 0% { background: rgba(74, 201, 160, .22); } 100% { background: var(--panel2); } }
-  @keyframes res-tile-pulse-down { 0% { background: rgba(224, 82, 74, .18); } 100% { background: var(--panel2); } }
+  @keyframes res-tile-pulse-up { 0% { background: rgba(74, 201, 160, .09); } 100% { background: var(--panel2); } }
+  @keyframes res-tile-pulse-down { 0% { background: rgba(224, 82, 74, .08); } 100% { background: var(--panel2); } }
   .res-tile svg { flex-shrink: 0; }
   .res-tile .info { display: flex; flex-direction: column; overflow: hidden; }
   .res-tile .amount { font-size: 13px; font-weight: 700; white-space: nowrap; }
@@ -292,9 +295,12 @@
   }
   .bld-row:last-child { margin-bottom: 0; }
   /* Разовая вспышка постройки, которая реально произвела ресурс в ход, только
-     что завершившийся (см. renderBuildings/lastBuildingsFlashTurn) - переиспользует
-     тот же keyframe, что вспышка карточки действия (flash-highlight выше). */
-  .bld-row.produced { animation: flash-highlight 1.6s ease-out; }
+     что завершившийся (см. renderBuildings/lastBuildingsFlashTurn) - НАМЕРЕННО
+     гораздо бледнее flash-highlight (той делится с карточками действий, где
+     вспышка - осознанный акцент на клик игрока, а не фоновый тик) - тут просто
+     чуть заметный отблеск, чтобы не отвлекать при каждом ходе. */
+  .bld-row.produced { animation: bld-row-produced-flash 1.6s ease-out; }
+  @keyframes bld-row-produced-flash { 0% { background: rgba(240, 160, 48, .07); } 100% { background: var(--bg); } }
   .bld-row-head { display: flex; align-items: flex-start; gap: 10px; }
   .bld-row-icon { position: relative; width: 30px; height: 30px; flex-shrink: 0; margin-top: 1px; }
   .bld-row-icon svg { width: 100%; height: 100%; }
@@ -308,6 +314,30 @@
   .bld-badge { font-size: 9.5px; font-weight: 700; letter-spacing: .02em; padding: 2px 6px; border-radius: 0; text-transform: uppercase; }
   .bld-badge.limit { background: var(--panel2); border: 1px solid rgba(255,255,255,.12); color: var(--muted); }
   .bld-badge.broken { background: rgba(224, 82, 74, .16); border: 1px solid rgba(224, 82, 74, .4); color: #ef8a83; }
+  /* Панель фильтров ("Состояние" + теги типа постройки, см. renderBuildingsFilterBar) -
+     над строкой поиска, тот же порядок, что storage-controls-row (сортировка над
+     поиском). */
+  .bld-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 18px 0; }
+  /* Иконка-переключатель состояния - клик листает по кругу (см.
+     BLD_STATUS_FILTER_CYCLE), цвет точки - тот же язык, что .bld-led у самой
+     постройки (зелёный/красный), у "Все" - нейтральный серый. */
+  .bld-status-filter-btn { display: inline-flex; align-items: center; gap: 6px; }
+  .bld-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+  .bld-status-filter-btn.ok .bld-status-dot { background: var(--ok); }
+  .bld-status-filter-btn.broken .bld-status-dot { background: var(--danger); }
+  /* Выпадающий список тегов - тот же визуальный приём, что .sound-panel у
+     громкости в шапке (плавающая тёмная панель с тенью, закрывается кликом
+     снаружи). Чекбоксы вместо select[multiple] - обычный select[multiple]
+     некрасиво выглядит и требует Ctrl+клик для мульти-выбора, что неочевидно. */
+  .bld-tag-dropdown { position: relative; }
+  .bld-tag-dropdown-panel {
+    position: absolute; top: calc(100% + 6px); left: 0;
+    background: #161d24; border: 1px solid rgba(255,255,255,.12); border-radius: 0;
+    padding: 10px 12px; min-width: 180px; box-shadow: 0 10px 28px rgba(0,0,0,.45); z-index: 30;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .bld-tag-option { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+  .bld-tag-clear { align-self: flex-start; font-size: 11px; margin-top: 4px; color: var(--muted); }
   .bld-repair-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
   .bld-repair-row .cost-chip { margin: 0; }
   .bld-repair-cost { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -564,6 +594,79 @@
   .modal.priorities-modal { width: 560px; height: 780px; max-width: none; max-height: none; overflow: hidden; }
   .modal.upgrades-modal { width: 560px; height: 780px; max-width: none; max-height: none; overflow: hidden; }
   .modal.tech-modal { width: 700px; height: 820px; max-width: none; max-height: none; overflow: hidden; }
+  /* Модалка "Охота" (см. openHuntingModal/renderEncounterModalBody) - по прямому
+     пожеланию, 2026-09-14: базовые 420px (.modal) ощущались тесными для портрета +
+     полосок HP + ряда кнопок приёмов с QTE-шкалой внутри. Просто max-width, не
+     фиксированный width/height как у canvas-модалок выше - высота тут и так
+     подстраивается под число открытых приёмов. */
+  .modal.hunting-modal { max-width: 600px; }
+  /* Дерево технологий и квесты - панорамируемые графы узлов, которым тесно в
+     обычных 700px .tech-modal (и которые в будущем вырастут ещё сильнее) -
+     отдельный класс ПОВЕРХ .tech-modal (не правка самого .tech-modal, который
+     делят Разведение/Книга видов/Синтезатор душ и т.п. фиксированной модалкой
+     700x820 - их трогать не нужно), по прямому пожеланию, 2026-09-13. */
+  .modal.tech-modal.graph-modal { width: 1200px; }
+  /* Модалка "Шахта" (openMineFieldModal) - поле должно занимать почти весь
+     экран игрока, а не тонуть в паддингах/подписях, поэтому крупный размер,
+     как у остальных canvas-модалок. НЕ фиксированный height (в отличие от
+     большинства других canvas-модалок) - на 900x940 при небольшом окне низ
+     модалки (кнопка "Обновить шахту"/поле целиком) обрезался overflow:hidden
+     без возможности проскроллить, по жалобе 2026-09-16. min(…, vh/vw) даёт
+     тот же крупный размер на нормальном окне, но ужимается на маленьком -
+     .mine-grid-wrap (flex:1, min-height:0) сам подстроит-сожмёт поле под
+     оставшуюся высоту, а не даст низу уехать за край. */
+  .modal.mine-field-modal { width: min(1080px, 96vw); height: min(1020px, 92vh); max-width: none; max-height: none; overflow: hidden; padding: 14px; gap: 10px; }
+  .mine-field-topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+  .mine-field-topline b { color: var(--blueprint); font-weight: 600; }
+  .mine-grid-wrap { position: relative; flex: 1; min-height: 0; display: flex; justify-content: center; align-items: center; }
+  /* Размер и форма клеток задаёт JS (renderMineFieldGrid: width/height/
+     grid-template-columns/-rows, все 4 - явные inline-стили) - строки И
+     столбцы делят явную ширину/высоту поровну (1fr), поэтому клетка НЕ квадрат
+     ровно в той пропорции, что и весь прямоугольник поля (MINE_GRID_ASPECT) -
+     собственный aspect-ratio у .mine-cell тут не нужен и был бы просто лишним
+     (при явных ширине/высоте от grid-трека он всё равно игнорируется, но раньше
+     давал ложное впечатление "клетки всегда квадратные"). По прямому
+     пожеланию, 2026-09-16 - поле растянуто чуть шире, чем выше. */
+  .mine-grid { display: grid; gap: 2px; background: #0c0e11; padding: 5px; box-shadow: inset 0 0 0 2px rgba(255,255,255,.1); }
+  .mine-cell { position: relative; background: #2b323c; overflow: hidden; cursor: pointer; }
+  .mine-cell.fog { background: #0a0c0e; cursor: default; }
+  .mine-sensed-icon { animation: mine-sensed-pulse 2.4s ease-in-out infinite; filter: saturate(.6) brightness(.8); }
+  @keyframes mine-sensed-pulse { 0%, 100% { opacity: .3; } 50% { opacity: .65; } }
+  .mine-cell.cleared { background: #0c0e11; box-shadow: inset 0 2px 5px rgba(0,0,0,.6); cursor: default; }
+  .mine-cell .mine-cracks {
+    position: absolute; inset: 0; pointer-events: none;
+    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.75) 0 1.5px, transparent 1.5px 7px),
+      repeating-linear-gradient(-45deg, rgba(0,0,0,.75) 0 1.5px, transparent 1.5px 7px);
+  }
+  .mine-cell .mine-icon { position: absolute; inset: 8%; display: flex; }
+  .mine-cell .mine-icon svg { width: 100%; height: 100%; }
+  .mine-cell .mine-lock { position: absolute; top: 0; right: 0; font-size: 8px; background: rgba(12,14,17,.85); padding: 1px; z-index: 1; }
+  .mine-cell.shake { animation: mine-cell-shake .25s; }
+  @keyframes mine-cell-shake { 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+  /* Всплывающее "+N" после вскапывания клетки (mineFieldPendingPopup) - висит
+     поверх .mine-grid-wrap (не внутри .mine-grid, который openMineFieldModal
+     пересобирает целиком на каждое действие), сама себя удаляет по animationend. */
+  .mine-gain-popup {
+    position: absolute; top: 0; left: 0; transform: translate(-50%, 0); pointer-events: none;
+    display: flex; align-items: center; gap: 3px; font-size: 14px; font-weight: 700;
+    color: #7ee6a8; text-shadow: 0 1px 3px rgba(0,0,0,.85); white-space: nowrap; z-index: 5;
+    animation: mine-gain-rise .9s ease-out forwards;
+  }
+  .mine-gain-popup .mine-gain-icon svg { width: 16px; height: 16px; display: block; }
+  @keyframes mine-gain-rise {
+    0% { opacity: 0; transform: translate(-50%, 4px) scale(.85); }
+    15% { opacity: 1; transform: translate(-50%, -6px) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -36px) scale(1); }
+  }
+  .mine-catalog-search { padding: 10px 14px 0; }
+  .mine-catalog-search input { width: 100%; }
+  .mine-catalog-row { display: flex; align-items: center; gap: 10px; }
+  .mine-catalog-row .mine-catalog-name { font-weight: 600; font-size: 13px; }
+  .mine-catalog-row .mine-catalog-meta { font-size: 11.5px; color: var(--muted); }
+  .mine-catalog-row.locked-row { opacity: .55; }
+  .mine-field-hint { font-size: 12px; padding: 0 2px; }
+  .mine-exit-btn { border-color: var(--blueprint); color: var(--blueprint); font-weight: 600; }
+  .mine-exit-btn:hover { background: rgba(95,208,232,.12); }
   /* Тонкий скроллбар в цвет темы - вместо стандартного браузерного, ВЕЗДЕ, где
      что-то скроллится внутри интерфейса (список построек на главном экране,
      внутренние списки/сетки/графы модулей фиксированного размера и т.п.) -
@@ -861,9 +964,15 @@
     position: sticky; top: 0; background: #161d24;
   }
   .modal-head button {
+    position: relative; z-index: 0;
     margin-left: auto; padding: 6px 14px 6px 10px; flex-shrink: 0;
-    border: 1px solid rgba(255,255,255,.15); background: transparent; color: #7f97a1; font-size: 11px;
+    border: none; background: rgba(255,255,255,.15); color: #7f97a1; font-size: 11px;
     clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  }
+  .modal-head button::before {
+    content: ""; position: absolute; z-index: -1; top: 1px; right: 1px; bottom: 1px; left: 1px;
+    background: #161d24;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 7px 100%, 0 calc(100% - 7px));
   }
   .modal-head strong {
     display: inline-block;
@@ -936,6 +1045,17 @@
   .lootbox-viewport { position: relative; height: 96px; margin: 24px 16px 0; overflow: hidden; border-radius: 0; background: #0d1116; border: 1px solid rgba(255,255,255,.12); }
   .lootbox-track { position: absolute; top: 0; left: 0; display: flex; height: 100%; will-change: transform; }
   .lootbox-cell { flex: 0 0 96px; width: 96px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-right: 1px solid rgba(255,255,255,.08); box-sizing: border-box; }
+  /* Фон ячейки по редкости приза (доля weight среди суммы весов кейса) - тот же
+     цветовой код, что "цвета редкости" CS:GO/CS2: синий/голубой/фиолетовый/
+     красный/жёлтый от частого к практически невозможному. Пороги в
+     lootboxRarityClass(). Объявлены ДО .won, чтобы пульсация победившей
+     ячейки (равная specificity, но позже в исходнике) всё равно перекрывала
+     фон редкости в момент остановки барабана. */
+  .lootbox-cell.rarity-common { background: rgba(64, 130, 255, 0.16); }
+  .lootbox-cell.rarity-rare { background: rgba(41, 200, 240, 0.16); }
+  .lootbox-cell.rarity-epic { background: rgba(170, 70, 255, 0.18); }
+  .lootbox-cell.rarity-legendary { background: rgba(255, 60, 60, 0.2); }
+  .lootbox-cell.rarity-mythic { background: rgba(255, 210, 40, 0.22); }
   .lootbox-cell.won { background: rgba(240, 160, 48, 0.15); animation: lootbox-won-pulse 2.5s ease-in-out infinite; }
   .lootbox-cell .lootbox-cell-name { font-size: 10px; color: var(--muted); text-align: center; padding: 0 4px; }
   .lootbox-cell .lootbox-cell-amount { font-size: 11px; font-weight: 600; color: var(--accent); }
@@ -956,6 +1076,105 @@
   }
   .lootbox-result { margin: 0 16px 16px; display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 70px; justify-content: center; }
   .lootbox-result .title { font-size: 15px; font-weight: 700; color: var(--accent); }
+
+  /* ---------- Стол зачарований (openEnchantingModal) ---------- */
+  .modal.enchanting-modal { width: min(940px, 96vw); height: min(660px, 90vh); max-width: none; max-height: none; }
+  .ench-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 208px 1fr 236px; }
+  .ench-col { min-height: 0; padding: 16px 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  .ench-col-left { border-right: 1px solid rgba(255,255,255,.08); }
+  .ench-col-right { border-left: 1px solid rgba(255,255,255,.08); }
+  .ench-col-center { align-items: center; justify-content: center; position: relative; gap: 20px; overflow: hidden; }
+  @media (max-width: 720px) {
+    .modal.enchanting-modal { width: 100vw; height: 100vh; }
+    .ench-layout { grid-template-columns: 1fr; grid-auto-rows: min-content; overflow-y: auto; }
+    .ench-col { overflow-y: visible; }
+    .ench-col-left, .ench-col-right { border: none; border-top: 1px solid rgba(255,255,255,.08); }
+    .ench-col-center { order: -1; }
+  }
+  .ench-col-label { font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--muted); }
+  .ench-tool-card { display: flex; align-items: center; gap: 10px; }
+  .ench-tool-card-icon { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+  .ench-tool-card-name { font-size: 13px; font-weight: 700; }
+  .ench-tool-card-tier { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+  .ench-durability-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .ench-durability-label b { font-family: Consolas, monospace; color: var(--text); font-weight: 400; }
+  .ench-durability-bar { height: 7px; background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); overflow: hidden; }
+  .ench-durability-fill { height: 100%; background: var(--ok); transition: width .3s; }
+  .ench-durability-fill.low { background: var(--warn); }
+  .ench-durability-fill.crit { background: var(--danger); }
+  .ench-applied-col { display: flex; flex-direction: column; gap: 6px; }
+  .ench-applied-empty { height: 34px; border: 1px dashed rgba(95,208,232,.3); animation: ench-invite-pulse 2s ease-in-out infinite; }
+  @keyframes ench-invite-pulse { 0%, 100% { border-color: rgba(95,208,232,.25); } 50% { border-color: rgba(95,208,232,.6); } }
+  .ench-chip { display: flex; align-items: center; gap: 7px; font-size: 11.5px; padding: 6px 8px; border: 1px solid; }
+  .ench-chip svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .ench-chip b { margin-left: auto; font-family: Consolas, monospace; }
+  .ench-chip.new-flash { animation: ench-chip-flash 1.1s ease-out; }
+  @keyframes ench-chip-flash { 0% { filter: brightness(2.2); } 100% { filter: brightness(1); } }
+
+  .ench-altar-glow { position: absolute; left: 50%; top: 50%; width: 380px; height: 380px; transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(var(--ench-glow-rgb, 95,208,232), var(--ench-glow-a, .04)) 0%, transparent 68%);
+    transition: background .35s; pointer-events: none; z-index: 0; }
+  .ench-circles-row { position: relative; z-index: 1; display: flex; gap: 20px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .ench-circle-slot { position: relative; width: 138px; height: 138px; display: flex; align-items: center; justify-content: center; }
+  .ench-circle-slot canvas { position: absolute; inset: 0; pointer-events: none; }
+  .ench-rune-ticks { position: absolute; inset: 7px; border-radius: 50%; pointer-events: none;
+    background: repeating-conic-gradient(rgba(95,208,232,.55) 0 2deg, transparent 2deg 30deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    animation: ench-ring-spin-rev 9s linear infinite; opacity: .8; }
+  @keyframes ench-ring-spin-rev { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+  .ench-circle { position: relative; width: 92px; height: 92px; border-radius: 50%; z-index: 2; }
+  .ench-circle .ring { position: absolute; inset: 0; border-radius: 50%; border: 1px dashed rgba(95,208,232,.4); animation: ench-ring-spin 14s linear infinite; }
+  .ench-circle .ring2 { position: absolute; inset: 9px; border-radius: 50%; border: 1px solid rgba(95,208,232,.18); }
+  @keyframes ench-ring-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .ench-circle .core { position: absolute; inset: 14px; border-radius: 50%; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); transition: box-shadow .2s, background .2s; }
+  .ench-circle .core svg { width: 30px; height: 30px; }
+  .ench-circle.locked .ring { animation-duration: 5s; border-color: var(--lvl-c, var(--blueprint)); }
+  .ench-circle.locked .core { box-shadow: inset 0 0 0 2px var(--lvl-c, var(--blueprint)), 0 0 20px color-mix(in srgb, var(--lvl-c, var(--blueprint)) 45%, transparent); background: color-mix(in srgb, var(--lvl-c, var(--blueprint)) 12%, var(--bg)); }
+  .ench-circle.spinning .core svg { animation: ench-spin-flicker .09s steps(1) infinite; }
+  @keyframes ench-spin-flicker { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+  .ench-circle .lvl-badge { position: absolute; bottom: -3px; right: -3px; font-family: Consolas, monospace; font-size: 9px; font-weight: 700;
+    background: var(--modal); border: 1px solid var(--lvl-c, var(--border)); color: var(--lvl-c, var(--muted)); width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .15s; }
+  .ench-circle.locked .lvl-badge { opacity: 1; }
+  .ench-circle.success .core { animation: ench-circle-win-pulse .9s ease-in-out infinite; }
+  @keyframes ench-circle-win-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.4); } }
+  .ench-circle.fail .core { box-shadow: inset 0 0 0 2px var(--danger), 0 0 18px rgba(224,82,74,.4); }
+  .ench-shock-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--lvl-c, var(--blueprint)); opacity: 0; pointer-events: none; z-index: 3; }
+  .ench-shock-ring.play { animation: ench-shock-burst .65s ease-out; }
+  @keyframes ench-shock-burst { 0% { transform: scale(.35); opacity: .95; } 100% { transform: scale(1.9); opacity: 0; } }
+
+  .ench-success-badge { position: absolute; left: 50%; top: 18%; transform: translate(-50%, -50%) scale(.5); z-index: 5;
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--modal); border: 1px solid var(--accent);
+    box-shadow: 0 0 26px rgba(240,160,48,.5); opacity: 0; pointer-events: none; }
+  .ench-success-badge svg { width: 30px; height: 30px; }
+  .ench-success-badge .roman { font-family: Consolas, monospace; font-size: 18px; font-weight: 700; color: var(--accent); }
+  .ench-success-badge.show { animation: ench-badge-pop 1.7s cubic-bezier(.2,1.4,.4,1) forwards; }
+  @keyframes ench-badge-pop {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(.4); }
+    14% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+    22% { transform: translate(-50%, -50%) scale(1); }
+    82% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -60%) scale(.92); }
+  }
+
+  .ench-roll-row { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; }
+  .ench-roll-btn { padding: 12px 30px; font-size: 12.5px; letter-spacing: .04em; animation: ench-roll-glow 2.2s ease-in-out infinite; }
+  @keyframes ench-roll-glow { 0%, 100% { box-shadow: 0 0 0 rgba(240,160,48,0); } 50% { box-shadow: 0 0 20px rgba(240,160,48,.5); } }
+  .ench-roll-btn:disabled { animation: none; }
+  .ench-book-chip { display: flex; align-items: center; gap: 6px; font-family: Consolas, monospace; font-size: 13px; color: var(--accent); font-weight: 600; }
+  .ench-book-chip svg { width: 18px; height: 18px; }
+
+  .ench-pool-list { display: flex; flex-direction: column; gap: 7px; }
+  .ench-pool-row { display: flex; align-items: center; gap: 9px; padding: 7px 8px; background: rgba(255,255,255,.02); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+  .ench-pool-ic { width: 26px; height: 26px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+  .ench-pool-ic svg { width: 15px; height: 15px; }
+  .ench-pool-name { font-size: 11.5px; font-weight: 600; flex: 1; min-width: 0; }
+  .ench-pool-levels { display: flex; gap: 3px; flex-shrink: 0; }
+  .ench-pool-lvl { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-family: Consolas, monospace; font-size: 9px; border: 1px solid var(--border); color: var(--muted); }
+  .ench-pool-lvl.reached { border-color: var(--lvl-c); color: var(--lvl-c); background: color-mix(in srgb, var(--lvl-c) 14%, transparent); }
+  .ench-pool-empty { font-size: 11.5px; color: var(--muted); }
 
   .toast-breed { background: linear-gradient(135deg, #1f3a24, #20242a); border: 1px solid var(--ok); }
   .toast-breed .title { color: var(--ok); font-weight: 700; font-size: 12px; }
@@ -991,6 +1210,7 @@
   .tech-tab-placeholder { padding: 24px 14px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
   .tech-tab-summary { color: var(--muted); font-size: 13px; }
   .tech-tab-open-btn { padding: 10px 18px; font-size: 13px; }
+  .tech-tab-research { width: 100%; text-align: left; }
 
   /* .tech-tree-wrap заполняет ВСЮ высоту модалки, оставшуюся под шапкой (модалка
      теперь фиксированного размера 700x820 - см. .modal.tech-modal выше, и
@@ -1004,13 +1224,17 @@
      никогда не меняет размер при переключении эры - см. CLAUDE.md. */
   .quest-era-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .tech-graph {
-    position: relative; flex: 1; min-height: 0; overflow: auto;
+    /* overflow: hidden, не auto - панорамирование и зум теперь чистый CSS-transform
+       (translate+scale) на .tech-cols, см. enableGraphPanning/enableGraphZoom, а не
+       нативный скролл: у скролла есть жёсткая рамка [0, scrollWidth-clientWidth], и
+       когда граф целиком помещается в модалку (частый случай для небольших квестовых
+       эр), эта рамка нулевая - любая попытка алгоритма зума к курсору выставить
+       scrollLeft тихо схлопывалась обратно в 0, и зум визуально цеплялся за
+       transform-origin (левый верхний угол) вместо курсора. translate такого
+       ограничения не имеет. */
+    position: relative; flex: 1; min-height: 0; overflow: hidden;
     border: 1px solid rgba(255,255,255,.1); border-radius: 0; background: #0d1116; cursor: grab;
-    scrollbar-width: thin; scrollbar-color: rgba(95,208,232,.4) transparent;
   }
-  .tech-graph::-webkit-scrollbar { width: 8px; height: 8px; }
-  .tech-graph::-webkit-scrollbar-track { background: transparent; }
-  .tech-graph::-webkit-scrollbar-thumb { background-color: rgba(95,208,232,.35); border: 2px solid #0d1116; background-clip: padding-box; }
   .tech-graph.panning { cursor: grabbing; }
   .tech-cols { display: flex; gap: 6px; padding: 18px; position: relative; z-index: 1; width: max-content; transform-origin: 0 0; }
   .tech-col-band { display: flex; flex-direction: column; border-radius: 10px; padding: 10px 8px; }
@@ -1030,6 +1254,13 @@
   .tech-node.researched { background: rgba(95,208,232,.08); border-color: var(--blueprint); color: #a9e8f5; }
   .tech-node.available { background: rgba(240,160,48,.08); border-color: var(--accent); color: var(--accent); animation: node-flicker 6s infinite; }
   .tech-node.locked { opacity: 1; }
+  /* Идёт исследование ИМЕННО этого узла (VIEW.active_research) - зелёный акцент
+     поверх обычного .available, чтобы отличался от просто "доступна" на глаз. */
+  .tech-node.researching { background: rgba(74,201,160,.12); border-color: #4ac9a0; color: #8ed6c2; animation: node-researching-pulse 1.6s infinite; }
+  @keyframes node-researching-pulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(74,201,160,0); }
+    50% { box-shadow: 0 0 8px rgba(74,201,160,.6); }
+  }
   @keyframes node-flicker {
     0%, 92% { box-shadow: none; }
     93% { opacity: .5; box-shadow: none; }
@@ -1052,31 +1283,71 @@
 
   /* Узел квестового графа (openQuestsModal/renderQuestGraph) - НАМЕРЕННО не
      .tech-node: отдельный класс, чтобы декоративная обводка не задела дерево
-     технологий. Скошенный угол (clip-path) + двойная рамка (обычный border +
-     внутренний inset-контур цвета статуса) + значок-жетон статуса в углу -
-     раньше тут была просто цветная левая полоска, как у технологий. */
-  /* 1:1 из канваса (B_Quests.dc.html: .qnode/.q-claimed/.q-completed/.q-avail/
-     .q-locked) - та же полноцветная плоская рамка + тонированный фон, что у
-     .tech-node, только с сохранённым скошенным уголком (clip-path) как
-     декоративным отличием квестового графа от технологического - см.
-     CLAUDE.md. Статусная палитра из канваса НЕ повторяет --ok/--danger:
-     claimed/completed тонируются голубым (--blueprint - "уже часть схемы"),
-     available - янтарным (--accent - "требует действия"), а не зелёным. */
+     технологий. Квадрат с большой пиксель-иконкой квеста (q.icon, своя
+     картинка на каждый квест - рисуется/загружается в редакторе контента
+     точно так же, как у ресурсов/построек/мобов, дефолт - questIcon()) в
+     центре + значок-жетон статуса в углу (QUEST_STATUS_ICON) - имя квеста НЕ
+     печатается прямо на узле,
+     только во всплывающей подсказке при наведении (.quest-node-tip) и в
+     постоянной панели деталей снизу (renderQuestDetail). Locked-квест
+     рисуется на графе ВСЕГДА (не скрывается), просто приглушённым цветом и
+     БЕЗ клика (см. renderQuestGraph - click-листенер вешается только на
+     status !== "locked") - подсказка с именем при наведении при этом всё
+     равно работает (осознанный "тизер" следующего квеста без подробностей).
+     Статусная палитра НЕ повторяет --ok/--danger: claimed/completed
+     тонируются голубым (--blueprint - "уже часть схемы"), available -
+     янтарным (--accent - "требует действия"), а не зелёным. */
   .quest-node {
     position: relative;
-    background: #14191f; border: 1px solid #2b333b; border-radius: 0;
-    padding: 9px 11px; font-family: Consolas, "Courier New", monospace; font-size: 11px; color: #4d5762;
+    width: 64px; height: 64px;
+    display: flex; align-items: center; justify-content: center;
+    background: #14191f; border: 1px solid #2b333b; border-radius: 6px;
+    font-family: Consolas, "Courier New", monospace; font-size: 11px; color: #4d5762;
     cursor: pointer;
-    clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px);
     transition: border-color .12s ease, background .12s ease;
   }
-  .quest-node:hover { border-color: var(--blueprint); }
+  .quest-node.locked { cursor: default; }
+  .quest-node:not(.locked):hover { border-color: var(--blueprint); }
   .quest-node.selected { box-shadow: 0 0 0 1px var(--accent); border-color: var(--accent); }
   .quest-node.locked { background: #14191f; border-color: #2b333b; color: #4d5762; }
   .quest-node.available { background: rgba(240,160,48,.08); border-color: var(--accent); color: var(--accent); animation: node-flicker 6s infinite; }
   .quest-node.completed { background: rgba(95,208,232,.05); border-color: rgba(95,208,232,.5); color: #7f97a1; }
   .quest-node.claimed { background: rgba(95,208,232,.1); border-color: var(--blueprint); color: #a9e8f5; }
-  .quest-node-name { padding-right: 16px; }
+  .quest-node-icon { display: flex; }
+  .quest-node.locked .quest-node-icon { filter: grayscale(1) opacity(.5); }
+  /* Подсказка с именем квеста при наведении - CUSTOM (не нативный title),
+     ИМЕННО потому что цвет текста в ней настраивается ПЕР-КВЕСТОВО из
+     редактора контента (quests.*.tooltip_color, см. content_editor.html:
+     вкладка "Квесты" - тот же принцип, что q.icon/q.bg/q.border) - у
+     нативного title цвет текста браузер не отдаёт на откуп странице. Цвет
+     выставляется инлайн-стилем НА КОНКРЕТНОМ узле в buildQuestNode (нет
+     override - остаётся дефолт из этого правила, QUEST_DEFAULT_TOOLTIP_COLOR).
+     Шрифт НАМЕРЕННО не моноширинный (в отличие от самого узла/остального
+     графа, см. CLAUDE.md "стиль чертежа") - подсказка читается на глаз бегло
+     и мельком, засечки/моноширинность тут только мешают. */
+  .quest-node-tip {
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #10151bf0; border: 1px solid #2b333b; border-radius: 4px; padding: 5px 9px;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px; font-weight: 600; line-height: 1.3; letter-spacing: .01em;
+    white-space: nowrap; pointer-events: none; z-index: 20;
+    display: none;
+    color: #dbe7ec;
+  }
+  .quest-node:hover .quest-node-tip { display: block; }
+  /* Колонки/ряд графа квестов ПЕРЕОПРЕДЕЛЯЮТ общую ширину .tech-col (160px в
+     дереве технологий, рассчитана на текстовые карточки) под компактный
+     квадрат 64x64 - без этого каждая колонка держала кучу пустого места
+     справа от узла (см. комментарий у renderQuestGraph про убранную band). */
+  .quest-graph .tech-col { width: 64px; }
+  .quest-graph .tech-col-row { gap: 20px; }
+  /* .tech-graph скроллится (overflow:auto) - подсказка (.quest-node-tip)
+     всплывает НАД узлом абсолютным позиционированием и обрезается краем
+     контейнера, если узел в самом верхнем ряду и обычного padding (18px, см.
+     .tech-cols) не хватает под её высоту. Увеличенный верхний паддинг ТОЛЬКО
+     для графа квестов даёт место под подсказку у любого узла, не трогая
+     дерево технологий (там подсказок такого рода нет). */
+  .quest-graph .tech-cols { padding-top: 44px; }
   .quest-node-badge {
     position: absolute; top: -7px; right: -7px; width: 19px; height: 19px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1;
@@ -1097,12 +1368,19 @@
 
   .quest-era-tabs button.active { color: var(--era-accent, var(--accent)); border-color: var(--era-accent, var(--accent-dim)); }
   /* Компактная плашка деталей - 1:1 из канваса (B_TechTree.dc.html/B_Quests.dc.html:
-     .detail/.detail-name/.detail-cost/.btn): один невысокий флекс-ряд (имя +
-     цена слева, кнопка справа), а НЕ карточка с заголовком/описанием/списком
+     .detail/.detail-name/.detail-cost/.btn): невысокий флекс-ряд (инфо-блок
+     слева, кнопка справа), а НЕ карточка с заголовком/описанием/списком
      "открывает"/бейджем тира друг под другом, как было раньше - см. CLAUDE.md.
-     Полное описание/"открывает"/предупреждение про лабораторию по-прежнему
-     доступны - как title-подсказка на имени технологии, а не постоянным
-     текстом (иначе плашка снова растянулась бы на пол-экрана). */
+     У технологии полное описание/"открывает"/предупреждение про лабораторию -
+     по-прежнему только title-подсказка на имени (иначе плашка растянулась бы
+     на пол-экрана). У квеста описание, условие выполнения И награда
+     (renderQuestDetail: quest.description/quest.conditions/reward_case) -
+     ПОСТОЯННЫЙ текст в info-блоке (не только подсказка) - без этого при клике
+     на квест было физически не понять, что делать и какая награда. "Нужно: .."
+     и "Награда: .." дополнительно выделены цветом/жирным (.quest-detail-goal/
+     .quest-detail-reward) поверх обычного тусклого .tech-detail-cost -
+     прямая жалоба "текст снизу незаметен"; в подсказке у квеста остаётся
+     только пояснение про требования из другой эры. */
   .tech-detail {
     flex-shrink: 0; background: transparent; border: 1px solid rgba(255,255,255,.1); border-radius: 0;
     padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -1112,6 +1390,20 @@
   .tech-detail-cost { font-size: 11px; color: #7f97a1; font-family: Consolas, monospace; margin-top: 4px; }
   .tech-detail-cost b { color: #dbe7ec; font-weight: 700; }
   .tech-detail-cost.warn { color: var(--warn); }
+  /* "Что сделать"/"какая награда" у квеста (renderQuestDetail) - осознанно
+     ярче и крупнее соседних tech-detail-cost строк (флейвор-описание/эра),
+     это ответ на прямую жалобу "текст снизу незаметен, непонятно что делать".
+     Амбер (--accent) для цели - тот же цвет, что у .quest-node.available
+     ("требует действия"); циан (--blueprint) для награды - тот же цвет, что
+     у .quest-node.claimed ("уже часть добычи"). */
+  .quest-detail-goal {
+    font-size: 12px; font-weight: 700; color: var(--accent); font-family: Consolas, monospace;
+    margin-top: 6px;
+  }
+  .quest-detail-reward {
+    font-size: 12px; font-weight: 700; color: var(--blueprint); font-family: Consolas, monospace;
+    margin-top: 4px;
+  }
   .tech-detail button {
     flex-shrink: 0; background: var(--accent); color: #10151b; border: 1px solid var(--accent);
     border-radius: 0; padding: 10px 16px; font-weight: 700; font-size: 12px;
@@ -1122,7 +1414,7 @@
   .tech-detail button:active:not(:disabled) { transform: scale(0.97); filter: brightness(0.92); }
   .tech-detail button.on-cooldown { opacity: .6; cursor: not-allowed; pointer-events: none; }
 
-  /* ---------- панель схватки (renderActiveEncounterBlock) ---------- */
+  /* ---------- панель схватки (модалка "Охота" - renderEncounterModalBody) ---------- */
   .encounter-box { display: flex; gap: 12px; align-items: flex-start; }
   .encounter-portrait {
     position: relative; flex-shrink: 0; width: 72px; height: 72px;
@@ -1139,23 +1431,111 @@
     position: relative; height: 10px; border-radius: 5px; background: var(--panel2);
     border: 1px solid var(--border); overflow: hidden; margin: 6px 0 8px;
   }
+  /* "Теневой след" полоски HP - лежит ПОД .encounter-hp-fill и той же ширины,
+     но перезжает на новое значение медленнее (transition-delay + более долгая
+     длительность) - на время, пока .encounter-hp-fill уже прыгнул на новую
+     (меньшую) ширину, ghost ещё чуть-чуть виден правее её края и даёт
+     привычное по другим играм "полоска только что просела" ощущение. Ставится
+     на равную ширину при каждой перерисовке модалки (holo-эффекта без
+     предыдущего кадра не бывает), поэтому виден только в окне
+     HIT_EFFECT_DELAY_MS между самим ударом и перерисовкой (см. playCombatHitEffect). */
+  .encounter-hp-ghost, .player-hp-ghost {
+    position: absolute; top: 0; left: 0; height: 100%; background: rgba(255,255,255,.55);
+    transition: width .35s ease-out .05s;
+  }
   .encounter-hp-fill {
-    height: 100%; background: linear-gradient(90deg, var(--accent-dim, var(--accent)), var(--accent));
-    transition: width .3s ease-out;
+    position: absolute; top: 0; left: 0; height: 100%;
+    background: linear-gradient(90deg, var(--accent-dim, var(--accent)), var(--accent));
+    transition: width .15s ease-out;
   }
   .encounter-moves { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* Подсказка про ещё не открытые приёмы (см. makeAttackButton/renderEncounterModalBody) -
+     сами кнопки таких приёмов теперь вообще не рисуются (по прямому пожеланию:
+     "заблокированные, а не перезаряжающиеся" не должны быть видны), но полностью
+     скрывать сам факт существования прокачки оружия не хочется - одна тихая строка
+     вместо ряда серых нерабочих кнопок. */
+  .encounter-locked-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  /* HP-полоска ИГРОКА внутри модалки "Охота" (см. openHuntingModal) - отдельные
+     классы от .encounter-hp-bar/.encounter-hp-fill (те красятся акцентным
+     цветом моба), чтобы "чьё" здоровье не путалось на глаз: игрок - зелёный
+     (--ok), моб - оранжевый акцент, как и раньше. */
+  .player-hp-bar {
+    position: relative; height: 10px; border-radius: 5px; background: var(--panel2);
+    border: 1px solid var(--border); overflow: hidden; margin: 6px 0 8px;
+  }
+  .player-hp-fill {
+    position: absolute; top: 0; left: 0; height: 100%; background: var(--ok);
+    transition: width .15s ease-out;
+  }
+  .wounded-badge {
+    font-size: 11px; font-weight: 700; color: var(--danger); cursor: help;
+    border: 1px solid var(--danger); border-radius: 6px; padding: 2px 8px;
+  }
+  /* Портрет игрока трясётся/подсвечивается той же анимацией, что портрет моба
+     (.encounter-portrait.hit-shake), см. playCombatHitEffect. */
+  .player-hp-wrap.hit-shake { animation: hit-shake .35s ease-in-out; }
+  /* Компактный баннер "В бою: <моб>" в панели локации (заменяет старую инлайн-
+     панель схватки - см. renderActions) - открывает модалку "Охота" по клику,
+     сама схватка глобальна на всю игру (не привязана к текущей локации), так
+     что баннер просто напоминает вернуться в бой, если модалку закрыли не
+     отступив. */
+  .encounter-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 14px; margin-bottom: 12px; border-radius: 8px;
+    background: rgba(224,82,74,.1); border: 1px solid rgba(224,82,74,.35);
+    cursor: pointer; font-size: 13px;
+  }
+  .encounter-banner:hover { background: rgba(224,82,74,.16); }
   .move-btn {
-    position: relative; overflow: hidden; font-size: 12px; padding: 7px 10px;
-    border-radius: 6px; border: 1px solid var(--border); background: var(--panel2);
+    position: relative; overflow: hidden; font-size: 13px; padding: 12px 16px;
+    min-width: 96px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel2);
     color: var(--text); cursor: pointer; transition: transform .08s ease, filter .08s ease;
   }
   .move-btn:active:not(:disabled) { transform: scale(0.96); }
   .move-btn.primary { background: var(--accent); color: #241a08; border-color: var(--accent); font-weight: 600; }
   .move-btn:disabled { opacity: .5; cursor: not-allowed; }
-  .move-btn .move-cd-badge {
-    position: absolute; top: 2px; right: 4px; font-size: 10px; font-weight: 700;
-    color: var(--danger);
+  /* Мини-"циферблат" кулдауна приёма (см. makeAttackButton) - конус-градиент
+     дозаполняется JS-ом инлайновым style под конкретную дробь остатка, тут
+     только форма/позиция кружка. Сидит В УГЛУ кнопки, а не поверх всей неё -
+     чтобы название приёма под ним оставалось читаемым, не как плоский серый
+     disabled-фон раньше. */
+  .move-btn .move-cd-pie {
+    position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.7);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.45) inset;
   }
+  /* QTE тайминга удара (см. startQte/makeAttackButton в JS) - ЧИСТО клиентская
+     шкала поверх самой кнопки атаки, сервер про неё ничего не знает и урон
+     считает как всегда (см. game/engine.py:attack_encounter). Первый клик по
+     кнопке запускает бегущий маркер, второй - считывает его позицию: попадание
+     в зелёную зону не меняет реальный урон, только косметику самого удара
+     (см. .dmg-float-qte ниже) - честная механика без обмана в цифрах.
+     Занимает своё место снизу кнопки (.qte-active добавляет отступ), а не
+     перекрывает текст названия приёма. Отступ/высота шкалы увеличены по
+     прямому пожеланию, 2026-09-14: сама кнопка + курсор мыши почти полностью
+     закрывали крошечную 5px-полоску, из-за чего казалось, что клик "не туда"
+     попадает - у более рослой кнопки полоска остаётся видна НИЖЕ курсора,
+     который обычно стоит на тексте приёма ближе к верху кнопки. */
+  .move-btn.qte-active { padding-bottom: 28px; }
+  .qte-track {
+    position: absolute; left: 6px; right: 6px; bottom: 8px; height: 10px;
+    background: rgba(0,0,0,.4); border-radius: 5px; overflow: visible;
+  }
+  .qte-zone { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: rgba(120,224,120,.65); }
+  .qte-marker {
+    position: absolute; top: -3px; bottom: -3px; width: 6px; border-radius: 3px;
+    background: #fff; box-shadow: 0 0 6px rgba(255,255,255,.9); left: 0%;
+  }
+  /* Мгновенная (без ожидания сервера) покраска исхода - см. resolveQte() в JS. */
+  .qte-track.qte-result-hit .qte-marker { background: #7be07b; box-shadow: 0 0 8px rgba(123,224,123,.9); }
+  .qte-track.qte-result-hit .qte-zone { background: rgba(123,224,123,.9); }
+  .qte-track.qte-result-miss .qte-marker { background: #e0524a; box-shadow: 0 0 8px rgba(224,82,74,.9); }
+  /* Косметический бонус попадания в QTE-зону - звёздочка перед числом урона и
+     мягкое свечение, накладывается ПОВЕРХ обычной/kill/true-раскраски (см.
+     dmgClass в playCombatHitEffect), а не заменяет её. */
+  .dmg-float-qte { text-shadow: 0 0 7px rgba(255,255,255,.85), 0 1px 2px rgba(0,0,0,.6); }
+  .dmg-float-qte::before { content: "✦ "; }
 
   @keyframes hit-shake {
     0%, 100% { transform: translateX(0); }
@@ -1169,6 +1549,20 @@
     content: ""; position: absolute; inset: 0; border-radius: 8px;
     background: rgba(224,82,74,.35); animation: flash-highlight .35s ease-out;
   }
+  /* "Замах" - диагональная светлая полоса, пролетающая через портрет моба в
+     момент удара (::before, независим от ::after выше - оба живут на одном
+     .hit-shake, просто разные псевдоэлементы). Чисто декоративный слой поверх
+     существующей тряски/вспышки, без новых иконок оружия. */
+  @keyframes weapon-slash {
+    0% { transform: translateX(-70%) rotate(-18deg); opacity: 0; }
+    35% { opacity: 1; }
+    100% { transform: translateX(70%) rotate(-18deg); opacity: 0; }
+  }
+  .encounter-portrait.hit-shake::before {
+    content: ""; position: absolute; inset: -6px; border-radius: 8px; pointer-events: none;
+    background: linear-gradient(100deg, transparent 42%, rgba(255,255,255,.9) 49%, rgba(255,255,255,.9) 53%, transparent 60%);
+    animation: weapon-slash .3s ease-out;
+  }
 
   @keyframes dmg-float {
     0% { transform: translate(-50%, 0); opacity: 1; }
@@ -1180,6 +1574,12 @@
     text-shadow: 0 1px 2px rgba(0,0,0,.6); animation: dmg-float .8s ease-out forwards;
     pointer-events: none; white-space: nowrap;
   }
+  /* Цвет цифры урона зависит от того, ЧЕМ был нанесён удар (см. pendingAttackMoveMode/
+     playCombatHitEffect) - золото на добивающем/ваншотном ударе (совпадает с
+     playKillFlash), фиолетовый на "истинном" уроне (percent_max_hp/percent_remaining_hp,
+     он не зависит от навыка/оружия) - обычный урон остаётся как раньше, красным. */
+  .dmg-float-kill { color: #ffd76a; font-size: 19px; }
+  .dmg-float-true { color: #c58cff; }
 
   @keyframes kill-flash-fade {
     0% { opacity: .85; }
@@ -1189,6 +1589,14 @@
     position: fixed; inset: 0; z-index: 9999; pointer-events: none;
     background: radial-gradient(circle, rgba(255,225,140,.9), rgba(255,225,140,0) 70%);
     animation: kill-flash-fade .5s ease-out forwards;
+  }
+  /* Поражение игрока (0 HP - см. playDefeatFlash/combat.defeated) - тот же
+     приём, что kill-flash-overlay, но красным и чуть дольше, чтобы читалось
+     как "плохое", а не как ещё одна победная вспышка. */
+  .defeat-flash-overlay {
+    position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+    background: radial-gradient(circle, rgba(224,82,74,.8), rgba(224,82,74,0) 70%);
+    animation: kill-flash-fade .7s ease-out forwards;
   }
 </style>
 </head>
@@ -1231,8 +1639,6 @@
 <audio id="bgMusicAudio" loop></audio>
 
 <main>
-  <div id="winBanner" class="win-banner" hidden>Все технологии изучены! Можно придумывать следующий тир прогрессии.</div>
-
   <div class="dashboard">
     <div class="col">
       <section class="panel" id="actionsPanel">
@@ -1290,6 +1696,11 @@
       <section class="panel" id="manualJobsPanel" hidden>
         <div class="panel-head"><span>Долгие действия</span></div>
         <div class="panel-body" id="manualJobsBody"></div>
+      </section>
+
+      <section class="panel" id="researchPanel" hidden>
+        <div class="panel-head"><span>Исследование</span></div>
+        <div class="panel-body" id="researchBody"></div>
       </section>
 
       <section class="panel">
@@ -1451,6 +1862,20 @@ const ICONS = {
     "..A....A..", ".AA....AA.", "AABAAAABAA", "AABBAABBAA",
     "AAAAAAAAAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
   ], palette: { A: "#6b6f7a", B: "#1f2226" } },
+
+  // Generic-заглушка для quests.*.icon без своей кастомной иконки - ДЕРЖАТЬ В
+  // ПАРЕ с DEFAULT_ICONS.quest в tools/content_editor.html (см. questIcon).
+  quest: { grid: [
+    "..AAAAAA..", ".AAAAAAAA.", "AABBBBBBAA", "AABBBBBBAA",
+    "AABAAAABAA", "AABBBBBBAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
+  ], palette: { A: "#e3c98a", B: "#8a5a34" } },
+
+  // Generic-заглушка для enchantments.*.icon без своей кастомной иконки - тот
+  // же принцип, что monster/quest выше (см. enchantIcon).
+  enchant: { grid: [
+    "....A....", "....A....", "...AAA...", "..AAAAA..",
+    "AAAAAAAAA", "..AAAAA..", "...AAA...", "....A....", "....A....",
+  ], palette: { A: "#f0a030" } },
 };
 
 // Раскраска по тиру для ЛЮБОГО инструмента без своей кастомной иконки - раньше была
@@ -1476,11 +1901,27 @@ const BUILDING_PALETTE = {
 function resourceIcon(rid) {
   return (VIEW.icons.resources && VIEW.icons.resources[rid]) || ICONS[rid] || null;
 }
+// Иконка ЖИЛЫ на поле шахты (mining_info.*.icon) - независима от иконки самого
+// добытого ресурса, по прямому пожеланию, 2026-09-16. Без своей иконки жила
+// откатывается на resourceIcon(rid) - см. content_editor.html: renderMining().
+function veinIcon(rid) {
+  return (VIEW.icons.mining_veins && VIEW.icons.mining_veins[rid]) || resourceIcon(rid);
+}
 function buildingIcon(bid) {
   return (VIEW.icons.buildings && VIEW.icons.buildings[bid]) || null;
 }
 function mobIcon(mid) {
   return (VIEW.icons.mobs && VIEW.icons.mobs[mid]) || ICONS.monster;
+}
+function enchantIcon(eid) {
+  return (VIEW.icons.enchantments && VIEW.icons.enchantments[eid]) || ICONS.enchant;
+}
+// Квест несёт свою иконку ПРЯМО в объекте (q.icon, см. quests_view в
+// web_ui.py), не через отдельный lookup-словарь VIEW.icons.* - каждый квест
+// и так приходит своим полным объектом (в отличие от мобов, которых игра
+// встречает по id независимо от контента).
+function questIcon(q) {
+  return q.icon || ICONS.quest;
 }
 // toolId="pickaxe" рисуется формой кирки (встроенная иконка ICONS.pickaxe) -
 // остальные инструменты без своей нарисованной иконки берут нейтральную форму
@@ -1861,10 +2302,6 @@ function actionCooldownInfo(kind, item) {
   if (kind === "manual") return { key: `manual:${item.id}`, delay: item.click_delay_ms ?? dflt };
   if (kind === "build") return { key: `build:${item.id}`, delay: item.click_delay_ms ?? dflt };
   if (kind === "repair") return { key: `repair:${item.id}`, delay: item.repair_click_delay_ms ?? dflt };
-  if (kind === "mining") {
-    if (item.kind === "mine") return { key: `mine:${item.resource_id}`, delay: item.click_delay_ms ?? dflt };
-    if (item.kind === "search_any") return { key: "search_any", delay: dflt };
-  }
   if (kind === "hunting") {
     if (item.kind === "search") return { key: `hunt_search:${item.location}`, delay: dflt };
     // move_id=null (обычная атака без приёма) и move_id="heavy_strike" и т.п. -
@@ -1887,7 +2324,6 @@ function renderAll() {
   const timeIconDef = t.is_day ? ICONS.sun : ICONS.moon;
   timeIconBox.appendChild(pixelIcon(timeIconDef.grid, timeIconDef.palette, 16));
   document.getElementById("techProgress").textContent = `${VIEW.techs_researched}/${VIEW.techs_total}`;
-  document.getElementById("winBanner").hidden = !VIEW.all_researched;
   const saveNameLabel = document.getElementById("saveNameLabel");
   if (VIEW.save_name) {
     document.getElementById("saveNameText").textContent = VIEW.save_name;
@@ -1917,6 +2353,7 @@ function renderAll() {
   renderAutocraft();
   renderEnergyCraft();
   renderManualJobs();
+  renderResearchPanel();
   renderActions();
   // Если модалка дерева технологий или инструментов сейчас открыта (например,
   // игрок исследовал технологию или улучшил инструмент прямо из неё),
@@ -1944,6 +2381,8 @@ function renderAll() {
   if (document.getElementById("geneticsLabOverlay")) openGeneticsLabModal();
   if (document.getElementById("skillsOverlay")) openSkillsModal();
   if (document.getElementById("questsOverlay")) openQuestsModal();
+  if (document.getElementById("huntingOverlay")) openHuntingModal();
+  if (document.getElementById("enchantingOverlay")) openEnchantingModal();
   const farmUpgradesOverlay = document.getElementById("farmUpgradesOverlay");
   if (farmUpgradesOverlay) {
     const freshFarm = VIEW.farms.find(f => f.id === farmUpgradesOverlay.dataset.farmId);
@@ -1971,6 +2410,7 @@ function renderAll() {
     else closeAutomationModal();
   }
   if (document.getElementById("prioritiesOverlay")) openPrioritiesModal();
+  if (document.getElementById("mineFieldOverlay")) openMineFieldModal();
 }
 
 function renderAutocraft() {
@@ -2099,6 +2539,42 @@ function renderManualJobs() {
   VIEW.manual_jobs.forEach(job => {
     container.appendChild(manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, job.name));
   });
+}
+
+// Прогресс текущего исследования (techs.*.research_turns > 1, см.
+// game/engine.py:research/_process_research) - ГЛОБАЛЬНО один слот на всю игру
+// (VIEW.active_research, не список, как manual_jobs), поэтому отдельная простая
+// функция вместо переиспользования manualJobProgressRow (которой нужен actionId
+// для отмены). Отмена (cancel_research) возвращает игроку cost, списанный при
+// старте - тот же принцип, что у долгих ручных действий.
+function researchProgressRow(job, label) {
+  const ratio = job.turns_total > 0 ? job.turns_done / job.turns_total : 0;
+  const row = el("div", { class: "autocraft-job" });
+  const head = el("div", { class: "job-head" });
+  const text = label ? `${label}: ${job.turns_done}/${job.turns_total} ход(ов)` : `${job.turns_done}/${job.turns_total} ход(ов)`;
+  head.appendChild(el("span", { text }));
+  const right = el("span", { class: "job-right" });
+  right.appendChild(jobCancelButton(() => cancelJob("research", {})));
+  head.appendChild(right);
+  row.appendChild(head);
+  const bar = el("div", { class: "job-bar" });
+  bar.appendChild(el("div", { class: "job-bar-fill", style: `width:${Math.round(ratio * 100)}%` }));
+  row.appendChild(bar);
+  return row;
+}
+
+// Панель "Исследование" - зеркало renderManualJobs (видна, только пока
+// VIEW.active_research не null), нужна отдельно от карточки технологии в дереве
+// технологий (renderTechDetail), т.к. дерево обычно не открыто, пока исследование
+// тикает где-то в фоне (тот же довод, что у панели "Долгие действия").
+function renderResearchPanel() {
+  const panel = document.getElementById("researchPanel");
+  const job = VIEW.active_research;
+  panel.hidden = !job;
+  if (!job) return;
+  const container = document.getElementById("researchBody");
+  container.innerHTML = "";
+  container.appendChild(researchProgressRow(job, job.name));
 }
 
 // 5 жёстко зашитых признаков генотипа особи - должно совпадать с
@@ -3105,6 +3581,452 @@ function closeSoulSynthesizerModal() {
   if (overlay) overlay.remove();
 }
 
+// ---------- Стол зачарований (enchanting_table, VIEW.enchanting) ----------
+// Модалка глобальная (не привязана к конкретной built-постройке, в отличие от
+// soul_collector) - любая работающая копия любого стола зачарований годится
+// (см. game/engine.py:_enchanting_table_config), поэтому кнопка на карточке
+// постройки просто открывает её без buildingId. enchantingActiveTool -
+// выбор инструмента переживает переоткрытие (тот же приём, что
+// questsActiveEra/prioritiesActiveTab).
+let enchantingActiveTool = null;
+let enchantingSpinning = false;
+let enchantingFx = [];
+let _enchFxLoopRunning = false;
+let _enchFxLastT = null;
+
+function lvlColorVar(level) { return level === 1 ? "var(--lvl1)" : level === 2 ? "var(--lvl2)" : "var(--lvl3)"; }
+function lvlColorRgb(level) { return level === 1 ? "95,208,232" : level === 2 ? "95,208,232" : "240,160,48"; }
+function lvlRoman(level) { return level === 1 ? "I" : level === 2 ? "II" : "III"; }
+
+function openEnchantingModal() {
+  const data = VIEW.enchanting;
+  closeEnchantingModal();
+  if (!data.tools.length) return; // в этом контенте ни один инструмент не зачаровываем (enchant_kind нигде не задан)
+  if (!enchantingActiveTool || !data.tools.some(t => t.id === enchantingActiveTool)) {
+    enchantingActiveTool = data.tools[0].id;
+  }
+
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay && !enchantingSpinning) closeEnchantingModal(); });
+  const modal = el("div", { class: "modal enchanting-modal" });
+  modal.append(
+    el("div", { class: "bracket tl" }), el("div", { class: "bracket tr" }),
+    el("div", { class: "bracket bl" }), el("div", { class: "bracket br" }),
+  );
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Стол зачарований" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => { if (!enchantingSpinning) closeEnchantingModal(); } }));
+  modal.appendChild(head);
+
+  const layout = el("div", { class: "ench-layout" });
+  layout.append(
+    el("div", { class: "ench-col ench-col-left", id: "enchLeftCol" }),
+    el("div", { class: "ench-col ench-col-center", id: "enchCenterCol" }),
+    el("div", { class: "ench-col ench-col-right", id: "enchRightCol" }),
+  );
+  modal.appendChild(layout);
+
+  overlay.appendChild(modal);
+  overlay.id = "enchantingOverlay";
+  document.body.appendChild(overlay);
+
+  renderEnchantingAll();
+  _startEnchFxLoop();
+}
+
+function closeEnchantingModal() {
+  const overlay = document.getElementById("enchantingOverlay");
+  if (overlay) overlay.remove();
+  enchantingFx = [];
+}
+
+function renderEnchantingAll() {
+  const data = VIEW.enchanting;
+  const tool = data.tools.find(t => t.id === enchantingActiveTool) || data.tools[0];
+  renderEnchantingLeft(data, tool);
+  renderEnchantingCenter(tool, data);
+  renderEnchantingRight(tool);
+}
+
+function renderEnchantingAppliedInto(container, tool) {
+  container.innerHTML = "";
+  if (!tool.applied.length) {
+    container.appendChild(el("div", { class: "ench-applied-empty" }));
+    return;
+  }
+  tool.applied.forEach(a => {
+    const c = lvlColorVar(a.level);
+    const chip = el("div", { class: "ench-chip" });
+    chip.style.cssText = `border-color:${c};color:${c};background:color-mix(in srgb,${c} 12%, transparent)`;
+    chip.dataset.enchantId = a.enchant_id;
+    const iconDef = enchantIcon(a.enchant_id);
+    chip.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 16));
+    chip.appendChild(el("span", { text: a.name }));
+    chip.appendChild(el("b", { text: lvlRoman(a.level) }));
+    container.appendChild(chip);
+  });
+}
+
+function renderEnchantingLeft(data, tool) {
+  const col = document.getElementById("enchLeftCol");
+  col.innerHTML = "";
+  col.appendChild(el("div", { class: "ench-col-label", text: "Инструмент" }));
+
+  const select = el("select");
+  data.tools.forEach(t => {
+    const opt = el("option", { value: t.id, text: t.name });
+    if (t.id === tool.id) opt.setAttribute("selected", "selected");
+    select.appendChild(opt);
+  });
+  select.addEventListener("change", (e) => {
+    if (enchantingSpinning) { select.value = enchantingActiveTool; return; }
+    enchantingActiveTool = e.target.value;
+    renderEnchantingAll();
+  });
+  col.appendChild(select);
+
+  const card = el("div", { class: "ench-tool-card" });
+  const iconBox = el("div", { class: "ench-tool-card-icon" });
+  const toolIconDef = toolIcon(tool.id, tool.tier);
+  iconBox.appendChild(pixelIcon(toolIconDef.grid, toolIconDef.palette, 26));
+  card.appendChild(iconBox);
+  const info = el("div");
+  info.appendChild(el("div", { class: "ench-tool-card-name", text: tool.name }));
+  info.appendChild(el("div", { class: "ench-tool-card-tier", text: `${tool.tier_name} · тир ${tool.tier}/${tool.max_tier}` }));
+  card.appendChild(info);
+  col.appendChild(card);
+
+  if (tool.max_durability != null) {
+    const durWrap = el("div");
+    const label = el("div", { class: "ench-durability-label" });
+    label.appendChild(el("span", { text: "Прочность" }));
+    label.appendChild(el("b", { text: `${tool.durability_remaining} / ${tool.max_durability}` }));
+    durWrap.appendChild(label);
+    const bar = el("div", { class: "ench-durability-bar" });
+    const pct = Math.max(0, Math.min(100, (tool.durability_remaining / tool.max_durability) * 100));
+    const fillCls = pct <= 20 ? " crit" : pct <= 50 ? " low" : "";
+    bar.appendChild(el("div", { class: `ench-durability-fill${fillCls}`, style: `width:${pct}%` }));
+    durWrap.appendChild(bar);
+    col.appendChild(durWrap);
+  }
+
+  col.appendChild(el("div", { class: "ench-col-label", text: "Активные" }));
+  const appliedCol = el("div", { class: "ench-applied-col", id: "enchAppliedCol" });
+  renderEnchantingAppliedInto(appliedCol, tool);
+  col.appendChild(appliedCol);
+}
+
+function renderEnchantingRight(tool) {
+  const col = document.getElementById("enchRightCol");
+  col.innerHTML = "";
+  col.appendChild(el("div", { class: "ench-col-label", text: "Доступно" }));
+  const list = el("div", { class: "ench-pool-list" });
+  if (!tool.pool.length) {
+    list.appendChild(el("div", { class: "ench-pool-empty", text: "—" }));
+  } else {
+    tool.pool.forEach(group => {
+      const row = el("div", { class: "ench-pool-row" });
+      const ic = el("div", { class: "ench-pool-ic" });
+      const iconDef = enchantIcon(group.enchant_id);
+      ic.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 15));
+      row.appendChild(ic);
+      row.appendChild(el("div", { class: "ench-pool-name", text: group.name }));
+      const levels = el("div", { class: "ench-pool-levels" });
+      group.levels.forEach(lv => {
+        const c = lvlColorVar(lv.level);
+        const pip = el("div", { class: `ench-pool-lvl${lv.reached ? " reached" : ""}`, text: lvlRoman(lv.level) });
+        pip.style.setProperty("--lvl-c", c);
+        pip.title = `${group.name} ${lvlRoman(lv.level)}: ${group.description}`;
+        levels.appendChild(pip);
+      });
+      row.appendChild(levels);
+      list.appendChild(row);
+    });
+  }
+  col.appendChild(list);
+}
+
+function renderEnchantingCenter(tool, data) {
+  const col = document.getElementById("enchCenterCol");
+  col.innerHTML = "";
+  enchantingFx = [];
+
+  col.appendChild(el("div", { class: "ench-altar-glow", id: "enchAltarGlow" }));
+
+  const circlesRow = el("div", { class: "ench-circles-row" });
+  for (let i = 0; i < 3; i++) {
+    const slot = el("div", { class: "ench-circle-slot", id: `enchSlot${i}` });
+    const canvas = el("canvas");
+    canvas.width = 138; canvas.height = 138;
+    slot.appendChild(canvas);
+    slot.appendChild(el("div", { class: "ench-rune-ticks" }));
+    const circle = el("div", { class: "ench-circle", id: `enchCircle${i}` });
+    circle.append(
+      el("div", { class: "ring" }), el("div", { class: "ring2" }),
+      el("div", { class: "core" }), el("div", { class: "lvl-badge" }),
+    );
+    slot.appendChild(circle);
+    slot.appendChild(el("div", { class: "ench-shock-ring", id: `enchShock${i}` }));
+    circlesRow.appendChild(slot);
+    const fx = makeEnchantFx(canvas);
+    fx.setAmbientColor("95,208,232", 260);
+    enchantingFx.push(fx);
+  }
+  col.appendChild(circlesRow);
+  col.appendChild(el("div", { class: "ench-success-badge", id: "enchSuccessBadge" }));
+
+  const rollRow = el("div", { class: "ench-roll-row" });
+  const rollBtn = el("button", { class: "primary ench-roll-btn", id: "enchRollBtn", text: "Зачаровать" });
+  rollBtn.disabled = enchantingSpinning || !data.available || tool.pool.length === 0;
+  rollBtn.addEventListener("click", () => rollEnchant(tool.id));
+  rollRow.appendChild(rollBtn);
+
+  const bookChip = el("div", { class: "ench-book-chip" });
+  data.cost.forEach(c => {
+    const iconDef = resourceIcon(c.id);
+    if (iconDef) bookChip.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 18));
+    bookChip.appendChild(el("b", { text: `×${c.amount}` }));
+  });
+  rollRow.appendChild(bookChip);
+  col.appendChild(rollRow);
+}
+
+// Орбитальные искры вокруг каждого круга (canvas, ЧИСТО декоративно - реальный
+// исход уже решён сервером, см. rollEnchant) - ускоряются во время прокрутки,
+// разлетаются вспышкой при фиксации символа, краснеют и осыпаются при провале.
+function makeEnchantFx(canvas) {
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2;
+  let particles = [];
+  let ambientTimer = 0;
+  let ambientRate = 220;
+  let rgb = "95,208,232";
+
+  function spawnAmbient() {
+    const ang = Math.random() * Math.PI * 2;
+    const r = 46 + Math.random() * 8;
+    particles.push({
+      x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r,
+      ang, r, spin: (Math.random() < 0.5 ? 1 : -1) * (0.004 + Math.random() * 0.006),
+      life: 900 + Math.random() * 500, maxLife: 1400, size: 1 + Math.random() * 1.2,
+      rgb, orbit: true, alpha: 0.5 + Math.random() * 0.3,
+    });
+  }
+  function burst(color, count, speed) {
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = speed * (0.5 + Math.random() * 0.7);
+      particles.push({
+        x: cx, y: cy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+        life: 500 + Math.random() * 260, maxLife: 760, size: 1.4 + Math.random() * 1.8,
+        rgb: color, orbit: false, alpha: 1, grav: 0,
+      });
+    }
+  }
+  function fallShards(color, count) {
+    for (let i = 0; i < count; i++) {
+      const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+      particles.push({
+        x: cx + (Math.random() - 0.5) * 50, y: cy + (Math.random() - 0.5) * 30,
+        vx: Math.cos(ang) * 0.4, vy: -1.2 - Math.random(),
+        life: 700 + Math.random() * 300, maxLife: 1000, size: 1.6 + Math.random() * 1.6,
+        rgb: color, orbit: false, alpha: 1, grav: 0.09,
+      });
+    }
+  }
+  function setAmbientColor(c, rate) { rgb = c; ambientRate = rate || 220; }
+
+  function step(dt) {
+    ambientTimer += dt;
+    if (ambientTimer > ambientRate) { ambientTimer = 0; spawnAmbient(); }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      if (p.orbit) {
+        p.ang += p.spin * dt;
+        p.x = cx + Math.cos(p.ang) * p.r;
+        p.y = cy + Math.sin(p.ang) * p.r;
+      } else {
+        p.vy += (p.grav || 0) * (dt / 16);
+        p.x += p.vx * (dt / 16);
+        p.y += p.vy * (dt / 16);
+      }
+    }
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    particles.forEach(p => {
+      const a = Math.max(0, p.life / p.maxLife) * (p.alpha != null ? p.alpha : 1);
+      ctx.fillStyle = `rgba(${p.rgb},${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+  return { step, draw, burst, fallShards, setAmbientColor };
+}
+
+function _enchFxLoop(t) {
+  if (!document.getElementById("enchantingOverlay")) { _enchFxLoopRunning = false; _enchFxLastT = null; return; }
+  if (_enchFxLastT == null) _enchFxLastT = t;
+  const dt = Math.min(48, t - _enchFxLastT);
+  _enchFxLastT = t;
+  enchantingFx.forEach(f => { f.step(dt); f.draw(); });
+  requestAnimationFrame(_enchFxLoop);
+}
+function _startEnchFxLoop() {
+  if (_enchFxLoopRunning) return;
+  _enchFxLoopRunning = true;
+  _enchFxLastT = null;
+  requestAnimationFrame(_enchFxLoop);
+}
+
+function setEnchCircleCore(circleEl, enchantId, color) {
+  const core = circleEl.querySelector(".core");
+  core.innerHTML = "";
+  const iconDef = enchantIcon(enchantId);
+  core.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 30));
+  circleEl.style.setProperty("--lvl-c", color);
+}
+
+function playEnchShock(idx, color) {
+  const shockEl = document.getElementById(`enchShock${idx}`);
+  if (!shockEl) return;
+  shockEl.style.setProperty("--lvl-c", color);
+  shockEl.classList.remove("play");
+  void shockEl.offsetWidth;
+  shockEl.classList.add("play");
+}
+
+function spinEnchCircle(idx, pool, forced, duration) {
+  return new Promise(resolve => {
+    const circleEl = document.getElementById(`enchCircle${idx}`);
+    if (!circleEl) { resolve(); return; }
+    circleEl.classList.add("spinning");
+    circleEl.classList.remove("locked", "success", "fail");
+    if (enchantingFx[idx]) enchantingFx[idx].setAmbientColor("95,208,232", 90);
+    let steps = 0;
+    const tick = () => {
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      setEnchCircleCore(circleEl, pick.enchant_id, lvlColorVar(pick.level));
+      steps++;
+      const delay = 50 + steps * 8;
+      if (steps * delay < duration) {
+        setTimeout(tick, delay);
+        return;
+      }
+      circleEl.classList.remove("spinning");
+      circleEl.classList.add("locked");
+      const color = lvlColorVar(forced.level);
+      setEnchCircleCore(circleEl, forced.enchant_id, color);
+      const badge = circleEl.querySelector(".lvl-badge");
+      if (badge) badge.textContent = lvlRoman(forced.level);
+      const rgb = lvlColorRgb(forced.level);
+      if (enchantingFx[idx]) { enchantingFx[idx].setAmbientColor(rgb, 500); enchantingFx[idx].burst(rgb, 16, 2.6); }
+      playEnchShock(idx, color);
+      const glow = document.getElementById("enchAltarGlow");
+      if (glow) {
+        const locked = document.querySelectorAll(".ench-circle.locked").length;
+        glow.style.setProperty("--ench-glow-rgb", rgb);
+        glow.style.setProperty("--ench-glow-a", (0.05 + locked * 0.09).toFixed(2));
+      }
+      resolve();
+    };
+    tick();
+  });
+}
+
+// Барабан для анимации набирается из ТЕКУЩЕГО пула инструмента (VIEW.enchanting,
+// уже свежий на момент вызова - см. rollEnchant) - круги при прокрутке мелькают
+// РЕАЛЬНЫМИ доступными символами, но останавливаются РОВНО там, где решил сервер
+// (enchantResult.circles), а не где попадёт клиентский random.
+async function playEnchantRoll(enchantResult) {
+  const tool = VIEW.enchanting.tools.find(t => t.id === enchantResult.tool_id);
+  const pool = tool ? tool.pool.flatMap(g => g.levels.map(lv => ({ enchant_id: g.enchant_id, level: lv.level }))) : [];
+  if (!pool.length) return;
+  const glow = document.getElementById("enchAltarGlow");
+  if (glow) { glow.style.setProperty("--ench-glow-rgb", "95,208,232"); glow.style.setProperty("--ench-glow-a", ".04"); }
+
+  const circles = enchantResult.circles;
+  await spinEnchCircle(0, pool, circles[0], 900);
+  await sleep(220);
+  await spinEnchCircle(1, pool, circles[1], 900);
+  await sleep(220);
+  await spinEnchCircle(2, pool, circles[2], 1050);
+
+  if (enchantResult.success) {
+    for (let i = 0; i < 3; i++) {
+      const c = document.getElementById(`enchCircle${i}`);
+      if (c) c.classList.add("success");
+      if (enchantingFx[i]) { enchantingFx[i].burst("240,160,48", 26, 3.2); enchantingFx[i].setAmbientColor("240,160,48", 300); }
+    }
+    if (glow) { glow.style.setProperty("--ench-glow-rgb", "240,160,48"); glow.style.setProperty("--ench-glow-a", ".22"); }
+    const badge = document.getElementById("enchSuccessBadge");
+    if (badge) {
+      badge.innerHTML = "";
+      const iconDef = enchantIcon(enchantResult.applied.enchant_id);
+      badge.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 30));
+      badge.appendChild(el("span", { class: "roman", text: lvlRoman(enchantResult.applied.level) }));
+      badge.classList.remove("show");
+      void badge.offsetWidth;
+      badge.classList.add("show");
+    }
+    playSound("reward");
+    const appliedCol = document.getElementById("enchAppliedCol");
+    const chip = appliedCol && appliedCol.querySelector(`[data-enchant-id="${enchantResult.applied.enchant_id}"]`);
+    if (chip) chip.classList.add("new-flash");
+    await sleep(1500);
+  } else {
+    for (let i = 0; i < 3; i++) {
+      const c = document.getElementById(`enchCircle${i}`);
+      if (c) c.classList.add("fail");
+      if (enchantingFx[i]) { enchantingFx[i].burst("224,82,74", 10, 1.4); enchantingFx[i].fallShards("224,82,74", 14); enchantingFx[i].setAmbientColor("224,82,74", 260); }
+    }
+    if (glow) { glow.style.setProperty("--ench-glow-rgb", "224,82,74"); glow.style.setProperty("--ench-glow-a", ".2"); }
+    await sleep(700);
+  }
+
+  for (let i = 0; i < 3; i++) {
+    const c = document.getElementById(`enchCircle${i}`);
+    if (c) c.classList.remove("locked", "success", "fail");
+    if (enchantingFx[i]) enchantingFx[i].setAmbientColor("95,208,232", 260);
+  }
+  if (glow) glow.style.setProperty("--ench-glow-a", ".04");
+}
+
+async function rollEnchant(toolId) {
+  if (busy || enchantingSpinning) return;
+  busy = true;
+  enchantingSpinning = true;
+  const btn = document.getElementById("enchRollBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/api/enchant_tool", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool_id: toolId }),
+    });
+    const payload = await res.json();
+    VIEW = payload.state;
+    if (!payload.enchant) {
+      // Не удалось даже начать (нет стола/не хватает книг) - обычное сообщение
+      // об ошибке, крутить нечего.
+      enchantingSpinning = false;
+      renderAll();
+      pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+      return;
+    }
+    renderAll(); // модалка перестраивается заново (круги в состоянии покоя) - тот же приём, что claimQuestReward/openLootBoxModal
+    await playEnchantRoll(payload.enchant);
+    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+  } finally {
+    enchantingSpinning = false;
+    busy = false;
+    const freshBtn = document.getElementById("enchRollBtn");
+    if (freshBtn) freshBtn.disabled = !VIEW.enchanting.available;
+  }
+}
+
 // Ползунок меню "Механизмы" (b.disableable, см. tools/web_ui.py:build_view/
 // engine.is_disableable_building) - только у построек, которые пассивно И
 // производят, И потребляют. min=0 (можно выключить все копии целиком),
@@ -3148,6 +4070,7 @@ async function setBuildingActiveCount(buildingId, activeCount) {
 async function abandonEncounter() {
   if (busy) return;
   busy = true;
+  clearActiveQte(); // не оставлять зависший авто-таймаут QTE на кнопке, которой больше не будет
   try {
     const res = await fetch("/api/hunt_abandon", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     const payload = await res.json();
@@ -3167,7 +4090,127 @@ function sleep(ms) {
 // новый VIEW/renderAll() - панель схватки строится ЗАНОВО на каждый renderAll(),
 // поэтому без этой паузы анимация на СТАРОМ DOM обрывалась бы, не успев доиграть
 // (при убийстве панель вовсе исчезает - см. doAction).
-const HIT_EFFECT_DELAY_MS = 320;
+const HIT_EFFECT_DELAY_MS = 450;
+
+// Каким РЕЖИМОМ приёма (move.mode, см. combat_moves_view) был нанесён удар, который
+// сейчас летит на сервер - выставляется в makeAttackButton ПЕРЕД вызовом doAction()
+// (сам combat-пакет из ответа сервера режима не несёт, только числа) и читается ровно
+// один раз в playCombatHitEffect, чтобы покрасить цифру урона под конкретный режим
+// (см. .dmg-float-true в CSS). Сброс на дефолт сразу после прочтения - на случай,
+// если между кликами по приёму придёт какой-то другой combat-эффект без явного move.
+let pendingAttackMoveMode = "multiplier";
+// Попал ли игрок в зелёную зону QTE ПЕРЕД этим конкретным ударом (см. ниже) -
+// тот же приём передачи "как был нанесён удар" в playCombatHitEffect, что и
+// pendingAttackMoveMode, только для косметического бонуса, а не для цвета по режиму.
+let pendingQteHit = false;
+
+// ---------- QTE тайминга удара (см. .qte-track в CSS) ----------
+// ЧИСТО клиентский слой поверх кнопки атаки - сервер как источник правды по-прежнему
+// не знает о QTE вообще (game/engine.py:attack_encounter урон считает как всегда),
+// попадание в зону даёт только косметический бонус самому эффекту удара, а не
+// реальные дополнительные очки урона - тот же принцип "не обманывать цифры", что
+// у остальных чисто клиентских эффектов в игре (click_delay_ms и т.п., см. CLAUDE.md).
+// Маркер раньше гонялся CSS-анимацией (alternate), а qteMarkerPos() отдельно
+// пересчитывал ту же позицию по performance.now() для сверки с зоной - ДВА
+// независимых таймера (браузерный композитор для CSS-анимации и JS-часы для
+// клика) технически могут разойтись на десятки мс (первый кадр CSS-анимации
+// стартует не в момент присвоения style, а на следующей отрисовке, и это время
+// не константа) - именно это давало ощущение "клик засчитывается с задержкой"
+// при живой игре. Теперь маркер двигает САМ JS (rAF-цикл tick() внутри startQte)
+// через ТУ ЖЕ qteMarkerPos(), что и проверка попадания - визуальная позиция и позиция,
+// по которой судится клик, гарантированно одно и то же число, расхождению
+// неоткуда взяться.
+const QTE_SWEEP_MS = 650;    // время ОДНОГО прохода маркера от края до края
+// 0.22 (~143мс окно на реакцию при 650мс прохода) оказалось слишком туго даже
+// после починки визуальной рассинхронизации - среднее время реакции человека
+// само по себе около 200-250мс, так что окно ýже этого физически не пройти
+// стабильно. Расширено по прямому пожеланию, 2026-09-14.
+const QTE_ZONE_WIDTH = 0.3;  // доля ширины шкалы, случайно сдвигается на старте
+const QTE_TIMEOUT_MS = 2600; // не подвисать навсегда, если игрок отвлёкся - бьём "мимо" сами
+const QTE_MARKER_WIDTH_PX = 6; // держать в паре с шириной .qte-marker в CSS (см. tick() ниже)
+let activeQte = null; // { key, startedAt, zoneStart, timeoutId, rafId, track, btn, marker } | null
+
+function qteMarkerPos(startedAt) {
+  const cycle = QTE_SWEEP_MS * 2;
+  const t = (performance.now() - startedAt) % cycle;
+  return t <= QTE_SWEEP_MS ? t / QTE_SWEEP_MS : 2 - t / QTE_SWEEP_MS;
+}
+
+function isQteHit(qte) {
+  const pos = qteMarkerPos(qte.startedAt);
+  return pos >= qte.zoneStart && pos <= qte.zoneStart + QTE_ZONE_WIDTH;
+}
+
+// Полная расчистка (таймеры + DOM) - используется, когда шкалу нужно убрать
+// БЕЗ визуального подтверждения исхода (отступление из боя, старт следующей
+// шкалы). Разрешение клика идёт через resolveQte() ниже, не сюда.
+function clearActiveQte() {
+  if (!activeQte) return;
+  clearTimeout(activeQte.timeoutId);
+  cancelAnimationFrame(activeQte.rafId);
+  activeQte.track.remove();
+  activeQte.btn.classList.remove("qte-active");
+  activeQte = null;
+}
+
+// Мгновенная (без ожидания ответа сервера) обратная связь по исходу QTE -
+// красит шкалу в hit/miss ПРЯМО в момент клика/авто-таймаута и убирает её чуть
+// погодя, а не тут же: раньше шкала пропадала сразу, и до самого прилёта ответа
+// с сервера (autocraft-preview + /api/action + HIT_EFFECT_DELAY_MS, вместе
+// иногда больше секунды) игрок не видел вообще никакого подтверждения, что
+// клик засчитан - это и читалось как "залипание". Сама реальная атака (см.
+// launchAttack) по-прежнему уходит на сервер независимо от этой анимации.
+const QTE_RESULT_FLASH_MS = 220;
+function resolveQte(qte, hit) {
+  clearTimeout(qte.timeoutId);
+  cancelAnimationFrame(qte.rafId);
+  qte.track.classList.add(hit ? "qte-result-hit" : "qte-result-miss");
+  setTimeout(() => {
+    qte.track.remove();
+    qte.btn.classList.remove("qte-active");
+  }, QTE_RESULT_FLASH_MS);
+}
+
+// Запускает шкалу НА кнопке btn - зона случайной ширины QTE_ZONE_WIDTH в случайном
+// месте на каждый запуск. finish(hit) вызывается ЛИБО по авто-таймауту (hit=false),
+// ЛИБО вторым кликом по той же кнопке (см. makeAttackButton).
+function startQte(key, btn, finish) {
+  const zoneStart = Math.random() * (1 - QTE_ZONE_WIDTH);
+  const track = el("div", { class: "qte-track" });
+  track.appendChild(el("div", {
+    class: "qte-zone",
+    style: `left:${(zoneStart * 100).toFixed(1)}%; width:${(QTE_ZONE_WIDTH * 100).toFixed(1)}%`,
+  }));
+  const marker = el("div", { class: "qte-marker" });
+  track.appendChild(marker);
+  btn.appendChild(track);
+  btn.classList.add("qte-active");
+  const startedAt = performance.now();
+  const timeoutId = setTimeout(() => finish(false), QTE_TIMEOUT_MS);
+  let rafId;
+  const tick = () => {
+    const pos = qteMarkerPos(startedAt);
+    // "- pos*ширина" - маркер не должен вылезать за правый край шкалы на pos=1,
+    // та же поправка, что раньше была в конечном кадре CSS-keyframe
+    // (calc(100% - Npx)), но теперь применена по всей длине.
+    marker.style.left = `calc(${(pos * 100).toFixed(2)}% - ${(pos * QTE_MARKER_WIDTH_PX).toFixed(2)}px)`;
+    rafId = requestAnimationFrame(tick);
+  };
+  tick(); // сразу выставить стартовую позицию, не ждать первого кадра rAF
+  return { key, startedAt, zoneStart, timeoutId, rafId, track, btn, marker };
+}
+
+// Двигает и заливку (быстро), и "теневой след" (медленнее, см. .encounter-hp-ghost
+// в CSS) полоски HP на одну и ту же итоговую ширину - оба elements получают ОДНО
+// и то же значение синхронно, а разница в скорости появления - целиком заслуга
+// CSS transition/transition-delay, JS-у сверх этого дёргать ничего не нужно.
+function updateHpBar(fillId, ghostId, ratio) {
+  const pct = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+  const fill = document.getElementById(fillId);
+  if (fill) fill.style.width = pct;
+  const ghost = document.getElementById(ghostId);
+  if (ghost) ghost.style.width = pct;
+}
 
 function playKillFlash() {
   const overlay = el("div", { class: "kill-flash-overlay" });
@@ -3175,32 +4218,65 @@ function playKillFlash() {
   setTimeout(() => overlay.remove(), 500);
 }
 
+// Поражение игрока (0 HP - см. combat.defeated/attack_encounter) - тот же
+// приём, что playKillFlash, красным вместо жёлтого.
+function playDefeatFlash() {
+  const overlay = el("div", { class: "defeat-flash-overlay" });
+  document.body.appendChild(overlay);
+  setTimeout(() => overlay.remove(), 700);
+}
+
 // Летящий урон/тряска портрета/вспышка на ваншот - играется на DOM ЕЩЁ ДО того,
 // как doAction подменит VIEW (см. HIT_EFFECT_DELAY_MS выше). HP-полоска двигается
 // напрямую (inline width), а не через полную перерисовку - иначе CSS-transition
 // не от чего было бы интерполировать (свежий элемент сразу в конечной позиции).
+// combat.player_damage_taken/player_hp/player_max_hp/defeated - см.
+// game/engine.py:attack_encounter (ответка моба, есть на КАЖДОМ ответе, не
+// только при поражении - 0, если удар был убивающим и ответки не было).
 function playCombatHitEffect(combat) {
-  const fill = document.getElementById("encounterHpFill");
-  if (fill && combat.max_hp > 0) {
-    const ratio = Math.max(0, Math.min(1, combat.remaining_hp / combat.max_hp));
-    fill.style.width = `${Math.round(ratio * 100)}%`;
+  const moveMode = pendingAttackMoveMode;
+  pendingAttackMoveMode = "multiplier";
+  const qteHit = pendingQteHit;
+  pendingQteHit = false;
+  if (combat.max_hp > 0) {
+    updateHpBar("encounterHpFill", "encounterHpGhost", combat.remaining_hp / combat.max_hp);
   }
   const portrait = document.getElementById("encounterPortrait");
   if (portrait) {
     portrait.classList.remove("hit-shake");
-    void portrait.offsetWidth; // reflow - иначе повторное .add() того же класса не перезапустит анимацию
+    void portrait.offsetWidth; // reflow - иначе повторное .add() того же класса не перезапустит анимацию (и замах, и тряска/вспышка сидят на одном классе)
     portrait.classList.add("hit-shake");
-    const dmg = el("div", { class: "dmg-float", text: `-${combat.damage}` });
+    let dmgClass = "dmg-float";
+    if (combat.instant_kill) dmgClass += " dmg-float-kill";
+    else if (moveMode === "percent_max_hp" || moveMode === "percent_remaining_hp") dmgClass += " dmg-float-true";
+    if (qteHit) dmgClass += " dmg-float-qte";
+    const dmg = el("div", { class: dmgClass, text: `-${combat.damage}` });
     portrait.appendChild(dmg);
     setTimeout(() => dmg.remove(), 900);
   }
   if (combat.instant_kill) playKillFlash();
+
+  if (combat.player_max_hp > 0) {
+    updateHpBar("encounterPlayerHpFill", "encounterPlayerHpGhost", combat.player_hp / combat.player_max_hp);
+  }
+  const playerWrap = document.getElementById("encounterPlayerHpWrap");
+  if (playerWrap && combat.player_damage_taken > 0) {
+    playerWrap.classList.remove("hit-shake");
+    void playerWrap.offsetWidth;
+    playerWrap.classList.add("hit-shake");
+    const dmg = el("div", { class: "dmg-float", text: `-${combat.player_damage_taken}` });
+    playerWrap.appendChild(dmg);
+    setTimeout(() => dmg.remove(), 900);
+  }
+  if (combat.defeated) playDefeatFlash();
 }
 
 // Кнопка одного варианта атаки - moveId=null - обычная атака (всегда доступна),
-// иначе move - запись из VIEW.hunting.combat_moves (см. engine.combat_moves_view):
-// "не изучен" (тир оружия ещё не дошёл) блокирует кнопку насовсем, "на кулдауне"
-// блокирует ВРЕМЕННО и показывает бейдж с числом ходов до готовности.
+// иначе move - запись из VIEW.hunting.combat_moves (см. engine.combat_moves_view).
+// Приёмы, у которых move.unlocked === false, сюда вообще не попадают - см.
+// renderEncounterModalBody (по прямому пожеланию: "заблокированные" приёмы не
+// должны быть видны вовсе, в отличие от "на кулдауне" - те видны, просто
+// временно недоступны, с круговым таймером до готовности, см. ниже).
 // Человекочитаемая формула урона приёма - см. game/engine.py:_move_damage (4
 // независимых режима). Только для подсказки (title) - сам расчёт всегда на сервере.
 function moveFormulaText(move) {
@@ -3217,27 +4293,70 @@ function makeAttackButton(label, moveId, move) {
   const { key, delay } = actionCooldownInfo("hunting", { kind: "attack", moveId });
   const btn = el("button", { class: "move-btn" + (moveId ? "" : " primary") });
   btn.appendChild(document.createTextNode(label));
-  const locked = move && !move.unlocked;
   const onCooldown = move && move.cooldown_remaining > 0;
   if (move) {
     const base = `${move.description} Урон: ${moveFormulaText(move)}.`;
-    btn.title = locked
-      ? `${base} (приём ещё не изучен)`
-      : onCooldown
-        ? `${base} (готов через ${move.cooldown_remaining} х.)`
-        : base;
+    btn.title = onCooldown ? `${base} (готов через ${move.cooldown_remaining} х.)` : base;
   }
-  if (locked) {
+  if (onCooldown) {
     btn.disabled = true;
-  } else if (onCooldown) {
-    btn.disabled = true;
-    btn.appendChild(el("span", { class: "move-cd-badge", text: String(move.cooldown_remaining) }));
+    // Круговой "циферблат" вместо плоского числа в углу (см. .move-cd-pie в CSS) -
+    // конус-градиент дозаполняется тут же, под конкретную долю оставшегося кулдауна
+    // (cooldown_turns всегда > 0, раз есть move.cooldown_remaining > 0 вообще).
+    const frac = Math.max(0, Math.min(1, move.cooldown_remaining / move.cooldown_turns));
+    const deg = Math.round(frac * 360);
+    const pie = el("div", {
+      class: "move-cd-pie",
+      style: `background: conic-gradient(var(--danger) ${deg}deg, rgba(255,255,255,.15) ${deg}deg)`,
+      text: String(move.cooldown_remaining),
+    });
+    btn.appendChild(pie);
   } else {
     const remaining = cooldownRemainingMs(key);
     if (remaining > 0) applyCooldownVisual(btn, remaining, delay);
-    btn.addEventListener("click", () => tryRunAction(key, delay, btn, () => doAction("hunt_attack", moveId)));
+    // Отправляет реальный удар на сервер как раньше - hit решает только косметику
+    // (см. .dmg-float-qte/pendingQteHit), сам урон не меняется вообще.
+    const launchAttack = (hit) => {
+      pendingAttackMoveMode = move ? move.mode : "multiplier";
+      pendingQteHit = hit;
+      tryRunAction(key, delay, btn, () => doAction("hunt_attack", moveId));
+    };
+    // Первый клик по кнопке ЗАПУСКАЕТ QTE (см. startQte), второй клик по НЕЙ ЖЕ -
+    // считывает текущее положение маркера и наносит удар. Пока на этой кнопке QTE
+    // идёт, клик по ЛЮБОЙ другой кнопке атаки игнорируется (activeQte один на всю
+    // панель) - не даёт открыть вторую шкалу параллельно первой. Исход красится
+    // (см. resolveQte) СРАЗУ на клике, ДО фактического ответа сервера - реальный
+    // удар (launchAttack) всё равно уходит на сервер как обычно, это только визуал.
+    btn.addEventListener("click", () => {
+      if (activeQte && activeQte.key === key) {
+        const qte = activeQte;
+        const hit = isQteHit(qte);
+        activeQte = null;
+        resolveQte(qte, hit);
+        launchAttack(hit);
+        return;
+      }
+      if (activeQte || cooldownRemainingMs(key) > 0) return;
+      activeQte = startQte(key, btn, (hit) => {
+        const qte = activeQte;
+        activeQte = null;
+        resolveQte(qte, hit);
+        launchAttack(hit);
+      });
+    });
   }
   return btn;
+}
+
+// "N приём"/"N приёма"/"N приёмов" - для подсказки про ещё не открытые приёмы
+// (см. renderEncounterModalBody), бесповоротно завязана на конкретное слово,
+// как и pluralItems ("пункт") - отдельная функция на каждое такое слово, не
+// общий генератор, тот же приём, что уже есть в файле.
+function pluralPriem(n) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "приём";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "приёма";
+  return "приёмов";
 }
 
 // Панель текущей схватки (ОДНА на всю игру, см. VIEW.hunting.active_encounter) -
@@ -3246,11 +4365,18 @@ function makeAttackButton(label, moveId, move) {
 // фиксированные id (#encounterPortrait/#encounterHpFill) - на них целится
 // playCombatHitEffect ДО перерисовки. "✕" (jobCancelButton) - abandonEncounter
 // (без хода, как house/release особей). Кнопки атаки: обычная (всегда) + по одной
-// на каждый приём боя (VIEW.hunting.combat_moves - весь список, а не только
-// открытые, чтобы игрок видел, что вообще есть и на каком тире мечу открывается).
-function renderActiveEncounterBlock(locationId) {
+// на каждый УЖЕ ОТКРЫТЫЙ приём боя (VIEW.hunting.combat_moves отфильтрован по
+// move.unlocked - см. makeAttackButton) - неоткрытые не рисуются вовсе, вместо
+// них внизу тихая строка-подсказка с одним числом, сколько их ещё будет.
+// Содержимое модалки "Охота" (см. openHuntingModal) - портрет/HP моба, таймер
+// босса, HP-полоска ИГРОКА + бейдж "Ранен" (VIEW.hunting.player_hp/
+// player_max_hp/wounded/wounded_turns_left, см. tools/web_ui.py:hunting_view),
+// кнопки приёмов и "Отступить". Схватка ГЛОБАЛЬНА (не привязана к локации, см.
+// CLAUDE.md) - в отличие от старого renderActiveEncounterBlock (жил ВНУТРИ
+// панели конкретной локации), у этой версии нет параметра locationId вовсе.
+function renderEncounterModalBody() {
   const encounter = VIEW.hunting.active_encounter;
-  if (!encounter || encounter.location !== locationId) return null;
+  if (!encounter) return null;
   const box = el("div", { class: "creature-row encounter-box" });
 
   const portrait = el("div", { id: "encounterPortrait", class: "encounter-portrait" + (encounter.is_boss ? " is-boss" : "") });
@@ -3263,30 +4389,108 @@ function renderActiveEncounterBlock(locationId) {
   title.appendChild(el("span", {
     text: `${encounter.is_boss ? "Босс" : "Цель"}: ${encounter.name} — ${encounter.remaining_hp}/${encounter.max_hp} HP`,
   }));
-  const right = el("span", { class: "job-right" });
   if (encounter.turns_left !== null && encounter.turns_left !== undefined) {
-    right.appendChild(el("span", {
+    title.appendChild(el("span", {
       class: "encounter-timer" + (encounter.turns_left <= 3 ? " urgent" : ""),
       text: `⏱ ${encounter.turns_left} х.`,
       title: "Сбежит, если не убить за столько ходов",
     }));
   }
-  right.appendChild(jobCancelButton(abandonEncounter));
-  title.appendChild(right);
   body.appendChild(title);
 
   const ratio = Math.max(0, Math.min(1, encounter.remaining_hp / encounter.max_hp));
+  const ratioPct = `${Math.round(ratio * 100)}%`;
   const bar = el("div", { class: "encounter-hp-bar" });
-  bar.appendChild(el("div", { id: "encounterHpFill", class: "encounter-hp-fill", style: `width:${Math.round(ratio * 100)}%` }));
+  // ghost и fill стартуют на ОДНОЙ и той же ширине - "теневой след" виден только
+  // между самим ударом и следующей перерисовкой (см. .encounter-hp-ghost в CSS),
+  // на свежепостроенной модалке предыдущего кадра ещё нет, показывать нечего.
+  bar.appendChild(el("div", { id: "encounterHpGhost", class: "encounter-hp-ghost", style: `width:${ratioPct}` }));
+  bar.appendChild(el("div", { id: "encounterHpFill", class: "encounter-hp-fill", style: `width:${ratioPct}` }));
   body.appendChild(bar);
 
+  // HP игрока - отдельная полоска/id от моба выше (см. playCombatHitEffect),
+  // зелёная (.player-hp-fill), чтобы "чьё" здоровье не путалось на глаз.
+  const playerTitle = el("div", { class: "encounter-title" });
+  playerTitle.appendChild(el("span", { text: `Твоё здоровье: ${VIEW.hunting.player_hp}/${VIEW.hunting.player_max_hp}` }));
+  if (VIEW.hunting.wounded) {
+    const dmgPercent = Math.round(VIEW.hunting.wounded_damage_multiplier * 100);
+    playerTitle.appendChild(el("span", {
+      class: "wounded-badge",
+      text: `Ранен: ещё ${VIEW.hunting.wounded_turns_left} х.`,
+      title: `Получено при поражении в предыдущем бою. Пока действует, весь урон, который наносите ВЫ, снижен до ${dmgPercent}% от обычного. Само пройдёт через ${VIEW.hunting.wounded_turns_left} х.; лечится реген HP (см. полоску выше) — но только вне боя, в бою HP не восстанавливается.`,
+    }));
+  }
+  body.appendChild(playerTitle);
+  const playerRatio = VIEW.hunting.player_max_hp > 0
+    ? Math.max(0, Math.min(1, VIEW.hunting.player_hp / VIEW.hunting.player_max_hp)) : 0;
+  const playerRatioPct = `${Math.round(playerRatio * 100)}%`;
+  const playerWrap = el("div", { id: "encounterPlayerHpWrap", class: "player-hp-bar player-hp-wrap" });
+  playerWrap.appendChild(el("div", { id: "encounterPlayerHpGhost", class: "player-hp-ghost", style: `width:${playerRatioPct}` }));
+  playerWrap.appendChild(el("div", { id: "encounterPlayerHpFill", class: "player-hp-fill", style: `width:${playerRatioPct}` }));
+  body.appendChild(playerWrap);
+
+  const allMoves = VIEW.hunting.combat_moves || [];
+  const unlockedMoves = allMoves.filter(m => m.unlocked);
+  const lockedCount = allMoves.length - unlockedMoves.length;
   const moves = el("div", { class: "encounter-moves" });
   moves.appendChild(makeAttackButton("Атаковать", null));
-  (VIEW.hunting.combat_moves || []).forEach(move => moves.appendChild(makeAttackButton(move.name, move.id, move)));
+  unlockedMoves.forEach(move => moves.appendChild(makeAttackButton(move.name, move.id, move)));
   body.appendChild(moves);
+  if (lockedCount > 0) {
+    body.appendChild(el("div", {
+      class: "encounter-locked-hint",
+      text: `Ещё ${lockedCount} ${pluralPriem(lockedCount)} откроется с более сильным оружием.`,
+    }));
+  }
+  body.appendChild(el("button", { class: "danger", text: "Отступить", onclick: abandonEncounter }));
 
   box.appendChild(body);
   return box;
+}
+
+// Компактный баннер вместо старой инлайн-панели схватки внутри панели
+// локации (renderActions) - схватка глобальна и переживает переход между
+// локациями, баннер просто напоминает вернуться в бой (открывает модалку),
+// если её закрыли, не отступив. Показывается ТОЛЬКО в самой локации-"Охоте",
+// где идёт бой (encounter.location), как и раньше.
+function renderEncounterBanner(locationId) {
+  const encounter = VIEW.hunting.active_encounter;
+  if (!encounter || encounter.location !== locationId) return null;
+  const banner = el("div", { class: "encounter-banner", onclick: openHuntingModal });
+  banner.appendChild(el("span", {
+    text: `⚔ В бою: ${encounter.name} — ${encounter.remaining_hp}/${encounter.max_hp} HP`,
+  }));
+  banner.appendChild(el("span", { text: "Открыть →" }));
+  return banner;
+}
+
+// Модалка "Охота" - см. renderEncounterModalBody. Ничего не строит и просто
+// закрывается, если активной схватки уже нет (добита/отступили/сбежал босс) -
+// тот же приём, что у остальных renderAll()-переоткрываемых модалок.
+function openHuntingModal() {
+  if (!VIEW.hunting.active_encounter) {
+    closeHuntingModal();
+    return;
+  }
+  closeHuntingModal();
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeHuntingModal(); });
+
+  const modal = el("div", { class: "modal hunting-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Охота" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: closeHuntingModal }));
+  modal.appendChild(head);
+  modal.appendChild(renderEncounterModalBody());
+
+  overlay.appendChild(modal);
+  overlay.id = "huntingOverlay";
+  document.body.appendChild(overlay);
+}
+
+function closeHuntingModal() {
+  const overlay = document.getElementById("huntingOverlay");
+  if (overlay) overlay.remove();
 }
 
 async function cancelJob(kind, extra) {
@@ -3321,10 +4525,11 @@ function renderEnergy() {
   freeStat.classList.toggle("ok", free >= 0);
   freeStat.classList.toggle("bad", free < 0);
 
-  const ratio = e.generation > 0 ? Math.min(1, e.consumption / e.generation) : (e.consumption > 0 ? 1 : 0);
+  const deficit = e.consumption > e.generation;
+  const freeRatio = deficit ? 0 : (e.generation > 0 ? (e.generation - e.consumption) / e.generation : 1);
   const fill = document.getElementById("energyBarFill");
-  fill.style.width = (ratio * 100) + "%";
-  fill.classList.toggle("danger", e.consumption > e.generation);
+  fill.style.width = (deficit ? 100 : freeRatio * 100) + "%";
+  fill.classList.toggle("danger", deficit);
 }
 
 // Предыдущее показанное значение каждого ресурса (rid -> amount) - нужно,
@@ -3392,6 +4597,100 @@ let buildingsSearchQuery = "";
 // "ещё ни разу не рендерили", чтобы не вспыхивало ВСЁ разом при самой первой
 // отрисовке страницы (см. renderBuildings).
 let lastBuildingsFlashTurn = null;
+// Фильтр "Состояние" панели "Производственные мощности" - переживает rebuild
+// списка, как buildingsSearchQuery. "all"/"ok"/"broken" - порядок цикла клика
+// по иконке, см. BLD_STATUS_FILTER_CYCLE.
+let buildingsBrokenFilter = "all";
+// Фильтр по тегам (b.tags, назначаются в редакторе контента - buildings.*.tags,
+// см. CLAUDE.md) - Set выбранных тегов, ЛЮБОЙ из которых должен быть у постройки
+// (OR, не И - постройка с несколькими тегами попадает под фильтр, если совпал
+// хотя бы один). Пусто = без фильтра по тегам.
+let buildingsTagFilter = new Set();
+// Открыта ли выпадающая панель фильтра по тегам - переживает rebuild списка
+// (renderBuildings() дёргается заново при каждом клике по чекбоксу тега, чтобы
+// применить фильтр), как buildingsSearchQuery.
+let buildingsTagDropdownOpen = false;
+
+const BLD_STATUS_FILTER_CYCLE = ["all", "ok", "broken"];
+const BLD_STATUS_FILTER_META = {
+  all: { label: "Все" },
+  ok: { label: "Только исправные" },
+  broken: { label: "Только сломанные" },
+};
+
+// Панель фильтров над списком построек - иконка-переключатель состояния (клик
+// листает по кругу "Все" -> "Только исправные" -> "Только сломанные", тот же
+// цветовой язык, что .bld-led у самой постройки, вместо select ради компактности
+// - вариантов всего 3 и они меняются кликом чаще, чем выбором из списка) +
+// красиво оформленный выпадающий список тегов (тот же визуальный приём, что
+// .sound-panel у громкости в шапке - плавающая панель, закрывается кликом
+// снаружи, см. document click listener сразу под функцией), собранный
+// динамически из ВСЕХ уже построенных построек (VIEW.buildings) - не
+// фиксированный список, ЛЮБОЙ тег, назначенный хоть одной постройке в редакторе
+// контента, сам появляется тут как фильтр, без правки этого файла.
+function renderBuildingsFilterBar(allTags) {
+  const bar = el("div", { class: "bld-filters" });
+
+  const statusBtn = el("button", { type: "button", class: `bld-status-filter-btn ${buildingsBrokenFilter}` });
+  statusBtn.title = `Состояние: ${BLD_STATUS_FILTER_META[buildingsBrokenFilter].label} (клик - сменить)`;
+  statusBtn.appendChild(el("span", { class: "bld-status-dot" }));
+  statusBtn.appendChild(document.createTextNode(BLD_STATUS_FILTER_META[buildingsBrokenFilter].label));
+  statusBtn.addEventListener("click", () => {
+    const idx = BLD_STATUS_FILTER_CYCLE.indexOf(buildingsBrokenFilter);
+    buildingsBrokenFilter = BLD_STATUS_FILTER_CYCLE[(idx + 1) % BLD_STATUS_FILTER_CYCLE.length];
+    renderBuildings();
+  });
+  bar.appendChild(statusBtn);
+
+  if (allTags.length) {
+    const tagWrap = el("div", { class: "bld-tag-dropdown" });
+    const tagBtn = el("button", {
+      type: "button", class: "bld-tag-dropdown-btn",
+      text: buildingsTagFilter.size ? `Тип: ${[...buildingsTagFilter].join(", ")}` : "Тип: любой",
+    });
+    tagBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      buildingsTagDropdownOpen = !buildingsTagDropdownOpen;
+      renderBuildings();
+    });
+    tagWrap.appendChild(tagBtn);
+
+    if (buildingsTagDropdownOpen) {
+      const panel = el("div", { class: "bld-tag-dropdown-panel" });
+      allTags.forEach(tag => {
+        const label = el("label", { class: "bld-tag-option" });
+        const cb = el("input", { type: "checkbox" });
+        cb.checked = buildingsTagFilter.has(tag);
+        cb.addEventListener("change", () => {
+          if (cb.checked) buildingsTagFilter.add(tag); else buildingsTagFilter.delete(tag);
+          renderBuildings();
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(tag));
+        panel.appendChild(label);
+      });
+      if (buildingsTagFilter.size) {
+        const clearBtn = el("button", { type: "button", class: "bld-tag-clear", text: "Сбросить" });
+        clearBtn.addEventListener("click", () => { buildingsTagFilter.clear(); renderBuildings(); });
+        panel.appendChild(clearBtn);
+      }
+      tagWrap.appendChild(panel);
+    }
+    bar.appendChild(tagWrap);
+  }
+
+  return bar;
+}
+// Закрытие выпадающей панели тегов кликом снаружи - слушатель вешается РОВНО
+// ОДИН РАЗ на весь документ (не при каждом renderBuildings(), чтобы не копить
+// висящие обработчики при каждой перерисовке панели), тот же приём, что
+// soundControl/soundPanel в конце файла.
+document.addEventListener("click", (e) => {
+  if (buildingsTagDropdownOpen && !e.target.closest(".bld-tag-dropdown")) {
+    buildingsTagDropdownOpen = false;
+    renderBuildings();
+  }
+});
 
 // Список построек (не сетка тайлов) - та же строка, что "Банк особей" в
 // "Особях": иконка со статусом, счётчик/бейдж лимита, описание, содержание
@@ -3423,8 +4722,24 @@ function renderBuildings() {
   const turnAdvanced = lastBuildingsFlashTurn !== null && VIEW.turn !== lastBuildingsFlashTurn;
   lastBuildingsFlashTurn = VIEW.turn;
 
+  // Теги считаются заново из ТЕКУЩИХ VIEW.buildings при каждой перерисовке (не
+  // кэшируются) - постройка может сломаться/восстановиться, но набор тегов как
+  // таковой меняется только правкой content.json, так что дороговизны тут нет.
+  // Снимаем из фильтра теги, которых не осталось ни у одной постройки (например,
+  // после смены сохранения на другое) - иначе кнопка осталась бы "нажатой", но
+  // невидимой, и фильтр выглядел бы сломанным без явной подсказки почему.
+  const allTags = [...new Set(VIEW.buildings.flatMap(b => b.tags || []))].sort((a, b) => a.localeCompare(b, "ru"));
+  [...buildingsTagFilter].forEach(t => { if (!allTags.includes(t)) buildingsTagFilter.delete(t); });
+
+  const filteredBuildings = VIEW.buildings.filter(b => {
+    if (buildingsBrokenFilter === "broken" && !(b.broken > 0)) return false;
+    if (buildingsBrokenFilter === "ok" && b.broken > 0) return false;
+    if (buildingsTagFilter.size && !(b.tags || []).some(t => buildingsTagFilter.has(t))) return false;
+    return true;
+  });
+
   const list = el("div", { class: "bld-list thin-scroll" });
-  VIEW.buildings.forEach(b => {
+  filteredBuildings.forEach(b => {
     const producedThisTurn = turnAdvanced && b.active_count > 0 && b.produces.length > 0;
     const row = el("div", { class: producedThisTurn ? "bld-row produced" : "bld-row" });
     row.dataset.resourceName = b.name.toLowerCase();
@@ -3475,7 +4790,7 @@ function renderBuildings() {
     if (b.broken > 0) main.appendChild(renderBuildingRepairRow(b));
     head.appendChild(main);
 
-    if (b.upgrades || b.is_farm || b.is_breeding_station || b.is_genetics_lab || b.is_soul_collector || b.automation) {
+    if (b.upgrades || b.is_farm || b.is_breeding_station || b.is_genetics_lab || b.is_soul_collector || b.is_enchanting_table || b.automation) {
       const actions = el("div", { class: "bld-row-actions" });
       if (b.upgrades) {
         const btn = el("button", { class: "upgrade-open-btn", text: "⚙ Улучшения" });
@@ -3512,6 +4827,12 @@ function renderBuildings() {
         btn.addEventListener("click", () => openSoulSynthesizerModal(b.id));
         actions.appendChild(btn);
       }
+      if (b.is_enchanting_table) {
+        const btn = el("button", { class: "upgrade-open-btn", text: "🔮 Зачаровать" });
+        btn.title = "Зачаровать кирку, оружие или броню";
+        btn.addEventListener("click", openEnchantingModal);
+        actions.appendChild(btn);
+      }
       head.appendChild(actions);
     }
 
@@ -3519,10 +4840,14 @@ function renderBuildings() {
     list.appendChild(row);
   });
 
+  container.appendChild(renderBuildingsFilterBar(allTags));
   container.appendChild(makeResourceSearchBar(list, {
     get: () => buildingsSearchQuery,
     set: (v) => { buildingsSearchQuery = v; },
   }, true));
+  if (!filteredBuildings.length) {
+    list.appendChild(el("div", { class: "empty-note", text: "Ничего не подходит под фильтр." }));
+  }
   container.appendChild(list);
   if (savedScroll !== null) list.scrollTop = savedScroll;
 }
@@ -3863,6 +5188,355 @@ function openAutomationModal(item) {
 
 function closeAutomationModal() {
   const overlay = document.getElementById("automationOverlay");
+  if (overlay) overlay.remove();
+}
+
+// Модалка "Шахта" (VIEW.mine_field, см. tools/web_ui.py:mine_field_view) -
+// туман войны: клетка видна только в радиусе 1 от уже пройденной, ломается
+// только если ортогонально граничит со сломанной (диагональ видна, но не
+// рубится) ИЛИ если весь N x N блок удара касается пройденного хотя бы одной
+// гранью (тогда бьёт целиком, включая ещё не открытые клетки внутри блока).
+// Глобальная модалка (одна на игру, как Квесты/Навыки) - хук в renderAll() уже
+// добавлен рядом с остальными такими модалками.
+let mineFieldHoverIndex = null;
+// Всплывашка "+N" по клетке, которую только что ударили - выставляется
+// mineFieldHitCell ДО renderAll() и считывается openMineFieldModal ПОСЛЕ того,
+// как renderMineFieldGrid пересоберёт сетку заново (сама модалка при каждом
+// действии уничтожается и создаётся с нуля, см. renderAll/openMineFieldModal -
+// поэтому попап не может просто "остаться висеть", его нужно заспавнить заново
+// поверх новой клетки на той же позиции).
+let mineFieldPendingPopup = null;
+
+// Клики по полю НЕ идут через doAction()/`/api/action` (тот всегда тратит ход,
+// см. tools/web_ui.py:run_turn) - у поля шахты свои выделенные эндпоинты, как у
+// insert_soul/house_creature, чтобы исследование тумана не двигало игровые часы.
+async function mineFieldPost(path, body, onResult) {
+  const prevResources = VIEW.resources;
+  const res = await fetch(path, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await res.json();
+  VIEW = payload.state;
+  if (onResult) onResult(prevResources);
+  pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+  renderAll();
+}
+
+function mineFieldNewField() { return mineFieldPost("/api/mining_new_field", {}); }
+
+function mineFieldHitCell(r, c) {
+  return mineFieldPost("/api/mining_hit_cell", { r, c }, (prevResources) => {
+    // Всплывашка - только по РУДЕ, не по обычной породе (rock_resource) - по
+    // прямому пожеланию, 2026-09-16: камень копаешь постоянно, "+N" на каждый
+    // клик замусоривал бы экран, руда - редкое приятное событие, вот её и
+    // стоит подсвечивать.
+    const rockId = VIEW.mine_field.rock_resource;
+    const gains = [];
+    for (const rid in VIEW.resources) {
+      if (rid === rockId) continue;
+      const delta = (VIEW.resources[rid] || 0) - (prevResources[rid] || 0);
+      if (delta > 0) gains.push({ id: rid, amount: delta });
+    }
+    if (gains.length) mineFieldPendingPopup = { r, c, gains };
+  });
+}
+
+// Спавнит "+N <иконка>" над клеткой (r, c) в уже отрисованной сетке - вызывается
+// сразу после renderMineFieldGrid, координаты берутся геометрически (getBoundingClientRect),
+// а не по проценту от размера ячейки, чтобы не зависеть от текущего масштаба поля.
+function spawnMineFieldGainPopup(gridWrap, mf, popup) {
+  const gridEl = document.getElementById("mineFieldGrid");
+  if (!gridEl) return;
+  const cellEl = gridEl.children[mineFieldIdx(mf.size, popup.r, popup.c)];
+  if (!cellEl) return;
+  const wrapRect = gridWrap.getBoundingClientRect();
+  const cellRect = cellEl.getBoundingClientRect();
+  const left = cellRect.left - wrapRect.left + cellRect.width / 2;
+  const top = cellRect.top - wrapRect.top;
+  popup.gains.forEach((gain, i) => {
+    const span = el("div", { class: "mine-gain-popup" });
+    span.style.left = `${left}px`;
+    span.style.top = `${top}px`;
+    span.style.animationDelay = `${i * 90}ms`;
+    span.appendChild(document.createTextNode(`+${gain.amount}`));
+    const iconDef = resourceIcon(gain.id);
+    if (iconDef) {
+      const iconBox = el("span", { class: "mine-gain-icon" });
+      iconBox.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 16));
+      span.appendChild(iconBox);
+    }
+    gridWrap.appendChild(span);
+    span.addEventListener("animationend", () => span.remove());
+  });
+}
+
+function mineFieldIdx(size, r, c) { return r * size + c; }
+
+function mineFieldCellBroken(cells, size, r, c) {
+  if (r < 0 || r >= size || c < 0 || c >= size) return false;
+  const cell = cells[mineFieldIdx(size, r, c)];
+  return !!(cell && cell.broken);
+}
+
+function mineFieldHasOrthogonalBrokenNeighbor(cells, size, r, c) {
+  return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dr, dc]) => mineFieldCellBroken(cells, size, r + dr, c + dc));
+}
+
+function mineFieldAreaCoords(size, area, r, c) {
+  const offset = Math.floor((area - 1) / 2);
+  const coords = [];
+  for (let rr = r - offset; rr < r - offset + area; rr++) {
+    for (let cc = c - offset; cc < c - offset + area; cc++) {
+      if (rr >= 0 && rr < size && cc >= 0 && cc < size) coords.push([rr, cc]);
+    }
+  }
+  return coords;
+}
+
+function mineFieldBlockReachable(cells, size, area, r, c) {
+  return mineFieldAreaCoords(size, area, r, c).some(([rr, cc]) =>
+    mineFieldCellBroken(cells, size, rr, cc) || mineFieldHasOrthogonalBrokenNeighbor(cells, size, rr, cc)
+  );
+}
+
+function mineFieldCellEl(mf, r, c) {
+  const size = mf.size;
+  const cell = mf.cells[mineFieldIdx(size, r, c)];
+  const el_ = el("div", { class: "mine-cell" });
+  el_.dataset.r = r;
+  el_.dataset.c = c;
+  if (!cell.revealed) {
+    el_.classList.add("fog");
+    // sensed_resource приходит только на верхнем тире щупа (mine_field.
+    // scanner_reveal_all_tier) - клетка остаётся В ТУМАНЕ (revealed всё ещё
+    // false, ломать нельзя, пока не дойдёшь обычным путём), просто сквозь
+    // туман проглядывает призрачная иконка руды - см. engine.py: mine_field_view.
+    if (cell.sensed_resource) {
+      const iconDef = veinIcon(cell.sensed_resource);
+      if (iconDef) {
+        const iconBox = el("div", { class: "mine-icon mine-sensed-icon" });
+        iconBox.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 28));
+        el_.appendChild(iconBox);
+      }
+    }
+    return el_;
+  }
+  if (cell.broken) { el_.classList.add("cleared"); return el_; }
+
+  let iconDef = null;
+  if (cell.resource) iconDef = veinIcon(cell.resource);
+  // Порода без руды - случайный вариант спрайта (icon_variant проставлен один раз
+  // при генерации клетки на сервере, см. _generate_mine_field), чисто визуальная
+  // пестрота поля, без единого клонированного тайла на 400 клеток подряд.
+  else iconDef = (mf.rock_icons && mf.rock_icons[cell.icon_variant]) || mf.rock_icon;
+  if (iconDef) {
+    const iconBox = el("div", { class: "mine-icon" });
+    iconBox.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 28));
+    el_.appendChild(iconBox);
+  }
+  if (cell.locked) el_.appendChild(el("span", { class: "mine-lock", text: "🔒" }));
+  if (cell.damage_fraction) {
+    const cracks = el("div", { class: "mine-cracks" });
+    cracks.style.opacity = Math.min(0.85, cell.damage_fraction * 0.9 + 0.15);
+    el_.appendChild(cracks);
+  }
+  return el_;
+}
+
+// Поле чуть шире, чем выше (не строгий квадрат) - по прямому пожеланию,
+// 2026-09-16, "попробовать чуть растянутые прямоугольники". 1.15 - скромная
+// растяжка, легко подкрутить это единственное число, если захочется заметнее.
+const MINE_GRID_ASPECT = 1.15;
+
+function renderMineFieldGrid(mf) {
+  const grid = document.getElementById("mineFieldGrid");
+  // Явный пиксельный размер вместо чистого CSS (width:100% + aspect-ratio) -
+  // тот подход считал высоту ТОЛЬКО от ширины обёртки, не оглядываясь на
+  // реально доступную высоту, и на широкой/невысокой модалке поле вылезало за
+  // .mine-grid-wrap и обрезалось overflow:hidden самой модалки (жалоба
+  // 2026-09-16: не видно низа поля и кнопки "Обновить шахту", если модалка не
+  // помещается по высоте). Берём наибольший прямоугольник с соотношением
+  // сторон MINE_GRID_ASPECT, который целиком помещается в обёртку - строки и
+  // столбцы сетки (grid-template-rows/-columns, оба ниже) делят эту явную
+  // ширину/высоту поровну, поэтому сама фигура клетки получается той же
+  // пропорции, без округления/наползания на последнюю строку.
+  const wrap = grid.parentElement;
+  const maxW = wrap.clientWidth, maxH = wrap.clientHeight;
+  let w = maxH * MINE_GRID_ASPECT, h = maxH;
+  if (w > maxW) { w = maxW; h = maxW / MINE_GRID_ASPECT; }
+  w = Math.floor(w); h = Math.floor(h);
+  if (w > 0 && h > 0) { grid.style.width = `${w}px`; grid.style.height = `${h}px`; }
+  grid.style.gridTemplateColumns = `repeat(${mf.size}, 1fr)`;
+  grid.style.gridTemplateRows = `repeat(${mf.size}, 1fr)`;
+  grid.innerHTML = "";
+  for (let r = 0; r < mf.size; r++) {
+    for (let c = 0; c < mf.size; c++) {
+      grid.appendChild(mineFieldCellEl(mf, r, c));
+    }
+  }
+  applyMineFieldHoverPreview(mf);
+}
+
+function applyMineFieldHoverPreview(mf) {
+  const grid = document.getElementById("mineFieldGrid");
+  if (!grid) return;
+  Array.prototype.forEach.call(grid.children, cellEl => cellEl.style.boxShadow = "");
+  if (mineFieldHoverIndex === null) return;
+  const r = Math.floor(mineFieldHoverIndex / mf.size), c = mineFieldHoverIndex % mf.size;
+  if (!mineFieldBlockReachable(mf.cells, mf.size, mf.pickaxe.area, r, c)) return;
+  mineFieldAreaCoords(mf.size, mf.pickaxe.area, r, c).forEach(([rr, cc]) => {
+    const cellEl = grid.children[mineFieldIdx(mf.size, rr, cc)];
+    if (cellEl) cellEl.style.boxShadow = "inset 0 0 0 2px var(--blueprint)";
+  });
+}
+
+// Небольшая подсказка над полем (не в "Справочнике руд" - тот статичный
+// энциклопедический список, эта строка про ТЕКУЩЕЕ поле) - по прямому
+// пожеланию, 2026-09-16. Собирается ЦЕЛИКОМ из ore_catalog: present_on_field/
+// field_count в ответе сервера появляются, только если тир щупа игрока
+// достаточен (см. engine.py: mine_field_view/scanner_types_tier/
+// scanner_counts_tier) - клиенту не нужно знать сами пороги, достаточно
+// проверить, пришли ли эти поля вообще.
+function mineFieldScannerHintText(mf) {
+  const catalog = mf.ore_catalog.filter(o => o.researched);
+  if (!catalog.length || catalog[0].present_on_field === undefined) return null;
+  const found = catalog.filter(o => o.present_on_field);
+  if (!found.length) return { text: "Щуп: на этом поле руды не найдено.", tone: "var(--muted)" };
+  const hasCounts = found.every(o => o.field_count !== undefined);
+  const parts = found.map(o => hasCounts ? `${o.name} (${o.field_count} кл.)` : o.name);
+  return { text: `Щуп нашёл: ${parts.join(", ")}.`, tone: "#7ee6a8" };
+}
+
+function openMineFieldModal() {
+  closeMineFieldModal();
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeMineFieldModal(); });
+
+  const modal = el("div", { class: "modal mine-field-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Шахта" }));
+  const catalogBtn = el("button", { class: "small", text: "Справочник руд" });
+  catalogBtn.addEventListener("click", () => openMineOreCatalogModal());
+  head.appendChild(catalogBtn);
+  // mine-exit-btn - подсветка чуть другим акцентом, чем "Обновить шахту"
+  // (та - тёплый primary, эта - холодный blueprint-контур): обе кнопки
+  // заметны, но не спорят друг с другом за внимание как две одинаковые CTA.
+  // По прямому пожеланию, 2026-09-16.
+  head.appendChild(el("button", { class: "mine-exit-btn", text: "Выход", onclick: closeMineFieldModal }));
+  modal.appendChild(head);
+
+  const mf = VIEW.mine_field;
+  const topline = el("div", { class: "mine-field-topline" });
+  topline.appendChild(el("span", {}, [
+    document.createTextNode("Кирка "),
+    el("b", { text: `Т${mf.pickaxe.tier}` }),
+    document.createTextNode(` · зона ${mf.pickaxe.area}×${mf.pickaxe.area} · урон ${mf.pickaxe.power}`),
+    document.createTextNode(" · Щуп "),
+    el("b", { text: `Т${mf.scanner_tier}` }),
+  ]));
+  // primary - тот же акцентный стиль, что у главных CTA-кнопок в игре (см.
+  // button.primary в CSS), по прямому пожеланию, 2026-09-16 - "Обновить шахту"
+  // должна бросаться в глаза рядом с приглушённой строкой статуса кирки/щупа.
+  const newFieldBtn = el("button", { class: "small primary", text: "Обновить шахту" });
+  newFieldBtn.addEventListener("click", () => mineFieldNewField());
+  topline.appendChild(newFieldBtn);
+  modal.appendChild(topline);
+
+  const hint = mineFieldScannerHintText(mf);
+  if (hint) {
+    const attrs = { class: "mine-field-hint", text: hint.text };
+    if (hint.tone) attrs.style = `color:${hint.tone}`;
+    modal.appendChild(el("div", attrs));
+  }
+
+  const gridWrap = el("div", { class: "mine-grid-wrap" });
+  const grid = el("div", { class: "mine-grid", id: "mineFieldGrid" });
+  gridWrap.appendChild(grid);
+  modal.appendChild(gridWrap);
+
+  grid.addEventListener("click", (e) => {
+    const cellEl = e.target.closest(".mine-cell");
+    if (!cellEl) return;
+    mineFieldHitCell(Number(cellEl.dataset.r), Number(cellEl.dataset.c));
+  });
+  grid.addEventListener("mousemove", (e) => {
+    const cellEl = e.target.closest(".mine-cell");
+    if (!cellEl) return;
+    const idx = mineFieldIdx(mf.size, Number(cellEl.dataset.r), Number(cellEl.dataset.c));
+    if (mineFieldHoverIndex !== idx) { mineFieldHoverIndex = idx; applyMineFieldHoverPreview(mf); }
+  });
+  grid.addEventListener("mouseleave", () => { mineFieldHoverIndex = null; applyMineFieldHoverPreview(mf); });
+
+  overlay.appendChild(modal);
+  overlay.id = "mineFieldOverlay";
+  document.body.appendChild(overlay);
+  renderMineFieldGrid(mf);
+  if (mineFieldPendingPopup) {
+    spawnMineFieldGainPopup(gridWrap, mf, mineFieldPendingPopup);
+    mineFieldPendingPopup = null;
+  }
+}
+
+function closeMineFieldModal() {
+  const overlay = document.getElementById("mineFieldOverlay");
+  if (overlay) overlay.remove();
+}
+
+// Справочник руд - отдельная модалка ПОВЕРХ Шахты (как openAutomationRuleEditorModal
+// поверх openAutomationModal), со строкой поиска по названию; не хукается в
+// renderAll() - список статичен на время открытия, закрывается сама.
+function openMineOreCatalogModal() {
+  closeMineOreCatalogModal();
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeMineOreCatalogModal(); });
+
+  const modal = el("div", { class: "modal upgrades-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Справочник руд" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: closeMineOreCatalogModal }));
+  modal.appendChild(head);
+
+  const searchBox = el("div", { class: "mine-catalog-search" });
+  const input = el("input", { type: "text", placeholder: "Поиск по названию…" });
+  searchBox.appendChild(input);
+  modal.appendChild(searchBox);
+
+  const list = el("div", { class: "upgrades-list scroll-area" });
+  modal.appendChild(list);
+
+  const renderList = () => {
+    const q = input.value.trim().toLowerCase();
+    list.innerHTML = "";
+    VIEW.mine_field.ore_catalog
+      .filter(o => o.name.toLowerCase().includes(q))
+      .forEach(o => {
+        const row = el("div", { class: "upgrade-row mine-catalog-row" + (o.researched ? "" : " locked-row") });
+        // Справочник - "как это выглядит В ЗАБОЕ", поэтому иконка жилы, а не
+        // иконка добытого ресурса (они теперь могут различаться).
+        const iconDef = veinIcon(o.id);
+        if (iconDef) row.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 28));
+        const info = el("div", {});
+        info.appendChild(el("div", { class: "mine-catalog-name", text: o.name }));
+        info.appendChild(el("div", {
+          class: "mine-catalog-meta",
+          text: `нужна кирка Т${o.required_tier} · редкость ${o.rarity} · кластер ${o.field_cluster_size[0]}–${o.field_cluster_size[1]} кл.`
+            + (o.researched ? "" : " · ещё не исследовано"),
+        }));
+        row.appendChild(info);
+        list.appendChild(row);
+      });
+  };
+  input.addEventListener("input", renderList);
+  renderList();
+
+  overlay.appendChild(modal);
+  overlay.id = "mineOreCatalogOverlay";
+  document.body.appendChild(overlay);
+}
+
+function closeMineOreCatalogModal() {
+  const overlay = document.getElementById("mineOreCatalogOverlay");
   if (overlay) overlay.remove();
 }
 
@@ -4325,8 +5999,7 @@ function locationItemCount(locId) {
   const loc = VIEW.locations.find(l => l.id === locId) || null;
   let count = manualActionsAt(locId).length + locationChildren(locId).length;
   if (loc && loc.is_mine) {
-    count += VIEW.categories.mining.filter(m => m.kind === "mine").length;
-    count += 1; // кнопка "искать жилу" - показывается всегда, доступна не всегда
+    count += 1; // одна кнопка "Войти в шахту", открывающая модалку с полем
   }
   if (loc && loc.is_converter) count += VIEW.categories.converter.length;
   if (loc && loc.is_hunting) {
@@ -4350,7 +6023,13 @@ function renderActions() {
   if (!visibleTabs.some(([k]) => k === activeActionTab)) activeActionTab = "locations";
 
   const tabsBox = document.getElementById("actionTabs");
+  // Сохраняем существующее подчёркивание (.tab-underline) при очистке - иначе
+  // тут же ниже создалось бы с нуля через positionTabUnderline() и анимация
+  // всегда ехала бы от дефолтной CSS-позиции (левый край, "Локации"), а не от
+  // реально текущей вкладки.
+  const existingUnderline = tabsBox.querySelector(".tab-underline");
   tabsBox.innerHTML = "";
+  if (existingUnderline) tabsBox.appendChild(existingUnderline);
   let activeTabBtn = null;
   visibleTabs.forEach(([key, label]) => {
     const count = key === "locations"
@@ -4465,16 +6144,20 @@ function renderLocationsPanel() {
     list.appendChild(card);
   };
   if (loc && loc.is_hunting) {
-    const encounterBlock = renderActiveEncounterBlock(loc.id);
-    if (encounterBlock) container.appendChild(encounterBlock);
+    const encounterBanner = renderEncounterBanner(loc.id);
+    if (encounterBanner) container.appendChild(encounterBanner);
   }
 
   manualActionsAt(currentId).forEach(item => addCard("manual", item));
   if (loc && loc.is_mine) {
-    const mining = VIEW.categories.mining;
-    mining.filter(m => m.kind === "mine").forEach(m => addCard("mining", m));
-    const searchItem = mining.find(m => m.kind === "search_any");
-    if (searchItem) addCard("mining", searchItem);
+    const card = el("button", { class: "action-card" });
+    card.dataset.search = "войти в шахту";
+    card.appendChild(pixelIcon(ICONS.pickaxe.grid, ICONS.pickaxe.palette, 30));
+    const main = el("div", { class: "main" });
+    main.appendChild(el("div", { class: "name", text: "Войти в шахту" }));
+    card.appendChild(main);
+    card.addEventListener("click", openMineFieldModal);
+    list.appendChild(card);
   }
   if (loc && loc.is_converter) {
     VIEW.categories.converter.forEach(item => addCard("converter", item));
@@ -4723,10 +6406,6 @@ function specialAbilitiesRow(item) {
 }
 
 function actionLabel(kind, item) {
-  if (kind === "mining") {
-    if (item.kind === "search_any") return "Искать жилу";
-    if (item.kind === "mine") return `Добывать: ${item.name}`;
-  }
   if (kind === "hunting") {
     if (item.kind === "search") return "Искать";
     if (item.kind === "attack") return `Атаковать: ${item.name}`;
@@ -4754,6 +6433,7 @@ function actionCard(kind, item) {
   // сама домножает их на текущее положение ползунка, без похода на сервер.
   const hasScale = kind === "manual" && item.scale_cap > 1;
   const manualJobRunning = kind === "manual" && item.already_running;
+  const manualLocationBlocked = kind === "manual" && !manualJobRunning && !!item.blocked_by;
   const scaleStateKey = `manual:${item.id}`;
   if (hasScale && !(scaleStateKey in manualActionScale)) {
     manualActionScale[scaleStateKey] = item.scale_cap; // по умолчанию - максимум, как было раньше без ползунка
@@ -4766,10 +6446,7 @@ function actionCard(kind, item) {
   if (kind === "manual" && !hasScale && !manualJobRunning) btn.dataset.actionId = item.id;
 
   let iconDef = null;
-  if (kind === "mining") {
-    if (item.kind === "search_any") iconDef = ICONS.ore;
-    else iconDef = resourceIcon(item.resource_id);
-  } else if (kind === "build") {
+  if (kind === "build") {
     iconDef = buildingIcon(item.id) || { grid: ICONS.machine.grid, palette: BUILDING_PALETTE.ok };
   } else if (kind === "manual" && item.gain && item.gain[0]) {
     iconDef = resourceIcon(item.gain[0].id);
@@ -4791,13 +6468,6 @@ function actionCard(kind, item) {
     costs.innerHTML = "";
     (item.cost || []).forEach(c => costs.appendChild(costChip(c.id, scaleAmount(c.amount, scale), false, c.jump_to, c.chance)));
     (item.gain || []).forEach(c => costs.appendChild(costChip(c.id, scaleAmount(c.amount, scale), true, undefined, c.chance)));
-    if (kind === "mining" && item.kind === "search_any") {
-      costs.appendChild(el("span", { class: "note-chip", text: item.available ? "есть что искать" : "искать больше нечего" }));
-    }
-    if (kind === "mining" && item.kind === "mine") {
-      const qualityText = item.quality_name ? ` (качество: ${item.quality_name} ×${item.quality_multiplier} к запасу)` : "";
-      costs.appendChild(el("span", { class: "note-chip", text: `в жиле: ${item.remaining}${qualityText}, добыча ${item.per_turn}/ход` }));
-    }
     if (kind === "converter") {
       item.produces.forEach(c => costs.appendChild(costChip(c.id, c.amount, true)));
       costs.appendChild(el("span", { class: "note-chip", text: `${item.threshold} энергии` }));
@@ -4809,6 +6479,7 @@ function actionCard(kind, item) {
         ? `${item.turns_done}/${item.turns_total} ход(ов)`
         : `займёт ${item.duration_turns} ход(ов)`;
       costs.appendChild(el("span", { class: "note-chip", text: chipText }));
+      if (manualLocationBlocked) costs.appendChild(el("span", { class: "note-chip", text: `занято: «${item.blocked_by}»` }));
     }
     if (kind === "hunting" && item.kind === "search") {
       costs.appendChild(el("span", { class: "note-chip", text: "рандомная встреча" }));
@@ -4841,6 +6512,9 @@ function actionCard(kind, item) {
   } else if (manualJobRunning) {
     btn.disabled = true;
     btn.title = "Это действие уже выполняется - прогресс и отмена ниже";
+  } else if (manualLocationBlocked) {
+    btn.disabled = true;
+    btn.title = `В этой локации уже выполняется другое действие: «${item.blocked_by}»`;
   } else {
     const { key, delay } = actionCooldownInfo(kind, item);
     const remaining = cooldownRemainingMs(key);
@@ -4889,14 +6563,22 @@ function actionCard(kind, item) {
 function runAction(kind, item, scale) {
   if (kind === "manual") return doAction("manual", item.id, scale);
   if (kind === "build") return doAction("build", item.id);
-  if (kind === "mining") {
-    if (item.kind === "mine") return doAction("mining_mine", item.resource_id);
-    if (item.kind === "search_any") return doAction("mining_search", null);
-  }
   if (kind === "converter") return doAction("start_energy_recipe", item.id);
   if (kind === "hunting") {
-    if (item.kind === "search") return doAction("hunt_search", item.location);
-    if (item.kind === "summon") return doAction("summon_boss", item.id);
+    // После успешного поиска/призыва (VIEW.hunting.active_encounter появился)
+    // сразу открываем модалку "Охота" - см. openHuntingModal. doAction() уже
+    // обновил VIEW и один раз перерисовал страницу к моменту, когда resolve'ится
+    // этот .then(), так что openHuntingModal() тут видит свежие данные.
+    if (item.kind === "search") {
+      return doAction("hunt_search", item.location).then(() => {
+        if (VIEW.hunting.active_encounter) openHuntingModal();
+      });
+    }
+    if (item.kind === "summon") {
+      return doAction("summon_boss", item.id).then(() => {
+        if (VIEW.hunting.active_encounter) openHuntingModal();
+      });
+    }
   }
 }
 
@@ -4926,6 +6608,16 @@ function renderTechTab() {
     class: "tech-tab-summary",
     text: `Изучено технологий: ${VIEW.techs_researched}/${VIEW.techs_total}`,
   }));
+  // Текущее исследование (VIEW.active_research) - видно прямо тут, рядом с
+  // кнопкой открытия дерева, чтобы не нужно было открывать модалку только
+  // ради того, чтобы проверить прогресс/остаток ходов (то же самое, что
+  // researchProgressRow показывает в панели "Исследование" сбоку, но здесь -
+  // на самой вкладке категории действий).
+  if (VIEW.active_research) {
+    const box = el("div", { class: "tech-tab-research" });
+    box.appendChild(researchProgressRow(VIEW.active_research, VIEW.active_research.name));
+    wrap.appendChild(box);
+  }
   const btn = el("button", { class: "tech-tab-open-btn", text: "Открыть дерево технологий" });
   btn.addEventListener("click", openTechTreeModal);
   wrap.appendChild(btn);
@@ -4933,33 +6625,25 @@ function renderTechTab() {
 }
 
 function openTechTreeModal() {
-  // Тот же приём, что openStorage(): если модалка уже открыта (например, нас
-  // сюда позвал renderAll() после исследования технологии изнутри неё же),
-  // запоминаем прокрутку графа/детали ДО пересборки и возвращаем её после -
-  // иначе выбор технологии или оплата сбрасывали бы просмотр в начало графа.
-  // Скроллится именно .tech-graph (см. его CSS: overflow: auto) - сам .modal
-  // не скроллится (overflow: hidden), брать прокрутку с него было бы всегда 0.
-  const prevGraph = document.querySelector("#techTreeOverlay .tech-graph");
-  const savedScroll = prevGraph ? { left: prevGraph.scrollLeft, top: prevGraph.scrollTop } : null;
-
   closeTechTreeModal();
   const overlay = el("div", { class: "modal-overlay" });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeTechTreeModal(); });
 
-  const modal = el("div", { class: "modal tech-modal" });
+  const modal = el("div", { class: "modal tech-modal graph-modal" });
   const head = el("div", { class: "modal-head" });
   head.appendChild(el("strong", { text: "Дерево технологий" }));
   head.appendChild(el("button", { text: "Закрыть", onclick: closeTechTreeModal }));
   modal.appendChild(head);
+  // Позиция/зум графа (см. techGraphZoom) переживают пересборку сами - объект-
+  // состояние живёт СНАРУЖИ renderTechTree(), поэтому здесь больше не нужно
+  // руками сохранять/восстанавливать scrollLeft/scrollTop (та же логика раньше
+  // была нужна, пока панорамирование было нативным скроллом, см. CLAUDE.md про
+  // enableGraphPanning).
   modal.appendChild(renderTechTree());
 
   overlay.appendChild(modal);
   overlay.id = "techTreeOverlay";
   document.body.appendChild(overlay);
-  if (savedScroll) {
-    const newGraph = modal.querySelector(".tech-graph");
-    if (newGraph) { newGraph.scrollLeft = savedScroll.left; newGraph.scrollTop = savedScroll.top; }
-  }
 }
 
 function closeTechTreeModal() {
@@ -4980,6 +6664,26 @@ const TIER_BAND_COLORS = [
 ];
 function tierBandColor(tier) {
   return TIER_BAND_COLORS[(tier - 1) % TIER_BAND_COLORS.length];
+}
+
+function hexToRgba(hex, alpha) {
+  const m = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex || "");
+  if (!m) return hex;
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Оформление эры квестбука (content.json: eras[era]) - имя и главный цвет,
+// заданные в редакторе контента. У эры без записи в eras (старый контент,
+// только что заведённый в редакторе номер) - тот же дефолт, что был ДО
+// появления этого раздела: подпись "Эра N" и цикличная палитра TIER_BAND_COLORS.
+function eraTheme(era) {
+  const info = VIEW.eras && VIEW.eras[String(era)];
+  if (info && info.color) {
+    return { bg: hexToRgba(info.color, 0.10), border: hexToRgba(info.color, 0.35), text: info.color, name: info.name || `Эра ${era}` };
+  }
+  const palette = tierBandColor(era);
+  return { bg: palette.bg, border: palette.border, text: palette.text, name: `Эра ${era}` };
 }
 
 // Столбец графа - это НЕ тир целиком (было так, но зависимости ВНУТРИ тира,
@@ -5036,7 +6740,6 @@ function renderTechTree() {
 
   const { columnOf, tierRange, tiers } = computeTechColumns(tree);
   const graph = el("div", { class: "tech-graph" });
-  enableGraphPanning(graph);
   const svg = svgEl("svg", { class: "tech-edges" });
   const cols = el("div", { class: "tech-cols" });
   const nodeEls = {};
@@ -5051,8 +6754,15 @@ function renderTechTree() {
     for (let col = startCol; col <= endCol; col++) {
       const colEl = el("div", { class: "tech-col" });
       tree.filter(t => columnOf[t.id] === col).forEach(t => {
-        const node = el("div", { class: `tech-node ${t.status}${t.id === selectedTechId ? " selected" : ""}` });
-        node.appendChild(el("div", { text: t.name }));
+        // Идёт исследование ИМЕННО этой технологии (VIEW.active_research, см.
+        // game/engine.py:research) - доп. класс поверх обычного status (узел
+        // остаётся "available" по факту, ещё не в state.techs) и прогресс ходов
+        // прямо в подписи узла, чтобы был виден без клика по узлу.
+        const researching = VIEW.active_research && VIEW.active_research.tech_id === t.id;
+        const classes = `tech-node ${t.status}${researching ? " researching" : ""}${t.id === selectedTechId ? " selected" : ""}`;
+        const node = el("div", { class: classes });
+        const label = researching ? `${t.name} (${VIEW.active_research.turns_done}/${VIEW.active_research.turns_total})` : t.name;
+        node.appendChild(el("div", { text: label }));
         node.addEventListener("click", () => selectTechNode(t.id));
         colEl.appendChild(node);
         nodeEls[t.id] = node;
@@ -5064,7 +6774,9 @@ function renderTechTree() {
   });
   graph.appendChild(svg);
   graph.appendChild(cols);
-  enableGraphZoom(graph, cols, techGraphZoom, () => drawTechEdges(graph, svg, tree, nodeEls));
+  const redrawTechEdges = () => drawTechEdges(graph, svg, tree, nodeEls);
+  enableGraphPanning(graph, cols, techGraphZoom, redrawTechEdges);
+  enableGraphZoom(graph, cols, techGraphZoom, redrawTechEdges);
   wrap.appendChild(graph);
   const detailBox = el("div");
   detailBox.appendChild(renderTechDetail(tree.find(t => t.id === selectedTechId)));
@@ -5073,22 +6785,22 @@ function renderTechTree() {
 
   // Связи рисуются после того, как узлы реально попали в DOM и получили размеры -
   // без requestAnimationFrame getBoundingClientRect ещё отдал бы нули.
-  requestAnimationFrame(() => drawTechEdges(graph, svg, tree, nodeEls));
+  requestAnimationFrame(redrawTechEdges);
   return wrap;
 }
 
-// Перетаскивание мышью для панорамирования .tech-graph - в дополнение к обычной
-// прокрутке колесом/трекпадом/полосами прокрутки (та уже работала сама по себе
-// через overflow:auto, см. CLAUDE.md). graphPanState - ОДНА глобальная переменная
-// (не поле на графе), потому что mousemove/mouseup должны продолжать работать,
-// даже когда курсор уходит ЗА пределы .tech-graph во время быстрого перетаскивания -
-// а слушать эти события нужно на window, а не на самом графе.
-let graphPanState = null; // { graph, startX, startY, scrollLeft, scrollTop } | null
-// Текущий зум графа техов/квестов - см. enableGraphZoom. Раздельные переменные
-// (а не одна общая), потому что обе модалки могут быть открыты для разных
-// целей в разное время и не должны делить один и тот же уровень приближения.
-let techGraphZoom = { value: 1 };
-let questGraphZoom = { value: 1 };
+// Перетаскивание мышью для панорамирования .tech-graph. graphPanState - ОДНА
+// глобальная переменная (не поле на графе), потому что mousemove/mouseup должны
+// продолжать работать, даже когда курсор уходит ЗА пределы .tech-graph во время
+// быстрого перетаскивания - а слушать эти события нужно на window, а не на самом
+// графе.
+let graphPanState = null; // { graph, cols, zoomState, redraw, startX, startY, panX0, panY0 } | null
+// Текущий зум+панорама графа техов/квестов - см. enableGraphZoom/enableGraphPanning.
+// Раздельные переменные (а не одна общая), потому что обе модалки могут быть
+// открыты для разных целей в разное время и не должны делить один и тот же
+// уровень приближения/сдвиг вида.
+let techGraphZoom = { zoom: 1, panX: 0, panY: 0 };
+let questGraphZoom = { zoom: 1, panX: 0, panY: 0 };
 
 // mousedown вешается ЗАНОВО на каждый свежий .tech-graph (renderTechTree()
 // пересоздаёт граф с нуля при каждой перерисовке) - это не течёт, старый
@@ -5097,60 +6809,75 @@ let questGraphZoom = { value: 1 };
 // bootstrap-кода в конце файла: если бы их тоже вешали здесь на window при
 // каждом рендере, они бы копились там вечно (window переживает любую
 // перерисовку), а не исчезали вместе с графом.
-function enableGraphPanning(graph) {
+function enableGraphPanning(graph, cols, zoomState, redraw) {
   graph.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return; // только левая кнопка мыши
     if (e.target.closest(".tech-node, .quest-node")) return; // клик по узлу - это выбор технологии/квеста, не панорамирование
     graphPanState = {
-      graph, startX: e.clientX, startY: e.clientY,
-      scrollLeft: graph.scrollLeft, scrollTop: graph.scrollTop,
+      graph, cols, zoomState, redraw,
+      startX: e.clientX, startY: e.clientY,
+      panX0: zoomState.panX, panY0: zoomState.panY,
     };
     graph.classList.add("panning");
     e.preventDefault(); // не выделять текст на графе во время перетаскивания
   });
 }
 
-// Зум колесом мыши для .tech-graph (и .tech-graph.quest-graph). Масштабируется
-// ТОЛЬКО .tech-cols (сами колонки/узлы) - .tech-edges (SVG рёбер) намеренно
-// остаётся вне transform: drawTechEdges/drawQuestEdges и так честно перечитывают
-// geometry узлов через getBoundingClientRect ПОСЛЕ скейла, поэтому рёбра просто
-// сами оказываются в новых координатах без единой строчки, знающей про zoom.
+// Зум колесом мыши + панорамирование перетаскиванием для .tech-graph (и
+// .tech-graph.quest-graph) - оба через ОДИН и тот же CSS transform на .tech-cols
+// (translate ПОСЛЕ scale, см. applyGraphTransform), а не через нативный скролл:
+// у overflow:auto-скролла есть жёсткая рамка [0, scrollWidth-clientWidth], и когда
+// граф целиком помещается в модалку (частый случай для небольших квестовых эр),
+// эта рамка нулевая - раньше это тихо схлопывало scrollLeft обратно в 0, и зум
+// визуально цеплялся за transform-origin (левый верхний угол) вместо курсора,
+// где бы тот ни стоял. .tech-edges (SVG рёбер) намеренно остаётся ВНЕ этого
+// transform - drawTechEdges/drawQuestEdges честно перечитывают geometry узлов
+// через getBoundingClientRect ПОСЛЕ transform (redraw(), см. ниже), поэтому рёбра
+// просто сами оказываются в новых координатах без единой строчки, знающей про
+// zoom/pan, а сами линии не "толстеют" при масштабировании вместе с узлами.
 // GRAPH_ZOOM_MIN/MAX подобраны на глаз: ниже 0.5 узлы превращаются в нечитаемую
 // кашу, выше 2 увеличивать уже незачем - обычный текст на узле и так короткий.
 const GRAPH_ZOOM_MIN = 0.5;
 const GRAPH_ZOOM_MAX = 2;
 const GRAPH_ZOOM_STEP = 1.12;
 
-function applyGraphZoom(cols, zoom) {
-  cols.style.transform = `scale(${zoom})`;
+// translate ПОСЛЕ scale (порядок в списке transform читается справа налево) -
+// значит panX/panY заданы в экранных пикселях независимо от текущего зума:
+// перетаскивание на 100px экрана всегда двигает вид на 100px экрана, а не на
+// 100/zoom px контента. Итоговая экранная позиция точки L контента (при
+// transform-origin: 0 0) = panX + zoom*L - см. вывод в enableGraphZoom.
+function applyGraphTransform(cols, zoomState) {
+  cols.style.transform = `translate(${zoomState.panX}px, ${zoomState.panY}px) scale(${zoomState.zoom})`;
 }
 
-// zoomState - {value}, а не голое число: содержимое модалки (renderTechTree/
-// renderQuestGraph) пересобирается с нуля при КАЖДОМ действии игрока, пока
-// модалка открыта (см. openTechTreeModal/openQuestsModal, вызываются заново
-// из renderAll()) - объект-обёртка живёт СНАРУЖИ рендер-функции (как
-// selectedTechId/questsActiveEra) и переживает эту пересборку, поэтому зум не
-// сбрасывается на 1 при каждом клике "Исследовать"/"Забрать награду".
+// zoomState - {zoom, panX, panY}, а не голые переменные: содержимое модалки
+// (renderTechTree/renderQuestGraph) пересобирается с нуля при КАЖДОМ действии
+// игрока, пока модалка открыта (см. openTechTreeModal/openQuestsModal, вызываются
+// заново из renderAll()) - объект-обёртка живёт СНАРУЖИ рендер-функции (как
+// selectedTechId/questsActiveEra) и переживает эту пересборку, поэтому зум и
+// сдвиг вида не сбрасываются при каждом клике "Исследовать"/"Забрать награду".
 function enableGraphZoom(graph, cols, zoomState, redraw) {
-  applyGraphZoom(cols, zoomState.value);
+  applyGraphTransform(cols, zoomState);
   graph.addEventListener("wheel", (e) => {
     e.preventDefault(); // колесо теперь целиком отдано зуму, не скроллу графа
     const rect = graph.getBoundingClientRect();
     const offsetX = e.clientX - rect.left;
     const offsetY = e.clientY - rect.top;
-    const oldZoom = zoomState.value;
-    // Точка контента под курсором (в масштабе .tech-cols, transform-origin: 0 0) -
-    // остаётся под курсором и после смены zoom, иначе граф "уезжал" бы при каждом
-    // тике колеса вместо приближения именно к тому месту, где стоит мышь.
-    const contentX = (graph.scrollLeft + offsetX) / oldZoom;
-    const contentY = (graph.scrollTop + offsetY) / oldZoom;
+    const oldZoom = zoomState.zoom;
+    // Точка контента (в координатах ДО scale, transform-origin: 0 0) под курсором -
+    // экранная позиция точки L это panX + zoom*L (см. applyGraphTransform), обращаем.
+    const contentX = (offsetX - zoomState.panX) / oldZoom;
+    const contentY = (offsetY - zoomState.panY) / oldZoom;
     const factor = e.deltaY < 0 ? GRAPH_ZOOM_STEP : 1 / GRAPH_ZOOM_STEP;
     const newZoom = Math.min(GRAPH_ZOOM_MAX, Math.max(GRAPH_ZOOM_MIN, oldZoom * factor));
     if (newZoom === oldZoom) return;
-    zoomState.value = newZoom;
-    applyGraphZoom(cols, newZoom);
-    graph.scrollLeft = contentX * newZoom - offsetX;
-    graph.scrollTop = contentY * newZoom - offsetY;
+    // Подбираем panX/panY так, чтобы contentX/contentY остались РОВНО под курсором,
+    // где бы он ни стоял - чистый translate, без чужого клэмпинга (см. комментарий
+    // к GRAPH_ZOOM_MIN выше).
+    zoomState.zoom = newZoom;
+    zoomState.panX = offsetX - newZoom * contentX;
+    zoomState.panY = offsetY - newZoom * contentY;
+    applyGraphTransform(cols, zoomState);
     redraw();
   }, { passive: false });
 }
@@ -5169,10 +6896,13 @@ function drawTechEdges(graph, svg, tree, nodeEls) {
       const fromEl = nodeEls[reqId];
       if (!fromEl) return;
       const fromRect = fromEl.getBoundingClientRect();
-      const x1 = fromRect.right - graphRect.left + graph.scrollLeft;
-      const y1 = fromRect.top - graphRect.top + fromRect.height / 2 + graph.scrollTop;
-      const x2 = toRect.left - graphRect.left + graph.scrollLeft;
-      const y2 = toRect.top - graphRect.top + toRect.height / 2 + graph.scrollTop;
+      // Без + graph.scrollLeft/scrollTop - .tech-graph больше не скроллится
+      // (overflow: hidden, панорама теперь transform, см. enableGraphPanning),
+      // getBoundingClientRect уже честно даёт итоговый экранный прямоугольник.
+      const x1 = fromRect.right - graphRect.left;
+      const y1 = fromRect.top - graphRect.top + fromRect.height / 2;
+      const x2 = toRect.left - graphRect.left;
+      const y2 = toRect.top - graphRect.top + toRect.height / 2;
       const midX = (x1 + x2) / 2;
       const done = t.status !== "locked";
       // pathLength=1 нормализует stroke-dasharray/-dashoffset к 0..1 независимо
@@ -5214,6 +6944,11 @@ function renderTechDetail(tech) {
   const statusText = { researched: " — изучено", available: "", locked: " — заблокировано" };
   info.appendChild(el("div", { class: "tech-detail-name", title: titleParts.join(" "), text: `${tech.name}${statusText[tech.status] || ""}` }));
 
+  // research_turns > 1 - показываем эффективное время (уже с учётом купленных
+  // research_speed апгрейдов лаборатории, см. game/engine.py:tech_research_turns) -
+  // рядом с ценой. Ровно 1 ход не показываем вовсе, чтобы не засорять
+  // мгновенные технологии бесполезным "· 1 ход".
+  const turnsText = tech.research_turns > 1 ? ` · ${tech.research_turns} х.` : "";
   const costText = tech.cost.length
     ? tech.cost.map(c => `${c.amount} ${c.name}`).join(" · ")
     : "бесплатно";
@@ -5225,19 +6960,31 @@ function renderTechDetail(tech) {
   } else if (tech.status === "locked") {
     costLine.textContent = `Тир ${tech.tier} · нужны другие технологии`;
   } else {
-    costLine.append(`Тир ${tech.tier}: `, el("b", { text: costText }));
+    costLine.append(`Тир ${tech.tier}: `, el("b", { text: costText + turnsText }));
   }
   info.appendChild(costLine);
   box.appendChild(info);
 
-  if (tech.status === "available") {
-    const btn = el("button", { text: "Исследовать →" });
+  // Слот исследования ГЛОБАЛЬНЫЙ (VIEW.active_research, см. game/engine.py:research) -
+  // на этой самой технологии показываем прогресс с отменой. На любой ДРУГОЙ
+  // "available" - можно переключиться ОДНИМ кликом в любой момент (research()
+  // сам отменяет текущую и возвращает её cost) - кнопка просто подписана иначе
+  // и предупреждает, что заменит текущее исследование, чтобы клик не был
+  // неожиданностью.
+  const switchingAway = VIEW.active_research && VIEW.active_research.tech_id !== tech.id;
+  if (VIEW.active_research && VIEW.active_research.tech_id === tech.id) {
+    box.appendChild(researchProgressRow(VIEW.active_research));
+  } else if (tech.status === "available") {
+    const btn = el("button", { text: switchingAway ? "Переключиться →" : "Исследовать →" });
     const key = `tech:${tech.id}`;
     const delay = VIEW.default_action_delay_ms;
     const remaining = cooldownRemainingMs(key);
     if (remaining > 0) applyCooldownVisual(btn, remaining, delay);
     btn.addEventListener("click", () => tryRunAction(key, delay, btn, () => doAction("tech", tech.id)));
     box.appendChild(btn);
+    if (switchingAway) {
+      box.appendChild(el("div", { class: "hint", text: `Отменит текущее исследование «${VIEW.active_research.name}» (затраты вернутся)` }));
+    }
   }
   return box;
 }
@@ -5497,9 +7244,25 @@ function pushLog(log) {
 // Текст поиска по складу - переживает rebuild сетки (openStorage() дёргается
 // заново на каждый пин/апгрейд), как categorySearchQuery/locationSearchQuery.
 let storageSearchQuery = "";
-// Режим сортировки склада - тем же приёмом переживает rebuild сетки.
-// "default" - порядок появления в игре (как VIEW.storage пришёл с сервера).
+
+const STORAGE_SORT_OPTIONS = [
+  ["default", "Как в игре"],
+  ["amount_desc", "Количество ↓"],
+  ["amount_asc", "Количество ↑"],
+  ["alpha", "По алфавиту"],
+];
+
+// Режим сортировки склада - тем же приёмом переживает rebuild сетки, а через
+// localStorage (тот же приём, что sfxVolume/musicVolume) ещё и перезапуск игры
+// целиком - это чисто клиентская настройка интерфейса (не save-critical state,
+// не пишется в save.json), но по прямому пожеланию игрока должна пережить
+// закрытие/открытие окна. "default" - порядок появления в игре (как
+// VIEW.storage пришёл с сервера).
 let storageSortMode = "default";
+try {
+  const savedSort = localStorage.getItem("storageSortMode");
+  if (STORAGE_SORT_OPTIONS.some(([value]) => value === savedSort)) storageSortMode = savedSort;
+} catch (e) { /* ignore */ }
 // То же самое, но для сетки выбора ресурса во вкладке "Автокрафт" модалки
 // "Приоритеты" (см. renderAutocraftPriorityTab) - отдельная переменная, у этих
 // двух сеток разный набор плиток и они открываются независимо друг от друга.
@@ -5543,13 +7306,6 @@ function sortedStorageItems() {
   return items;
 }
 
-const STORAGE_SORT_OPTIONS = [
-  ["default", "Как в игре"],
-  ["amount_desc", "Количество ↓"],
-  ["amount_asc", "Количество ↑"],
-  ["alpha", "По алфавиту"],
-];
-
 // Переключатель сортировки склада - select, а не отдельные кнопки-вкладки:
 // вариантов всего 4 и они не нуждаются в развесистом UI вкладок с подчёркиванием
 // (см. positionTabUnderline) - тут это было бы избыточно ради самого частого
@@ -5566,6 +7322,7 @@ function makeStorageSortBar() {
   });
   select.addEventListener("change", () => {
     storageSortMode = select.value;
+    try { localStorage.setItem("storageSortMode", storageSortMode); } catch (e) { /* ignore */ }
     openStorage();
   });
   bar.appendChild(select);
@@ -5673,14 +7430,13 @@ function defaultQuestEra(eras, quests) {
 }
 
 function openQuestsModal() {
-  // См. openTechTreeModal - скроллится .tech-graph, не сам .modal.
-  const prevGraph = document.querySelector("#questsOverlay .tech-graph");
-  const savedScroll = prevGraph ? { left: prevGraph.scrollLeft, top: prevGraph.scrollTop } : null;
+  // Позиция/зум графа переживают пересборку сами через questGraphZoom - см.
+  // комментарий в openTechTreeModal.
   closeQuestsModal();
   const overlay = el("div", { class: "modal-overlay" });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeQuestsModal(); });
 
-  const modal = el("div", { class: "modal tech-modal quest-modal" });
+  const modal = el("div", { class: "modal tech-modal quest-modal graph-modal" });
   const head = el("div", { class: "modal-head" });
   head.appendChild(el("strong", { text: "Квесты" }));
   head.appendChild(el("button", { text: "Закрыть", onclick: closeQuestsModal }));
@@ -5698,9 +7454,9 @@ function openQuestsModal() {
     const tabs = el("div", { class: "tabs quest-era-tabs" });
     let activeEraBtn = null;
     eras.forEach(era => {
-      const palette = tierBandColor(era);
-      const btn = el("button", { text: `Эра ${era}`, class: era === questsActiveEra ? "active" : "" });
-      btn.style.setProperty("--era-accent", palette.text);
+      const theme = eraTheme(era);
+      const btn = el("button", { text: theme.name, class: era === questsActiveEra ? "active" : "" });
+      btn.style.setProperty("--era-accent", theme.text);
       btn.addEventListener("click", () => {
         questsActiveEra = era;
         tabs.querySelectorAll("button").forEach(b => b.classList.remove("active"));
@@ -5722,10 +7478,6 @@ function openQuestsModal() {
   overlay.appendChild(modal);
   overlay.id = "questsOverlay";
   document.body.appendChild(overlay);
-  if (savedScroll) {
-    const newGraph = modal.querySelector(".tech-graph");
-    if (newGraph) { newGraph.scrollLeft = savedScroll.left; newGraph.scrollTop = savedScroll.top; }
-  }
 }
 
 function closeQuestsModal() {
@@ -5737,6 +7489,23 @@ function closeQuestsModal() {
 // (content.json loot_cases.*.prizes[].weight, см. game/engine.py:_roll_loot_case_prize).
 function totalPrizeWeight(prizes) {
   return prizes.reduce((sum, p) => sum + (p.weight || 1), 0);
+}
+
+// Пороги редкости для фона ячейки лутбокса - тот же цветовой код, что в
+// CS:GO/CS2 (синий -> частый, голубой -> редкий, фиолетовый -> супер редкий,
+// красный -> супер-супер редкий, жёлтый -> практически невозможный). Порог -
+// шанс ИМЕННО этого приза среди всех призов кейса (weight/totalWeight*100),
+// не глобальная редкость ресурса. Проверяются по убыванию, первый подошедший
+// побеждает.
+const LOOTBOX_RARITY_THRESHOLDS = [
+  { min: 20, cls: "rarity-common" },
+  { min: 5, cls: "rarity-rare" },
+  { min: 1, cls: "rarity-epic" },
+  { min: 0.1, cls: "rarity-legendary" },
+  { min: 0, cls: "rarity-mythic" },
+];
+function lootboxRarityClass(oddsPercent) {
+  return LOOTBOX_RARITY_THRESHOLDS.find(t => oddsPercent >= t.min).cls;
 }
 
 // Столбец графа ОДНОЙ эры - локальная глубина зависимостей среди квестов ЭТОЙ
@@ -5761,11 +7530,35 @@ function computeQuestEraLevels(quests) {
 }
 
 const QUEST_STATUS_ICON = { locked: "🔒", available: "⏳", completed: "🎁", claimed: "✓" };
+// Дефолтный цвет текста подсказки, когда у квеста нет своего tooltip_color -
+// держать в паре с QUEST_DEFAULT_TOOLTIP_COLOR в content_editor.html и с
+// дефолтом .quest-node-tip { color: ... } в CSS выше.
+const QUEST_DEFAULT_TOOLTIP_COLOR = "#dbe7ec";
 
+// q.icon (content.json: quests.*.icon) - необязательный per-квестовый оверрайд
+// центральной пиксель-иконки узла ({grid,palette}, рисуется тем же редактором
+// иконок, что у ресурсов/построек/мобов - см. questIcon), действует для ЛЮБОГО
+// статуса, включая locked (приглушается CSS-фильтром .quest-node.locked
+// .quest-node-icon), в отличие от QUEST_STATUS_ICON (жетон в углу - это
+// всегда значок СТАТУСА, а не квеста). q.bg/q.border - оверрайд цвета узла
+// целиком (иначе узел красится по статусу, см. CSS .quest-node.<status>) -
+// инлайн-стиль перебивает правило из таблицы стилей. q.tooltip_color - та же
+// идея для цвета текста подсказки (ПЕР-КВЕСТОВО, не общая настройка - разным
+// квестам может требоваться разный контраст на разном фоне узла). Имя квеста
+// здесь НЕ печатается - только во всплывающей подсказке (.quest-node-tip)
+// при наведении, см. CSS-комментарий выше.
 function buildQuestNode(q) {
   const node = el("div", { class: `quest-node ${q.status}${q.id === selectedQuestId ? " selected" : ""}` });
+  const iconDef = questIcon(q);
+  const iconWrap = el("div", { class: "quest-node-icon" });
+  iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 34));
+  node.appendChild(iconWrap);
   node.appendChild(el("div", { class: "quest-node-badge", text: QUEST_STATUS_ICON[q.status] || "" }));
-  node.appendChild(el("div", { class: "quest-node-name", text: q.name }));
+  const tip = el("div", { class: "quest-node-tip", text: q.name });
+  tip.style.color = q.tooltip_color || QUEST_DEFAULT_TOOLTIP_COLOR;
+  node.appendChild(tip);
+  if (q.bg) node.style.background = q.bg;
+  if (q.border) node.style.borderColor = q.border;
   return node;
 }
 
@@ -5798,44 +7591,56 @@ function renderQuestGraph(era) {
     return wrap;
   }
   if (!quests.some(q => q.id === selectedQuestId)) {
-    selectedQuestId = (quests.find(q => q.status === "completed") || quests.find(q => q.status === "available") || quests[0]).id;
+    // Locked-квест сюда попасть не должен (см. click-листенер ниже - на locked
+    // он не вешается вовсе), поэтому и фолбэк выбора его игнорирует - если в
+    // эре вообще нет ни одного разблокированного квеста (вырожденный случай),
+    // панель деталей просто остаётся пустой (renderQuestDetail(undefined)).
+    const fallback = quests.find(q => q.status === "completed") || quests.find(q => q.status === "claimed")
+      || quests.find(q => q.status === "available") || quests.find(q => q.status !== "locked");
+    selectedQuestId = fallback ? fallback.id : null;
   }
 
   const localLevel = computeQuestEraLevels(quests);
   const maxCol = Math.max(0, ...quests.map(q => localLevel[q.id]));
-  const palette = tierBandColor(era);
 
   const graph = el("div", { class: "tech-graph quest-graph" });
-  enableGraphPanning(graph);
   const svg = svgEl("svg", { class: "tech-edges" });
   const cols = el("div", { class: "tech-cols" });
-  const band = el("div", { class: "tech-col-band" });
-  band.style.background = palette.bg;
-  band.style.border = `1px solid ${palette.border}`;
+  // Раньше тут была одна большая цветная "плашка" эры (.tech-col-band,
+  // background/border = theme.bg/border) под ВСЕМИ колонками сразу - с тех
+  // пор, как узлы стали компактными квадратами 64x64 (см. CSS-комментарий у
+  // .quest-node), а .tech-col по умолчанию 160px шириной (общий класс с
+  // деревом технологий, там под текстовые карточки), плашка растягивалась
+  // далеко за пределы самих квадратов и выглядела как случайное цветное
+  // пятно - убрана совсем (принадлежность к эре и так видна по вкладке
+  // сверху и по цвету рамки/фона узла из его статуса).
   const row = el("div", { class: "tech-col-row" });
   const nodeEls = {};
   for (let col = 0; col <= maxCol; col++) {
     const colEl = el("div", { class: "tech-col" });
     quests.filter(q => localLevel[q.id] === col).forEach(q => {
       const node = buildQuestNode(q);
-      node.addEventListener("click", () => selectQuestNode(q.id));
+      // Locked-квест рисуется на графе, но некликабелен (см. CSS-комментарий у
+      // .quest-node) - открыть детали можно только для уже доступного квеста.
+      if (q.status !== "locked") node.addEventListener("click", () => selectQuestNode(q.id));
       colEl.appendChild(node);
       nodeEls[q.id] = node;
     });
     row.appendChild(colEl);
   }
-  band.appendChild(row);
-  cols.appendChild(band);
+  cols.appendChild(row);
   graph.appendChild(svg);
   graph.appendChild(cols);
-  enableGraphZoom(graph, cols, questGraphZoom, () => drawQuestEdges(graph, svg, quests, nodeEls));
+  const redrawQuestEdges = () => drawQuestEdges(graph, svg, quests, nodeEls);
+  enableGraphPanning(graph, cols, questGraphZoom, redrawQuestEdges);
+  enableGraphZoom(graph, cols, questGraphZoom, redrawQuestEdges);
   wrap.appendChild(graph);
   const detailBox = el("div");
   detailBox.appendChild(renderQuestDetail(quests.find(q => q.id === selectedQuestId)));
   wrap.appendChild(detailBox);
   questGraphState = { nodeEls, detailBox };
 
-  requestAnimationFrame(() => drawQuestEdges(graph, svg, quests, nodeEls));
+  requestAnimationFrame(redrawQuestEdges);
   return wrap;
 }
 
@@ -5859,10 +7664,11 @@ function drawQuestEdges(graph, svg, quests, nodeEls) {
       const fromEl = nodeEls[reqId];
       if (!fromEl) return;
       const fromRect = fromEl.getBoundingClientRect();
-      const x1 = fromRect.right - graphRect.left + graph.scrollLeft;
-      const y1 = fromRect.top - graphRect.top + fromRect.height / 2 + graph.scrollTop;
-      const x2 = toRect.left - graphRect.left + graph.scrollLeft;
-      const y2 = toRect.top - graphRect.top + toRect.height / 2 + graph.scrollTop;
+      // Без + graph.scrollLeft/scrollTop - см. тот же комментарий в drawTechEdges.
+      const x1 = fromRect.right - graphRect.left;
+      const y1 = fromRect.top - graphRect.top + fromRect.height / 2;
+      const x2 = toRect.left - graphRect.left;
+      const y2 = toRect.top - graphRect.top + toRect.height / 2;
       const midX = (x1 + x2) / 2;
       const done = q.status !== "locked";
       svg.appendChild(svgEl("path", {
@@ -5879,16 +7685,19 @@ function renderQuestDetail(quest) {
   const box = el("div", { class: "tech-detail" });
   if (!quest) return box;
 
-  // Компактная плашка 1:1 из канваса (B_Quests.dc.html: .detail) - имя+награда
-  // в одну строку слева, кнопка справа. Описание/разбивка призов по шансам
-  // (barabан всё равно крутится ДО настоящего результата в openLootBoxModal,
-  // см. claimQuestReward) - в подсказке на имени, не постоянным текстом.
+  // "Нужно"/"Награда" - визуально ЯРЧЕ соседних строк (.quest-detail-goal/
+  // .quest-detail-reward, см. CSS) - прямая жалоба игрока "текст снизу
+  // незаметен, непонятно что делать и какая награда". Разбивка призов по
+  // шансам теперь тоже постоянный текст в строке награды (барабан всё равно
+  // крутится ДО настоящего результата в openLootBoxModal, см.
+  // claimQuestReward - показ шансов заранее не портит анимацию) - в подсказке
+  // на имени остаётся только пояснение про требования из другой эры.
   const totalWeight = totalPrizeWeight(quest.reward_case.prizes);
   const prizeLines = quest.reward_case.prizes.map(p => {
     const odds = totalWeight ? Math.round((p.weight || 1) / totalWeight * 100) : 0;
     return `${VIEW.resource_names[p.resource]} ×${p.amount} (${odds}%)`;
   });
-  const titleParts = [quest.description, `Награда (лутбокс «${quest.reward_case.name}»): ${prizeLines.join(", ")}`];
+  let title = "";
   if (quest.status === "locked" && quest.requires.length) {
     // Требование из ДРУГОЙ эры не нарисовано линией на этом графе (см.
     // renderQuestGraph) - поэтому явно подписываем эру рядом с именем, иначе
@@ -5896,9 +7705,9 @@ function renderQuestDetail(quest) {
     const reqNames = quest.requires.map(rid => {
       const rq = VIEW.quests.find(q => q.id === rid);
       if (!rq) return rid;
-      return rq.era === quest.era ? rq.name : `${rq.name} (эра ${rq.era})`;
+      return rq.era === quest.era ? rq.name : `${rq.name} (${eraTheme(rq.era).name})`;
     });
-    titleParts.push(`Нужно сначала выполнить: ${reqNames.join(", ")}`);
+    title = `Нужно сначала выполнить: ${reqNames.join(", ")}`;
   }
 
   const info = el("div", { class: "tech-detail-info" });
@@ -5906,8 +7715,13 @@ function renderQuestDetail(quest) {
     claimed: " — награда получена", completed: " — готов к выполнению",
     available: " — в процессе", locked: " — заблокирован",
   };
-  info.appendChild(el("div", { class: "tech-detail-name", title: titleParts.join(" "), text: `${quest.name}${statusSuffix[quest.status] || ""}` }));
-  info.appendChild(el("div", { class: "tech-detail-cost", text: `Эра ${quest.era} · награда: лутбокс «${quest.reward_case.name}»` }));
+  info.appendChild(el("div", { class: "tech-detail-name", title, text: `${quest.name}${statusSuffix[quest.status] || ""}` }));
+  if (quest.description) info.appendChild(el("div", { class: "tech-detail-cost", text: quest.description }));
+  info.appendChild(el("div", { class: "tech-detail-cost", text: eraTheme(quest.era).name }));
+  if (quest.conditions.length && quest.status !== "claimed") {
+    info.appendChild(el("div", { class: "quest-detail-goal", text: `Нужно: ${quest.conditions.join(" · ")}` }));
+  }
+  info.appendChild(el("div", { class: "quest-detail-reward", text: `Награда: «${quest.reward_case.name}» — ${prizeLines.join(", ")}` }));
   box.appendChild(info);
 
   if (quest.status === "completed") {
@@ -6031,9 +7845,17 @@ function openLootBoxModal(caseData, wonPrize) {
   document.body.appendChild(overlay);
 
   const prizePool = caseData.prizes.length ? caseData.prizes : [wonPrize];
+  const prizePoolWeight = totalPrizeWeight(prizePool);
   for (let i = 0; i < LOOTBOX_REEL_LENGTH; i++) {
     const prize = i === LOOTBOX_WINNING_INDEX ? wonPrize : prizePool[Math.floor(Math.random() * prizePool.length)];
-    const cell = el("div", { class: "lootbox-cell" });
+    // wonPrize приходит с сервера как {resource, amount} без weight (см.
+    // ActionResult.prize) - для реального результата ищем вес по совпадению
+    // с определением приза в самом кейсе, а не читаем prize.weight напрямую.
+    const prizeDef = prize.weight !== undefined ? prize
+      : (prizePool.find(p => p.resource === prize.resource && p.amount === prize.amount)
+        || prizePool.find(p => p.resource === prize.resource));
+    const oddsPercent = prizePoolWeight ? (prizeDef ? (prizeDef.weight || 1) : 1) / prizePoolWeight * 100 : 0;
+    const cell = el("div", { class: `lootbox-cell ${lootboxRarityClass(oddsPercent)}` });
     const iconDef = resourceIcon(prize.resource);
     if (iconDef) cell.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 36));
     cell.appendChild(el("div", { class: "lootbox-cell-name", text: VIEW.resource_names[prize.resource] }));
@@ -6510,14 +8332,28 @@ document.getElementById("autocraftToggle").addEventListener("change", async () =
   }
 });
 
-// Глобальные слушатели для панорамирования дерева технологий (см.
+// Глобальные слушатели для панорамирования дерева технологий/квестов (см.
 // enableGraphPanning) - ровно одна пара на весь документ, а не по одной на
 // каждый .tech-graph, иначе они копились бы на window с каждой перерисовкой.
+// graphPanRafPending коалесцирует redraw() рёбер до одного раза за кадр - сам
+// transform (applyGraphTransform) применяется немедленно на каждый mousemove
+// (дёшево), а вот пересборка SVG-путей в redraw() дороже и не обязана поспевать
+// за каждым отдельным событием мыши, которых может быть намного больше, чем
+// кадров в секунду.
+let graphPanRafPending = false;
 window.addEventListener("mousemove", (e) => {
   if (!graphPanState) return;
-  const { graph, startX, startY, scrollLeft, scrollTop } = graphPanState;
-  graph.scrollLeft = scrollLeft - (e.clientX - startX);
-  graph.scrollTop = scrollTop - (e.clientY - startY);
+  const { cols, zoomState, startX, startY, panX0, panY0 } = graphPanState;
+  zoomState.panX = panX0 + (e.clientX - startX);
+  zoomState.panY = panY0 + (e.clientY - startY);
+  applyGraphTransform(cols, zoomState);
+  if (!graphPanRafPending) {
+    graphPanRafPending = true;
+    requestAnimationFrame(() => {
+      graphPanRafPending = false;
+      if (graphPanState) graphPanState.redraw();
+    });
+  }
 });
 window.addEventListener("mouseup", () => {
   if (!graphPanState) return;

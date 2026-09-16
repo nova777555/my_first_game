@@ -145,6 +145,18 @@
   .req-list { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0; }
   .req-list label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
 
+  .tags-chip-list { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .tags-chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
+    padding: 2px 4px 2px 8px; border-radius: 12px;
+    background: var(--panel2, var(--panel)); border: 1px solid var(--border);
+  }
+  .tags-chip button {
+    border: none; background: none; color: var(--muted); cursor: pointer;
+    font-size: 13px; line-height: 1; padding: 0 2px;
+  }
+  .tags-chip button:hover { color: var(--danger); }
+
   .effect-card {
     border: 1px dashed var(--border);
     border-radius: 6px;
@@ -276,7 +288,7 @@
   .icon-btn .pixel-icon { image-rendering: pixelated; shape-rendering: crispEdges; background: var(--bg); border-radius: 3px; }
   .icon-btn .custom-tag { color: var(--accent); font-size: 10px; }
 
-  .icon-modal { max-width: 480px; }
+  .icon-modal { max-width: 520px; }
   .tech-picker-modal { max-width: 92vw; }
   .tech-pick-btn { text-align: left; min-width: 220px; }
 
@@ -293,6 +305,19 @@
   .building-picker-row.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   .building-picker-name { font-size: 13px; font-weight: 600; }
   .building-picker-id { font-size: 11px; color: var(--muted); }
+  .building-picker-row.multi input[type="checkbox"] { pointer-events: none; }
+
+  .tech-multi-select { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
+  .tech-multi-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tech-multi-chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--panel); font-size: 12px;
+  }
+  .tech-multi-chip-rm {
+    border: none; background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 0 2px;
+  }
+  .tech-multi-chip-rm:hover { color: var(--accent); }
   .icon-editor-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
   .icon-palette-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; }
   .icon-palette-row .swatch {
@@ -314,6 +339,10 @@
 
   .view-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
   .view-toggle button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .era-toggle button.active { background: none; color: var(--era-accent, var(--accent)); border-color: var(--era-accent, var(--accent)); }
+  .era-manager { margin-bottom: 12px; }
+  .era-manager-row { align-items: center; gap: 8px; }
+  .era-manager-row input[type="color"] { width: 36px; height: 28px; padding: 0; border: none; background: none; cursor: pointer; }
 
   .graph-scroll {
     overflow: auto;
@@ -322,7 +351,11 @@
     background: var(--panel);
     max-height: 70vh;
   }
-  .tech-graph { position: relative; }
+  /* Вкладки "Технологии"/"Квесты" (renderTechGraphView/renderQuestGraphView) -
+     не модалка (там graph-scroll и так вписан в max-height модалки 85vh), а
+     часть обычной страницы, есть куда расти сильнее дефолтных 70vh. */
+  .graph-scroll.graph-scroll-tab { max-height: calc(100vh - 230px); min-height: 420px; }
+  .tech-graph { position: relative; transform-origin: 0 0; }
   .tech-graph-svg { position: absolute; top: 0; left: 0; pointer-events: none; }
   .tech-tier-band { position: absolute; top: 0; border-radius: 6px; pointer-events: none; }
   .tech-tier-band-label { position: absolute; top: 4px; text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; pointer-events: none; }
@@ -360,6 +393,53 @@
     border: 2px solid var(--panel);
     cursor: crosshair;
   }
+  /* Квадратные узлы квестов (в отличие от узлов техов) тянутся ЛЮБОЙ из четырёх
+     граней - см. renderQuestGraphView. handle-right не переопределяется, это
+     и есть дефолт базового правила выше. */
+  .tech-node-handle.handle-top { top: -8px; left: 50%; right: auto; transform: translateX(-50%); }
+  .tech-node-handle.handle-bottom { top: auto; bottom: -8px; left: 50%; right: auto; transform: translateX(-50%); }
+  .tech-node-handle.handle-left { left: -8px; right: auto; top: 50%; transform: translateY(-50%); }
+
+  /* Квадратный узел графа квестов - 1:1 превью того, что увидит игрок в
+     web_ui.html (.quest-node/.quest-node-icon/.quest-node-tip) - та же тёмная
+     "чертёжная" палитра, независимо от светлой темы остального редактора,
+     чтобы значок/оформление/подсказка были видны БЕЗ запуска игры (см.
+     renderQuestGraphView). Игрового статуса тут нет (черновик, не состояние
+     сохранения) - узел всегда нейтрального цвета, тон "молчащего" узла в
+     игре (совпадает с .quest-node.locked - см. web_ui.html), q.bg/q.border
+     override переопределяют его ТОЧНО так же, как в игре. */
+  .tech-node.quest-node-square {
+    width: 64px; height: 64px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #14191f; border: 1px solid #2b333b; border-radius: 6px;
+    box-shadow: none;
+  }
+  .tech-node.quest-node-square:hover { border-color: #5fd0e8; }
+  .tech-node.quest-node-square.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .quest-node-square-icon { display: flex; }
+  /* id квеста - единственное, чего НЕТ в игре на самом узле - подпись только
+     для автора, вынесена ЗА пределы квадрата (снизу), чтобы не мешать
+     превью самого игрового узла. */
+  .quest-node-square-caption {
+    position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px;
+    font-size: 10px; color: var(--muted); white-space: nowrap; max-width: 120px;
+    overflow: hidden; text-overflow: ellipsis; text-align: center; pointer-events: none;
+  }
+  /* Буквальная копия .quest-node-tip из web_ui.html (шрифт/размер/цвет) - цвет
+     текста ПЕР-КВЕСТОВЫЙ (quests.*.tooltip_color, поле "Свой цвет текста
+     подсказки" в карточке квеста на вкладке "Список"), выставляется инлайн-
+     стилем на конкретном узле (см. renderQuestGraphView) - тут в CSS только
+     дефолт на случай, если квест свой цвет не задал. */
+  .quest-node-tip {
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #10151bf0; border: 1px solid #2b333b; border-radius: 4px; padding: 5px 9px;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px; font-weight: 600; line-height: 1.3; letter-spacing: .01em;
+    white-space: nowrap; pointer-events: none; z-index: 20;
+    display: none;
+    color: #dbe7ec;
+  }
+  .tech-node.quest-node-square:hover .quest-node-tip { display: block; }
 
   .tech-edge { stroke: var(--muted); stroke-width: 2; fill: none; pointer-events: none; }
   .tech-edge.related { stroke: var(--accent); stroke-width: 3; }
@@ -403,6 +483,7 @@
   <div id="tab-mobs" class="tab"></div>
   <div id="tab-combat-moves" class="tab"></div>
   <div id="tab-skills" class="tab"></div>
+  <div id="tab-enchantments" class="tab"></div>
   <div id="tab-quests" class="tab"></div>
   <div id="tab-settings" class="tab"></div>
   <div id="tab-raw" class="tab">
@@ -436,6 +517,7 @@ const TABS = [
   ["mobs", "Мобы/Боссы"],
   ["combat-moves", "Приёмы боя"],
   ["skills", "Навыки"],
+  ["enchantments", "Зачарования"],
   ["quests", "Квесты"],
   ["settings", "Настройки"],
   ["raw", "JSON"],
@@ -560,6 +642,21 @@ const DEFAULT_ICONS = {
     "..A....A..", ".AA....AA.", "AABAAAABAA", "AABBAABBAA",
     "AAAAAAAAAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
   ], palette: { A: "#6b6f7a", B: "#1f2226" } },
+
+  // ДЕРЖАТЬ В ПАРЕ с ICONS.quest в tools/web_ui.html - фоллбэк для quests.*.icon
+  // без своей кастомной иконки (свиток с двумя строками "текста", см.
+  // defaultQuestIcon ниже).
+  quest: { grid: [
+    "..AAAAAA..", ".AAAAAAAA.", "AABBBBBBAA", "AABBBBBBAA",
+    "AABAAAABAA", "AABBBBBBAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
+  ], palette: { A: "#e3c98a", B: "#8a5a34" } },
+
+  // ДЕРЖАТЬ В ПАРЕ с ICONS.enchant в tools/web_ui.html - фоллбэк для
+  // enchantments.*.icon без своей кастомной иконки (см. defaultEnchantIcon ниже).
+  enchant: { grid: [
+    "....A....", "....A....", "...AAA...", "..AAAAA..",
+    "AAAAAAAAA", "..AAAAA..", "...AAA...", "....A....", "....A....",
+  ], palette: { A: "#f0a030" } },
 };
 const DEFAULT_PICKAXE_PALETTES = [
   { A: "#6b4423", B: "#8a5a34" }, { A: "#6b4423", B: "#8b8f94" }, { A: "#6b4423", B: "#c7ccd1" },
@@ -594,10 +691,24 @@ function defaultToolTierIcon(toolId, tierIndex) {
 // что рисует игра (tools/web_ui.html:mobIcon() -> ICONS.monster), см. комментарий
 // у DEFAULT_ICONS.monster выше.
 function defaultMobIcon() { return DEFAULT_ICONS.monster; }
+// Дефолтная иконка КВЕСТА без своей кастомной icon - ОБЯЗАНА совпадать с тем,
+// что рисует игра (tools/web_ui.html:questIcon() -> ICONS.quest).
+function defaultQuestIcon() { return DEFAULT_ICONS.quest; }
+// Дефолтная иконка ЗАЧАРОВАНИЯ без своей кастомной icon - ОБЯЗАНА совпадать с
+// тем, что рисует игра (tools/web_ui.html:enchantIcon() -> ICONS.enchant).
+function defaultEnchantIcon() { return DEFAULT_ICONS.enchant; }
 
 // ---------- редактор пиксельных иконок ----------
 
-const ICON_EDITOR_SIZE = 24;
+// 32x32 (раньше 24x24) - разрешение ХОЛСТА пиксель-иконок, общее для ЛЮБОЙ
+// сущности с кастомной иконкой (ресурсы/постройки/локации/инструменты/мобы/
+// квесты) - держать в паре с тем же числом в комментариях/промпт-инструкции
+// ниже. Старые иконки, нарисованные при 24x24, продолжают работать как есть
+// (pixelIcon рисует по РЕАЛЬНОМУ grid.length конкретной иконки, не по этой
+// константе) - апскейл затрагивает только вновь нарисованные/импортированные
+// иконки. Чем выше число, тем чётче картинка при импорте фото (drawImage
+// в quantizeImageToIcon использует ИМЕННО его как целевой размер холста).
+const ICON_EDITOR_SIZE = 32;
 const ICON_EDITOR_CELL_PX = 14;
 const ICON_PRESET_COLORS = [
   "#e8e6df", "#8b93a0", "#2b2b2b", "#f0a030", "#f4c430", "#4ac9a0",
@@ -956,6 +1067,28 @@ function openJsonPasteModal(onApply) {
 }
 
 // Кнопка-превью с текущей иконкой (кастомной или дефолтной), открывающая редактор по клику.
+// iconEditButton работает с ЛЮБЫМ объектом, у которого поле называется РОВНО
+// .icon - для сущностей вроде mine_field, где значков несколько под другими
+// именами (rock_icon/rock_broken_icon), нужен прокси, переадресующий .icon на
+// нужный ключ объекта obj.
+function iconFieldProxy(obj, key) {
+  return new Proxy({}, {
+    get(_, prop) { return prop === "icon" ? obj[key] : undefined; },
+    set(_, prop, value) { if (prop === "icon") obj[key] = value; return true; },
+    deleteProperty(_, prop) { if (prop === "icon") delete obj[key]; return true; },
+  });
+}
+
+// Тот же приём, что iconFieldProxy, но для ОДНОГО элемента списка иконок
+// (mine_field.rock_icon_variants) вместо именованного поля объекта.
+function iconListItemProxy(list, index) {
+  return new Proxy({}, {
+    get(_, prop) { return prop === "icon" ? list[index] : undefined; },
+    set(_, prop, value) { if (prop === "icon") list[index] = value; return true; },
+    deleteProperty(_, prop) { if (prop === "icon") list[index] = null; return true; },
+  });
+}
+
 function iconEditButton(title, entity, fallbackIcon, onChanged) {
   const btn = el("button", { class: "icon-btn" });
   function render() {
@@ -979,7 +1112,7 @@ function iconEditButton(title, entity, fallbackIcon, onChanged) {
 
 // ---------- фильтрация внутри вкладки ----------
 
-const filters = { resources: "", storage: "", locations: "", manual: "", buildings: "", "breakdown-types": "", techs: "", "energy-recipes": "", mining: "", tools: "", mobs: "", "combat-moves": "", skills: "", quests: "" };
+const filters = { resources: "", storage: "", locations: "", manual: "", buildings: "", "breakdown-types": "", techs: "", "energy-recipes": "", species: "", breeding: "", mining: "", tools: "", mobs: "", "combat-moves": "", skills: "", enchantments: "", quests: "" };
 
 // Оборачивает контейнер карточек строкой поиска. Каждая карточка/строка должна иметь
 // data-search (текст для сравнения) - см. вызовы ниже. Вызови вернувшуюся apply() один
@@ -1050,6 +1183,8 @@ function buildSearchIndex() {
     idx.push({ tab: "combat-moves", anchor: `card-combat-moves-${moveId}`, cat: "Приём боя", label: move.name, sub: moveId }));
   Object.entries(DATA.skills || {}).forEach(([skid, sk]) =>
     idx.push({ tab: "skills", anchor: `card-skills-${skid}`, cat: "Навык", label: sk.name, sub: skid }));
+  Object.entries(DATA.enchantments || {}).forEach(([eid, ench]) =>
+    idx.push({ tab: "enchantments", anchor: `card-enchantments-${eid}`, cat: "Зачарование", label: ench.name, sub: eid }));
   Object.entries(DATA.quests || {}).forEach(([qid, q]) =>
     idx.push({ tab: "quests", anchor: `card-quests-${qid}`, cat: "Квест", label: q.name, sub: qid }));
   Object.entries(DATA.loot_cases || {}).forEach(([cid, c]) =>
@@ -1282,6 +1417,7 @@ function renderAll() {
   renderMobs();
   renderCombatMoves();
   renderSkills();
+  renderEnchantments();
   renderQuests();
   renderSettings();
   document.getElementById("rawJson").value = JSON.stringify(DATA, null, 2);
@@ -1377,6 +1513,113 @@ function openTechPicker(currentValue, onPick) {
 
 function closeTechPicker() {
   const overlay = document.getElementById("techPickerOverlay");
+  if (overlay) overlay.remove();
+}
+
+// Мульти-выбор технологий (requires у ДРУГОЙ технологии) - раньше был сплошной
+// список чекбоксов (.req-list), один на каждую технологию в игре: нормально,
+// пока их десяток, но перестаёт масштабироваться, когда дерево разрастается
+// (та же причина, по которой buildingRequirementSelect выше не голый <select>).
+// selectedIds - ссылка на t.requires, мутируется НА МЕСТЕ (push/splice), чтобы
+// не плодить новых массивов, которые могли бы разойтись со ссылками в других
+// местах (граф, cycle-checker). excludeId - сама редактируемая технология (не
+// предлагать зависимость от самой себя - полный цикл через цепочку всё равно
+// ловит content_validation.py при сохранении).
+function techMultiSelect(selectedIds, onChange, { excludeId = null } = {}) {
+  const wrap = el("div", { class: "tech-multi-select" });
+  const chipsBox = el("div", { class: "tech-multi-chips" });
+  const addBtn = el("button", { class: "small", type: "button", text: "+ Добавить технологию…" });
+
+  const renderChips = () => {
+    chipsBox.innerHTML = "";
+    if (!selectedIds.length) {
+      chipsBox.appendChild(el("span", { class: "hint", text: "— требований нет —" }));
+    }
+    selectedIds.forEach(id => {
+      const chip = el("span", { class: "tech-multi-chip" });
+      chip.appendChild(document.createTextNode(DATA.techs[id] ? DATA.techs[id].name : id));
+      const rm = el("button", { class: "tech-multi-chip-rm", type: "button", text: "×" });
+      rm.addEventListener("click", () => {
+        const idx = selectedIds.indexOf(id);
+        if (idx !== -1) selectedIds.splice(idx, 1);
+        onChange();
+        renderChips();
+      });
+      chip.appendChild(rm);
+      chipsBox.appendChild(chip);
+    });
+  };
+  renderChips();
+
+  addBtn.addEventListener("click", () => {
+    openTechMultiPicker(selectedIds, excludeId, () => { onChange(); renderChips(); });
+  });
+
+  wrap.appendChild(chipsBox);
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
+function openTechMultiPicker(selectedIds, excludeId, onToggle) {
+  closeTechMultiPicker();
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeTechMultiPicker(); });
+
+  const modal = el("div", { class: "modal building-picker-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Выбрать технологии" }));
+  head.appendChild(el("button", { text: "Готово", onclick: closeTechMultiPicker }));
+  modal.appendChild(head);
+
+  const body = el("div", { class: "building-picker-body" });
+  const search = el("input", { type: "text", placeholder: "Фильтр по названию или id…", class: "building-picker-search" });
+  body.appendChild(search);
+
+  const list = el("div", { class: "building-picker-list" });
+  const entries = Object.entries(DATA.techs).filter(([tid]) => tid !== excludeId);
+  if (!entries.length) {
+    list.appendChild(el("p", { class: "hint", text: "Технологий пока нет - добавь их на вкладке «Технологии»." }));
+  }
+  entries.forEach(([tid, t]) => {
+    const isSelected = () => selectedIds.includes(tid);
+    const row = el("div", {
+      class: "building-picker-row multi" + (isSelected() ? " selected" : ""),
+      "data-search": `${t.name} ${tid}`.toLowerCase(),
+    });
+    const cb = el("input", { type: "checkbox" });
+    cb.checked = isSelected();
+    const nameBox = el("div", { style: "display:flex; align-items:center; gap:8px;" }, [
+      cb, el("div", { class: "building-picker-name", text: t.name }),
+    ]);
+    row.appendChild(nameBox);
+    row.appendChild(el("code", { class: "building-picker-id", text: tid }));
+    row.addEventListener("click", () => {
+      const idx = selectedIds.indexOf(tid);
+      if (idx === -1) { selectedIds.push(tid); } else { selectedIds.splice(idx, 1); }
+      cb.checked = isSelected();
+      row.classList.toggle("selected", isSelected());
+      onToggle();
+    });
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+  modal.appendChild(body);
+
+  search.addEventListener("input", () => {
+    const q = search.value.trim().toLowerCase();
+    list.querySelectorAll("[data-search]").forEach(row => {
+      row.style.display = !q || row.dataset.search.includes(q) ? "" : "none";
+    });
+  });
+
+  overlay.appendChild(modal);
+  overlay.id = "techMultiPickerOverlay";
+  document.body.appendChild(overlay);
+  search.focus();
+}
+
+function closeTechMultiPicker() {
+  const overlay = document.getElementById("techMultiPickerOverlay");
   if (overlay) overlay.remove();
 }
 
@@ -1509,6 +1752,71 @@ function soulKindInput(value, onChange) {
   const datalist = el("datalist", { id: listId });
   [...kinds].sort().forEach(k => datalist.appendChild(el("option", { value: k })));
   return el("span", {}, [input, datalist]);
+}
+
+// Тот же приём, что soulKindInput, только для тега вида зачарования
+// (tools.*.enchant_kind, например "mining"/"weapon"/"armor" - см. enchantments.*.
+// applies_to_kind/game/engine.py:enchantment_pool) - свободная строка, datalist
+// собран из УЖЕ встречающихся значений с обеих сторон (сами инструменты И
+// зачарования), только подсказка, ничего не запрещает.
+let _enchantKindDatalistCounter = 0;
+function enchantKindInput(value, onChange) {
+  const listId = `enchantKindList_${_enchantKindDatalistCounter++}`;
+  const input = el("input", { type: "text", list: listId, placeholder: "например 'mining'/'weapon'/'armor'", value: value || "" });
+  input.addEventListener("change", () => onChange(input.value.trim()));
+  const kinds = new Set();
+  Object.values(DATA.tools || {}).forEach(t => { if (t.enchant_kind) kinds.add(t.enchant_kind); });
+  Object.values(DATA.enchantments || {}).forEach(e => { if (e.applies_to_kind) kinds.add(e.applies_to_kind); });
+  const datalist = el("datalist", { id: listId });
+  [...kinds].sort().forEach(k => datalist.appendChild(el("option", { value: k })));
+  return el("span", {}, [input, datalist]);
+}
+
+// Список произвольных тегов постройки (buildings.*.tags) - НЕ фиксированный
+// enum (тот же принцип, что breeding_accepts_family/soul_kind), только МНОЖЕСТВО
+// значений вместо одного: панель "Производственные мощности" в web_ui.html
+// собирает фильтр по типу постройки из тегов, реально назначенных хоть одной
+// уже построенной постройке - движок эти теги не читает вообще, чисто
+// UI-метаданные. Мутирует b.tags на месте (splice/push), пустой список
+// удаляется целиком (b.tags), чтобы не засорять content.json пустыми "tags": []
+// у построек без единого тега - тот же приём, что breakdown_types.
+let _buildingTagsDatalistCounter = 0;
+function buildingTagsInput(b) {
+  if (!Array.isArray(b.tags)) b.tags = [];
+  const list = b.tags;
+  const sync = () => { if (!list.length) delete b.tags; };
+  const listId = `buildingTagsList_${_buildingTagsDatalistCounter++}`;
+  const wrap = el("span", { class: "tags-chip-list" });
+  const input = el("input", { type: "text", list: listId, placeholder: "добавить тег…" });
+  const addTag = () => {
+    const v = input.value.trim();
+    input.value = "";
+    if (v && !list.includes(v)) { list.push(v); }
+    sync();
+    renderChips();
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); addTag(); }
+  });
+  input.addEventListener("change", addTag);
+  function renderChips() {
+    wrap.querySelectorAll(".tags-chip").forEach(c => c.remove());
+    list.forEach((tag, i) => {
+      const chip = el("span", { class: "tags-chip" }, [document.createTextNode(tag)]);
+      const rm = el("button", { type: "button", text: "×", title: "Убрать тег" });
+      rm.addEventListener("click", () => { list.splice(i, 1); sync(); renderChips(); });
+      chip.appendChild(rm);
+      wrap.insertBefore(chip, input);
+    });
+  }
+  wrap.appendChild(input);
+  const existingTags = new Set();
+  Object.values(DATA.buildings || {}).forEach(other => (other.tags || []).forEach(t => existingTags.add(t)));
+  const datalist = el("datalist", { id: listId });
+  [...existingTags].sort().forEach(t => datalist.appendChild(el("option", { value: t })));
+  wrap.appendChild(datalist);
+  renderChips();
+  return wrap;
 }
 
 // Выбор вида (DATA.species) - используется мутациями (parent_a/parent_b/
@@ -1892,6 +2200,7 @@ function findIdOwner(id) {
   if (DATA.mobs && id in DATA.mobs) return "мобом/боссом";
   if (DATA.combat_moves && id in DATA.combat_moves) return "приёмом боя";
   if (DATA.skills && id in DATA.skills) return "навыком";
+  if (DATA.enchantments && id in DATA.enchantments) return "зачарованием";
   if (DATA.quests && id in DATA.quests) return "квестом";
   if (DATA.loot_cases && id in DATA.loot_cases) return "кейсом с лутом";
   return null;
@@ -2806,6 +3115,60 @@ function openAutomationHubSettingsModal(b, onChange) {
   document.body.appendChild(overlay);
 }
 
+function enchantingTableSummaryText(b) {
+  if (!b.enchanting_table) return "не стол зачарований";
+  const cost = Object.entries(b.enchanting_table.cost || {});
+  if (!cost.length) return "цена попытки не задана";
+  return "цена попытки: " + cost.map(([rid, amt]) =>
+    `${amt}× ${DATA.resources.find(r => r.id === rid)?.name || rid}`).join(", ");
+}
+
+function openEnchantingTableSettingsModal(b, onChange) {
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal settings-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Стол зачарований" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => { overlay.remove(); onChange(); } }));
+  modal.appendChild(head);
+
+  modal.appendChild(el("p", { class: "hint", text:
+    "Постройка, открывающая общую модалку «Стол зачарований» (три магических круга) для ЛЮБОГО инструмента "
+    + "с заданным enchant_kind (вкладка «Инструменты») - список зачарований и то, каким инструментам они "
+    + "доступны, задаётся отдельно на вкладке «Зачарования». Тут только цена ОДНОЙ попытки (обычно книга "
+    + "зачарований) - списывается целиком независимо от исхода (см. game/engine.py:enchant_tool)." }));
+
+  const toggleRow = el("div", { class: "field-row" });
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = !!b.enchanting_table;
+  toggleRow.appendChild(enabled);
+  toggleRow.appendChild(el("label", { text: "Стол зачарований (enchanting_table)" }));
+  modal.appendChild(toggleRow);
+
+  const body = el("div");
+  const renderBody = () => {
+    body.innerHTML = "";
+    if (!b.enchanting_table) return;
+    if (!b.enchanting_table.cost) b.enchanting_table.cost = {};
+
+    body.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Цена одной попытки (cost)" })]));
+    const costBox = el("div", { class: "dict-editor" });
+    renderDictEditor(costBox, b.enchanting_table.cost);
+    body.appendChild(costBox);
+  };
+  renderBody();
+  modal.appendChild(body);
+
+  enabled.addEventListener("change", () => {
+    if (enabled.checked) b.enchanting_table = { cost: {} };
+    else delete b.enchanting_table;
+    renderBody();
+  });
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
 // Три жёстко зашитых типа улучшений (см. game/engine.py:effective_building_stats) -
 // НЕ универсальный конструктор "было/стало" (это осознанно отклонённый вариант:
 // с произвольными before/after было бы неясно, как взаимодействуют два одновременно
@@ -2831,6 +3194,7 @@ const UPGRADE_TYPE_OPTIONS = [
   ["breakdown_immunity", "Неломкость (отключает поломку постройки)"],
   ["action_duration_reduction", "Ускорение действия (сокращает duration_turns)"],
   ["automation_slots", "Слоты автоматизатора"],
+  ["research_speed", "Скорость исследований (сокращает research_turns своего тира)"],
 ];
 const UPGRADE_TYPE_HINTS = {
   scale: "любое положительное число (не обязательно целое) - во сколько раз рецепт домножается относительно БАЗОВОГО (и produces, и consumes). Если у постройки НЕСКОЛЬКО scale-улучшений, действует только САМОЕ БОЛЬШОЕ купленное значение (они не перемножаются) - чтобы задать прогрессию \"1:1 -> 2:2 -> 3:3\", просто заведите отдельные улучшения со значениями 2 и 3, а не 2 и 1.5",
@@ -2847,6 +3211,7 @@ const UPGRADE_TYPE_HINTS = {
   breakdown_immunity: "само число не используется (куплено/не куплено) - постройка (или, для фермы, ИМЕННО ЭТОТ экземпляр - апгрейд покупается через 'Особи') перестаёт ломаться вовсе, независимо от breakdown_chance и любых тех-эффектов. Разрешён у ЛЮБОЙ постройки, не только у ферм",
   action_duration_reduction: "число от 0 до 1 (не включая 1) - доля сокращения duration_turns у ручных действий, которые зависят от ЭТОЙ постройки (requires_building) и многоходовые (duration_turns > 1). При нескольких таких улучшениях действует САМОЕ БОЛЬШОЕ купленное значение (сильнейшее сокращение). Настолько сильное сокращение, что итог округляется до 1 хода, делает действие фактически мгновенным",
   automation_slots: "положительное число - АБСОЛЮТНАЯ добавка к вместимости автоматизатора ЭТОЙ постройки (см. модалку «Автоматизатор»). Имеет смысл только у построек с automation_hub. Обычно repeatable",
+  research_speed: "положительное число - АБСОЛЮТНОЕ сокращение времени исследования, В ХОДАХ (не доля, в отличие от action_duration_reduction), у технологий ТОГО ЖЕ тира, что lab_tier ЭТОЙ постройки (\"лаборатория той же эры\" - см. вкладку «Технологии», поле research_turns). Имеет смысл только у построек-лабораторий (lab_tier). При нескольких таких улучшениях (или нескольких подходящих лабораториях) действует САМОЕ БОЛЬШОЕ купленное сокращение, не сумма",
 };
 
 function upgradesSummaryText(b) {
@@ -3133,6 +3498,12 @@ function renderBuildings() {
     labelRow.appendChild(el("span", { class: "hint", text: "1-3 символа, показывается на пиксельной иконке постройки в игре" }));
     card.appendChild(labelRow);
 
+    const tagsRow = el("div", { class: "field-row" });
+    tagsRow.appendChild(el("label", { text: "Теги (фильтр в игре)" }));
+    tagsRow.appendChild(buildingTagsInput(b));
+    tagsRow.appendChild(el("span", { class: "hint", text: "произвольные метки вида «генератор»/«пасека»/«синтезатор душ» - по ним игрок сможет фильтровать панель «Производственные мощности»; на саму игровую логику никак не влияют" }));
+    card.appendChild(tagsRow);
+
     const periodRow = el("div", { class: "field-row" });
     periodRow.appendChild(el("label", { text: "Работает" }));
     const periodSelect = el("select", { onchange: () => { b.active_period = periodSelect.value || null; } });
@@ -3197,7 +3568,7 @@ function renderBuildings() {
     breedingAcceptsRow.appendChild(speciesFamilyInput(b.breeding_accepts_family, (v) => {
       if (v) b.breeding_accepts_family = v; else delete b.breeding_accepts_family;
     }));
-    breedingAcceptsRow.appendChild(el("span", { class: "hint", text: "пусто - в эту ферму можно поселить ЛЮБОЙ вид (старое поведение); иначе - только виды с ТАКИМ ЖЕ тегом family (вкладка «Виды») - например, пасека принимает только 'bee', оранжерея - только 'flower', чтобы игрок не путал их в одном меню. Новый вид того же семейства подхватывается автоматически - ничего в постройке менять не нужно" }));
+    breedingAcceptsRow.appendChild(el("span", { class: "hint", text: "пусто - в эту ферму можно поселить ЛЮБОЙ вид (старое поведение); иначе - только виды с ТАКИМ ЖЕ тегом family (вкладка «Виды») - например, пасека принимает только 'пчела', оранжерея - только 'цветок', чтобы игрок не путал их в одном меню. Новый вид того же семейства подхватывается автоматически - ничего в постройке менять не нужно" }));
     card.appendChild(breedingAcceptsRow);
 
     const geneticsLabRow = el("div", { class: "field-row" });
@@ -3263,6 +3634,15 @@ function renderBuildings() {
       openSoulCollectorSettingsModal(b, () => { soulCollectorSummary.textContent = soulCollectorSummaryText(b); });
     }}));
     card.appendChild(soulCollectorRow);
+
+    const enchantingTableRow = el("div", { class: "field-row settings-summary-row" });
+    enchantingTableRow.appendChild(el("label", { text: "Стол зачарований" }));
+    const enchantingTableSummary = el("span", { class: "hint", text: enchantingTableSummaryText(b) });
+    enchantingTableRow.appendChild(enchantingTableSummary);
+    enchantingTableRow.appendChild(el("button", { class: "small", text: "Настроить", onclick: () => {
+      openEnchantingTableSettingsModal(b, () => { enchantingTableSummary.textContent = enchantingTableSummaryText(b); });
+    }}));
+    card.appendChild(enchantingTableRow);
 
     const automationHubRow = el("div", { class: "field-row settings-summary-row" });
     automationHubRow.appendChild(el("label", { text: "Автоматизатор" }));
@@ -3436,7 +3816,7 @@ function renderTechListView(root) {
   const cardsBox = el("div");
   const filterBar = makeFilterBar("techs", cardsBox);
   const addForm = idPromptAndAdd("технология", (id) => {
-    DATA.techs[id] = { name: "Новая технология", tier: 1, description: "", requires: [], cost: {}, effects: [] };
+    DATA.techs[id] = { name: "Новая технология", tier: 1, research_turns: null, description: "", requires: [], cost: {}, effects: [] };
     jumpToTechCard(id, { focusName: true });
   });
   root.appendChild(makeToolbar(addForm, filterBar));
@@ -3453,7 +3833,7 @@ function renderTechListView(root) {
       index: i, count: techIds.length,
       onMove: (delta) => { moveDictKeyInPlace(DATA.techs, tid, delta); renderTechs(); },
       kind: "технология",
-      createDefault: () => ({ name: "Новая технология", tier: 1, description: "", requires: [], cost: {}, effects: [] }),
+      createDefault: () => ({ name: "Новая технология", tier: 1, research_turns: null, description: "", requires: [], cost: {}, effects: [] }),
       insertAfter: (id, value) => insertDictKeyAfterInPlace(DATA.techs, tid, id, value),
       jumpToNew: (id) => jumpToTechCard(id, { focusName: true }),
     });
@@ -3475,6 +3855,21 @@ function renderTechListView(root) {
       "тир 1 доступен сразу; тир N>1 требует построенную и рабочую постройку с lab_tier >= N (см. вкладку «Постройки»)" }));
     card.appendChild(tierRow);
 
+    const turnsRow = el("div", { class: "field-row" });
+    turnsRow.appendChild(el("label", { text: "Ходов на исследование" }));
+    const turnsInput = el("input", {
+      type: "number", min: "2", value: t.research_turns ?? "", placeholder: "1 (мгновенно)", style: "width:90px",
+    });
+    turnsInput.addEventListener("change", () => {
+      const raw = turnsInput.value.trim();
+      t.research_turns = raw === "" ? null : Math.max(2, Math.round(Number(raw)) || 2);
+      turnsInput.value = t.research_turns ?? "";
+    });
+    turnsRow.appendChild(turnsInput);
+    turnsRow.appendChild(el("span", { class: "hint", text:
+      "пусто/1 - технология изучается мгновенно за клик, как раньше. >= 2 - заводит фоновую задачу на N ходов (см. game/engine.py:research/_process_research); лаборатория ТОГО ЖЕ тира с апгрейдом research_speed может сократить это время" }));
+    card.appendChild(turnsRow);
+
     const descRow = el("div", { class: "field-row" });
     descRow.appendChild(el("label", { text: "Описание" }));
     descRow.appendChild(descriptionTextarea(t.description, "Что даёт игроку эта технология", (v) => { t.description = v; }));
@@ -3482,17 +3877,7 @@ function renderTechListView(root) {
     card.appendChild(descRow);
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Требует технологий" })]));
-    const reqBox = el("div", { class: "req-list" });
-    Object.entries(DATA.techs).filter(([otid]) => otid !== tid).forEach(([otid, other]) => {
-      const cb = el("input", { type: "checkbox" });
-      cb.checked = t.requires.includes(otid);
-      cb.addEventListener("change", () => {
-        if (cb.checked) { if (!t.requires.includes(otid)) t.requires.push(otid); }
-        else { t.requires = t.requires.filter(x => x !== otid); }
-      });
-      reqBox.appendChild(el("label", {}, [cb, document.createTextNode(other.name)]));
-    });
-    card.appendChild(reqBox);
+    card.appendChild(techMultiSelect(t.requires, () => {}, { excludeId: tid }));
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Цена исследования (cost)" })]));
     const costBox = el("div", { class: "dict-editor" });
@@ -3531,6 +3916,54 @@ function tierBandColorEditor(tier) {
 
 let selectedTechNode = null;
 let dragConnectState = null;
+
+// Зум колесом мыши для графов технологий/квестов - вокруг точки под курсором,
+// а не вокруг фиксированного (0,0), как в игровых модалках web_ui.html:
+// enableGraphZoom. Устройство графа здесь другое: #techGraph/#questGraph - ОДИН
+// div на узлы И svg рёбер разом (общая система координат абсолютных left/top,
+// см. nodeRect/questNodeRect), поэтому масштабируется CSS-transform'ом он
+// целиком - в отличие от web_ui.html, где рёбра рисует отдельный НЕскейлящийся
+// svg, перерисовываемый после каждого шага зума через getBoundingClientRect.
+// Здесь рёбра сами остаются на месте относительно узлов без отдельного redraw.
+// Оборотная сторона: getBoundingClientRect/clientX-clientY внутри
+// перетаскивания узлов и связей возвращают уже отмасштабированные экранные
+// пиксели - их нужно делить на текущий zoom, чтобы получить те же единицы, что
+// style.left/top и координаты svg (см. updateDragLine/onNodeDragMove/
+// centerQuestGraphView и их quest-аналоги - все они делают эту поправку).
+const GRAPH_ZOOM_MIN = 0.4;
+const GRAPH_ZOOM_MAX = 2.5;
+const GRAPH_ZOOM_STEP = 1.12;
+let techGraphZoom = { value: 1 };
+let questGraphZoom = { value: 1 };
+
+function applyGraphZoomEditor(graphEl, zoom) {
+  graphEl.style.transform = `scale(${zoom})`;
+}
+
+// zoomState - объект-обёртка {value}, а не голое число: renderTechs()/
+// renderQuests() пересобирают DOM графа с нуля при каждом действии, пока
+// вкладка открыта - обёртка живёт СНАРУЖИ рендер-функции (как selectedTechNode)
+// и переживает эту пересборку, поэтому зум не сбрасывается на 1 при любом
+// клике/перетаскивании узла.
+function enableGraphZoomEditor(scrollEl, graphEl, zoomState) {
+  applyGraphZoomEditor(graphEl, zoomState.value);
+  scrollEl.addEventListener("wheel", (e) => {
+    e.preventDefault(); // колесо теперь целиком отдано зуму, не скроллу графа
+    const rect = scrollEl.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+    const oldZoom = zoomState.value;
+    const contentX = (scrollEl.scrollLeft + offsetX) / oldZoom;
+    const contentY = (scrollEl.scrollTop + offsetY) / oldZoom;
+    const factor = e.deltaY < 0 ? GRAPH_ZOOM_STEP : 1 / GRAPH_ZOOM_STEP;
+    const newZoom = Math.min(GRAPH_ZOOM_MAX, Math.max(GRAPH_ZOOM_MIN, oldZoom * factor));
+    if (newZoom === oldZoom) return;
+    zoomState.value = newZoom;
+    applyGraphZoomEditor(graphEl, newZoom);
+    scrollEl.scrollLeft = contentX * newZoom - offsetX;
+    scrollEl.scrollTop = contentY * newZoom - offsetY;
+  }, { passive: false });
+}
 
 function techTierOf(id) {
   return DATA.techs[id]?.tier || 1;
@@ -3665,7 +4098,7 @@ function renderTechGraphView(root) {
 
   const { positions, width, height, tierColRange, tiers } = computeTechPositions();
 
-  const scroll = el("div", { class: "graph-scroll" });
+  const scroll = el("div", { class: "graph-scroll graph-scroll-tab" });
   const graph = el("div", { class: "tech-graph", id: "techGraph" });
   graph.style.width = width + "px";
   graph.style.height = height + "px";
@@ -3764,6 +4197,7 @@ function renderTechGraphView(root) {
 
   scroll.appendChild(graph);
   root.appendChild(scroll);
+  enableGraphZoomEditor(scroll, graph, techGraphZoom);
   applyTechSelectionHighlight();
 }
 
@@ -3806,21 +4240,24 @@ function startConnectDrag(fromId, evt) {
   const svg = graph.querySelector(".tech-graph-svg");
   const line = svgEl("line", { class: "tech-edge-drag" });
   svg.appendChild(line);
-  dragConnectState = { fromId, line, graph };
+  dragConnectState = { fromId, line, graph, zoom: techGraphZoom.value };
   updateDragLine(evt);
   document.addEventListener("mousemove", onConnectDragMove);
   document.addEventListener("mouseup", onConnectDragEnd);
 }
 
 function updateDragLine(evt) {
-  const { fromId, line, graph } = dragConnectState;
+  const { fromId, line, graph, zoom } = dragConnectState;
   const graphRect = graph.getBoundingClientRect();
   const fromNode = document.getElementById(`graphnode-${fromId}`);
   const fromRect = fromNode.getBoundingClientRect();
-  line.setAttribute("x1", fromRect.right - graphRect.left);
-  line.setAttribute("y1", fromRect.top + fromRect.height / 2 - graphRect.top);
-  line.setAttribute("x2", evt.clientX - graphRect.left);
-  line.setAttribute("y2", evt.clientY - graphRect.top);
+  // graphRect/fromRect - уже отмасштабированные экранные пиксели (getBoundingClientRect
+  // не знает про transform:scale на #techGraph), делим на zoom, чтобы получить те же
+  // единицы, что и координаты svg/style.left-top (см. комментарий у GRAPH_ZOOM_MIN выше).
+  line.setAttribute("x1", (fromRect.right - graphRect.left) / zoom);
+  line.setAttribute("y1", (fromRect.top + fromRect.height / 2 - graphRect.top) / zoom);
+  line.setAttribute("x2", (evt.clientX - graphRect.left) / zoom);
+  line.setAttribute("y2", (evt.clientY - graphRect.top) / zoom);
 }
 
 function onConnectDragMove(evt) {
@@ -3901,6 +4338,7 @@ function startNodeDrag(tid, evt) {
     startX: evt.clientX, startY: evt.clientY,
     startLeft: parseFloat(nodeEl.style.left) || 0,
     startTop: parseFloat(nodeEl.style.top) || 0,
+    zoom: techGraphZoom.value,
     moved: false,
   };
   document.addEventListener("mousemove", onNodeDragMove);
@@ -3909,8 +4347,10 @@ function startNodeDrag(tid, evt) {
 
 function onNodeDragMove(evt) {
   if (!nodeDragState) return;
-  const dx = evt.clientX - nodeDragState.startX;
-  const dy = evt.clientY - nodeDragState.startY;
+  // Экранный сдвиг мыши делим на zoom - при масштабе узел должен сдвинуться
+  // на dx/zoom в собственных (немасштабированных) координатах style.left/top.
+  const dx = (evt.clientX - nodeDragState.startX) / nodeDragState.zoom;
+  const dy = (evt.clientY - nodeDragState.startY) / nodeDragState.zoom;
   if (!nodeDragState.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
   nodeDragState.moved = true;
   const x = Math.max(0, nodeDragState.startLeft + dx);
@@ -4086,7 +4526,9 @@ function renderSpecies() {
     + "ли этот вид в фенотипе потомка при скрещивании с ДРУГИМ видом (нужен хотя бы один dominant=true вид, "
     + "иначе гетерозигота по виду ничего не определит). weight - как часто этот вид достаётся ДИКОЙ особи "
     + "(manual_actions.spawn_species, см. вкладку «Ручные действия») - 0 = недоступен для дикого улова, только "
-    + "через мутацию (вкладка «Мутации»)." }));
+    + "через мутацию (вкладка «Мутации»). Бонусный ресурс (необязательно) - ЧТО именно даёт промышленная пасека "
+    + "особи этого вида, когда её ген «Среда обитания» совпадает со средой, эмулируемой фермой (см. вкладку "
+    + "«Генетика» про саму среду) - у разных видов в одной и той же благоприятной среде может быть разный бонус." }));
 
   if (!DATA.species) DATA.species = {};
 
@@ -4125,7 +4567,7 @@ function renderSpecies() {
     familyRow.appendChild(speciesFamilyInput(sp.family, (v) => {
       if (v) sp.family = v; else delete sp.family;
     }));
-    familyRow.appendChild(el("span", { class: "hint", text: "тег для фильтра ферм (buildings.*.breeding_accepts_family) - например 'bee' у всех пчёл, 'flower' у всех манацветов; ферма с таким же тегом сама подхватит этот вид, ничего в ней менять не придётся" }));
+    familyRow.appendChild(el("span", { class: "hint", text: "тег для фильтра ферм (buildings.*.breeding_accepts_family) - например 'пчела' у всех пчёл, 'цветок' у всех манацветов; ферма с таким же тегом сама подхватит этот вид, ничего в ней менять не придётся" }));
     card.appendChild(familyRow);
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Производит за ход (produces)" })]));
@@ -4156,6 +4598,48 @@ function renderSpecies() {
     weightRow.appendChild(el("span", { class: "hint", text: "0 = не ловится в диком виде, только через мутацию" }));
     card.appendChild(weightRow);
 
+    // Бонусная продукция промышленной пасеки - см. подсказку вкладки выше:
+    // СРАБОТАЕТ ли бонус в этот ход, решает генотип особи (признак "Среда
+    // обитания", вкладка «Генетика») + апгрейд фермы environment_emulation,
+    // а КАКОЙ именно ресурс и сколько - вот эти три поля, у КАЖДОГО вида свои.
+    // Тот же приём "не выпадает" -> null, что у mob.soul_id (см. renderMobs) -
+    // отсутствие bonus_resource убирает и amount/chance целиком (см.
+    // tools/content_validation.py: они не обязательны без bonus_resource).
+    const bonusResRow = el("div", { class: "field-row" });
+    bonusResRow.appendChild(el("label", { text: "Бонусный ресурс" }));
+    const bonusResSelect = el("select");
+    bonusResSelect.appendChild(el("option", { value: "", text: "— нет бонуса —" }));
+    DATA.resources.forEach(r => {
+      const o = el("option", { value: r.id, text: r.name });
+      if (r.id === sp.bonus_resource) o.selected = true;
+      bonusResSelect.appendChild(o);
+    });
+    bonusResSelect.addEventListener("change", () => {
+      if (bonusResSelect.value === "") { delete sp.bonus_resource; delete sp.bonus_amount; delete sp.bonus_chance; }
+      else { sp.bonus_resource = bonusResSelect.value; if (sp.bonus_amount == null) sp.bonus_amount = 1; if (sp.bonus_chance == null) sp.bonus_chance = 0.2; }
+      renderSpecies();
+    });
+    bonusResRow.appendChild(bonusResSelect);
+    bonusResRow.appendChild(el("span", { class: "hint", text: "какой ресурс с шансом добавляет промышленная пасека, если генотип особи ('Среда обитания') совпадает со средой, которую эмулирует её экземпляр фермы (апгрейд типа environment_emulation) - разные виды в ОДНОЙ и той же благоприятной среде дают разные бонусы" }));
+    card.appendChild(bonusResRow);
+
+    if (sp.bonus_resource) {
+      const bonusAmountRow = el("div", { class: "field-row" });
+      bonusAmountRow.appendChild(el("label", { text: "Количество бонуса" }));
+      const bonusAmountInput = el("input", { type: "number", min: "0.01", step: "1", value: sp.bonus_amount ?? 1 });
+      bonusAmountInput.addEventListener("change", () => { sp.bonus_amount = Number(bonusAmountInput.value) || 1; });
+      bonusAmountRow.appendChild(bonusAmountInput);
+      card.appendChild(bonusAmountRow);
+
+      const bonusChanceRow = el("div", { class: "field-row" });
+      bonusChanceRow.appendChild(el("label", { text: "Шанс бонуса за ход" }));
+      const bonusChanceInput = el("input", { type: "number", min: "0.01", max: "1", step: "0.01", value: sp.bonus_chance ?? 0.2 });
+      bonusChanceInput.addEventListener("change", () => { sp.bonus_chance = Number(bonusChanceInput.value) || 0.2; });
+      bonusChanceRow.appendChild(bonusChanceInput);
+      bonusChanceRow.appendChild(el("span", { class: "hint", text: "вероятность (0..1) бонуса за ход, независимо от обычной produces - свой отдельный бросок" }));
+      card.appendChild(bonusChanceRow);
+    }
+
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
   });
@@ -4183,9 +4667,9 @@ function renderGeneticTraits() {
     + "Пятый признак генотипа - «Вид» - это вкладка «Виды» (dominant/weight ЛЮБОГО вида играют ТУ ЖЕ роль, что "
     + "здесь у аллелей). dominant решает, какая из двух аллелей пары выражается в фенотипе при скрещивании "
     + "(нужна хотя бы одна dominant=true аллель на признак - иначе гетерозигота ничего не определит); weight - "
-    + "как часто эта аллель достаётся ДИКОЙ особи (не связано с dominant). У «Среды обитания» вместо числового "
-    + "«Значение» - bonus_resource/bonus_amount/bonus_chance: какой ресурс, сколько и с какой вероятностью за "
-    + "ход добавляет промышленная пасека, эмулирующая ИМЕННО эту среду, особи с СОВПАДАЮЩИМ геном." }));
+    + "как часто эта аллель достаётся ДИКОЙ особи (не связано с dominant). «Среда обитания» решает только, КАКАЯ "
+    + "среда благоприятна для генотипа особи - бонусный ресурс за эту благоприятность настраивается на вкладке "
+    + "«Виды» (у каждого вида свой, не у самой среды - см. подсказку там)." }));
 
   if (!DATA.genetic_traits) DATA.genetic_traits = {};
 
@@ -4208,10 +4692,7 @@ function renderGeneticTraits() {
     if (isEnvironment) {
       ENVIRONMENT_ALLELE_IDS.forEach(aid => {
         if (!trait.alleles.some(a => a.id === aid)) {
-          trait.alleles.push({
-            id: aid, name: ENVIRONMENT_ALLELE_NAMES[aid], dominant: aid === "forest", weight: 1,
-            bonus_resource: null, bonus_amount: 1, bonus_chance: 0.2,
-          });
+          trait.alleles.push({ id: aid, name: ENVIRONMENT_ALLELE_NAMES[aid], dominant: aid === "forest", weight: 1 });
         }
       });
     }
@@ -4264,28 +4745,6 @@ function renderGeneticTraits() {
           valueRow.appendChild(valueInput);
           valueRow.appendChild(el("span", { class: "hint", text: traitId === "lifespan" ? "сколько ходов особь живёт в ферме, пока не умрёт от старости" : "множитель продукции особи (домножает produces её вида)" }));
           aCard.appendChild(valueRow);
-        }
-
-        if (isEnvironment) {
-          const bonusResRow = el("div", { class: "field-row" });
-          bonusResRow.appendChild(el("label", { text: "Бонусный ресурс" }));
-          bonusResRow.appendChild(resourceSelect(a.bonus_resource, (v) => { a.bonus_resource = v; }));
-          aCard.appendChild(bonusResRow);
-
-          const bonusAmountRow = el("div", { class: "field-row" });
-          bonusAmountRow.appendChild(el("label", { text: "Количество бонуса" }));
-          const bonusAmountInput = el("input", { type: "number", min: "0", step: "1", value: a.bonus_amount ?? 1 });
-          bonusAmountInput.addEventListener("change", () => { a.bonus_amount = Number(bonusAmountInput.value) || 0; });
-          bonusAmountRow.appendChild(bonusAmountInput);
-          aCard.appendChild(bonusAmountRow);
-
-          const bonusChanceRow = el("div", { class: "field-row" });
-          bonusChanceRow.appendChild(el("label", { text: "Шанс бонуса за ход" }));
-          const bonusChanceInput = el("input", { type: "number", min: "0", max: "1", step: "0.01", value: a.bonus_chance ?? 0 });
-          bonusChanceInput.addEventListener("change", () => { a.bonus_chance = Number(bonusChanceInput.value) || 0; });
-          bonusChanceRow.appendChild(bonusChanceInput);
-          bonusChanceRow.appendChild(el("span", { class: "hint", text: "вероятность (0..1), что промышленная пасека, эмулирующая эту среду, начислит бонус особи с совпадающим геном в этот ход" }));
-          aCard.appendChild(bonusChanceRow);
         }
 
         const domRow = el("div", { class: "field-row" });
@@ -4453,15 +4912,153 @@ function renderMutations() {
 
 // ---------- Добыча ----------
 
+function renderMineFieldSettingsCard() {
+  const mf = DATA.mine_field;
+  const card = el("div", { class: "card" });
+  card.appendChild(el("div", { class: "card-head" }, [el("strong", { text: "Настройки поля" })]));
+  card.appendChild(el("p", { class: "hint", text:
+    "Общие для ВСЕЙ шахты параметры (не привязаны к конкретной руде) - размер поля, какой инструмент решает "
+    + "площадь/урон удара (его mining_area/mining_power смотри на тирах инструмента, вкладка \"Инструменты\"), "
+    + "и параметры пустой породы (клетка без руды)." }));
+
+  const sizeRow = el("div", { class: "field-row" });
+  sizeRow.appendChild(el("label", { text: "Размер поля (сторона квадрата)" }));
+  const sizeInput = el("input", { type: "number", min: "1", value: mf.size });
+  sizeInput.addEventListener("change", () => { mf.size = Number(sizeInput.value) || 1; });
+  sizeRow.appendChild(sizeInput);
+  card.appendChild(sizeRow);
+
+  const toolRow = el("div", { class: "field-row" });
+  toolRow.appendChild(el("label", { text: "Инструмент удара" }));
+  toolRow.appendChild(toolSelect(mf.dig_tool, (v) => { mf.dig_tool = v; }));
+  card.appendChild(toolRow);
+
+  const budgetRow = el("div", { class: "field-row" });
+  budgetRow.appendChild(el("label", { text: "Бюджет кластеров на поле" }));
+  const budgetInput = el("input", { type: "number", min: "1", step: "1", value: mf.cluster_budget });
+  budgetInput.addEventListener("change", () => { mf.cluster_budget = Math.max(1, Math.round(Number(budgetInput.value) || 1)); });
+  budgetRow.appendChild(budgetInput);
+  budgetRow.appendChild(el("span", { class: "hint", text:
+    "общее число кластеров на ВСЁ поле (не растёт с числом видов руды) - розыгрыш между исследованными видами "
+    + "взвешен по 1/rarity, с повторами: редкой руде может просто не повезти и в этот раз она не заспавнится вовсе" }));
+  card.appendChild(budgetRow);
+
+  const scannerToolRow = el("div", { class: "field-row" });
+  scannerToolRow.appendChild(el("label", { text: "Инструмент-детектор" }));
+  scannerToolRow.appendChild(toolSelect(mf.scanner_tool, (v) => { mf.scanner_tool = v; renderMining(); }));
+  card.appendChild(scannerToolRow);
+
+  const scannerTierCount = DATA.tools[mf.scanner_tool]?.tiers.length || 1;
+  const scannerRow = el("div", { class: "field-row" });
+  scannerRow.appendChild(el("label", { text: `Пороги тира щупа (1-${scannerTierCount})` }));
+  const scannerBox = el("span", { style: "display:flex; gap:10px; align-items:center; flex-wrap:wrap;" });
+  [
+    ["scanner_types_tier", "виды руды (без счёта)"],
+    ["scanner_counts_tier", "+ количество клеток каждой руды"],
+    ["scanner_reveal_all_tier", "+ подсветка руды в тумане"],
+  ].forEach(([key, label]) => {
+    const wrap = el("span", { style: "display:flex; align-items:center; gap:4px;" });
+    const input = el("input", { type: "number", min: "1", max: String(scannerTierCount), style: "width:52px;", value: mf[key] });
+    input.addEventListener("change", () => {
+      mf[key] = Math.min(scannerTierCount, Math.max(1, Math.round(Number(input.value) || 1)));
+      input.value = mf[key];
+    });
+    wrap.appendChild(input);
+    wrap.appendChild(el("span", { class: "hint", text: label }));
+    scannerBox.appendChild(wrap);
+  });
+  scannerRow.appendChild(scannerBox);
+  card.appendChild(scannerRow);
+  card.appendChild(el("p", { class: "hint", text:
+    "Тир 1 щупа (дефолтный, есть у всех) намеренно ничего не показывает - только с порога \"виды руды\" справочник "
+    + "руд начинает отмечать, что реально заспавнилось на ЭТОМ поле. Порода (rock_resource) в детекцию не входит - "
+    + "щуп ищет только руду из списка ниже." }));
+
+  const rockResourceRow = el("div", { class: "field-row" });
+  rockResourceRow.appendChild(el("label", { text: "Ресурс пустой породы" }));
+  rockResourceRow.appendChild(resourceSelect(mf.rock_resource, (v) => { mf.rock_resource = v; }));
+  card.appendChild(rockResourceRow);
+
+  const rockYieldRow = el("div", { class: "field-row" });
+  rockYieldRow.appendChild(el("label", { text: "Выход породы с клетки" }));
+  const rockYieldInput = el("input", { type: "number", min: "1", value: mf.rock_yield });
+  rockYieldInput.addEventListener("change", () => { mf.rock_yield = Number(rockYieldInput.value) || 1; });
+  rockYieldRow.appendChild(rockYieldInput);
+  card.appendChild(rockYieldRow);
+
+  const rockToughnessRow = el("div", { class: "field-row" });
+  rockToughnessRow.appendChild(el("label", { text: "Прочность породы" }));
+  const rockToughnessInput = el("input", { type: "number", min: "1", value: mf.rock_toughness });
+  rockToughnessInput.addEventListener("change", () => { mf.rock_toughness = Number(rockToughnessInput.value) || 1; });
+  rockToughnessRow.appendChild(rockToughnessInput);
+  card.appendChild(rockToughnessRow);
+
+  const iconsRow = el("div", { class: "field-row" });
+  iconsRow.appendChild(el("label", { text: "Внешний вид клетки" }));
+  iconsRow.appendChild(el("span", { text: "целая: " }));
+  iconsRow.appendChild(iconEditButton("Порода (целая)", iconFieldProxy(mf, "rock_icon"), null, () => {}));
+  iconsRow.appendChild(el("span", { text: "сломанная: " }));
+  iconsRow.appendChild(iconEditButton("Порода (сломанная)", iconFieldProxy(mf, "rock_broken_icon"), null, () => {}));
+  card.appendChild(iconsRow);
+
+  // Доп. спрайты той же целой породы - чисто визуальное разнообразие поля
+  // (по прямому пожеланию, 2026-09-16: "андезит/гравий" отклонены в пользу
+  // простой пестроты одного и того же ресурса). При генерации поля КАЖДАЯ
+  // клетка породы получает случайный индекс в пул [rock_icon, ...variants]
+  // (engine.py: _generate_mine_field/mine_field_view) - никакого влияния на
+  // геймплей, редактор тут просто даёт нарисовать и убрать варианты.
+  if (!Array.isArray(mf.rock_icon_variants)) mf.rock_icon_variants = [];
+  const variantsRow = el("div", { class: "field-row" });
+  variantsRow.appendChild(el("label", { text: "Доп. варианты породы (перемешиваются случайно)" }));
+  const variantsBox = el("div", { style: "display:flex; gap:8px; flex-wrap:wrap; align-items:center;" });
+  function renderVariantsBox() {
+    variantsBox.innerHTML = "";
+    mf.rock_icon_variants.forEach((_, i) => {
+      const wrap = el("span", { style: "display:flex; align-items:center; gap:2px;" });
+      wrap.appendChild(iconEditButton(`Порода (вариант ${i + 1})`, iconListItemProxy(mf.rock_icon_variants, i), mf.rock_icon, () => {}));
+      const removeBtn = el("button", { class: "small", text: "✕" });
+      removeBtn.addEventListener("click", () => {
+        mf.rock_icon_variants.splice(i, 1);
+        renderVariantsBox();
+      });
+      wrap.appendChild(removeBtn);
+      variantsBox.appendChild(wrap);
+    });
+    const addBtn = el("button", { class: "small", text: "+ Добавить вариант" });
+    addBtn.addEventListener("click", () => {
+      mf.rock_icon_variants.push(null);
+      renderVariantsBox();
+    });
+    variantsBox.appendChild(addBtn);
+  }
+  renderVariantsBox();
+  variantsRow.appendChild(variantsBox);
+  card.appendChild(variantsRow);
+
+  makeCardCollapsible(card);
+  return card;
+}
+
 function renderMining() {
   const root = document.getElementById("tab-mining");
   root.innerHTML = "";
   root.appendChild(el("p", { class: "hint", text:
-    "Ручная добыча в шахте: активна всегда только одна жила - единая кнопка \"искать жилу\" заменяет предыдущую "
-    + "находку (даже неисчерпанную) и заново выбирает руду взвешенным случаем ИЗ ВСЕХ разведанных руд, включая уже "
-    + "находившиеся - шанс не растёт по мере того, как другие руды уже были найдены. Какую именно руду найдёт "
-    + "поиск, решает вес rarity (чем МЕНЬШЕ число, тем ЧАЩЕ руда встречается относительно других). "
-    + "Дальше vein_size_range - размер найденной жилы, base_yield x множитель тира инструмента = добыча за ход." }));
+    "Шахта - закрытое туманом поле (см. \"Настройки поля\" ниже): руда каждого исследованного (по requires_tech) "
+    + "вида ложится на поле кластерами, но ломается только киркой нужного тира (required_tier) - недоступная руда "
+    + "видна, но не поддаётся удару. rarity - вес частоты кластеров (чем МЕНЬШЕ число, тем ЧАЩЕ), "
+    + "field_cluster_size - размер одного кластера в клетках, toughness - сколько урона нужно снять с клетки, "
+    + "base_yield x множитель тира инструмента = выход руды с ОДНОЙ сломанной клетки." }));
+
+  if (!DATA.mine_field) {
+    DATA.mine_field = {
+      size: 20, dig_tool: Object.keys(DATA.tools)[0] || null, cluster_budget: 8,
+      scanner_tool: Object.keys(DATA.tools)[0] || null,
+      scanner_types_tier: 1, scanner_counts_tier: 1, scanner_reveal_all_tier: 1,
+      rock_resource: DATA.resources[0]?.id || null, rock_yield: 2, rock_toughness: 1,
+      rock_icon: null, rock_broken_icon: null, rock_icon_variants: [],
+    };
+  }
+  root.appendChild(renderMineFieldSettingsCard());
 
   const cardsBox = el("div");
   const filterBar = makeFilterBar("mining", cardsBox);
@@ -4474,10 +5071,13 @@ function renderMining() {
     const addBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
       const rid = select.value;
       const firstTool = Object.keys(DATA.tools)[0] || null;
-      DATA.mining_info[rid] = { requires_tech: null, required_tool: firstTool, required_tier: 1, rarity: 1, vein_size_range: [10, 20], base_yield: 2 };
+      DATA.mining_info[rid] = {
+        requires_tech: null, required_tool: firstTool, required_tier: 1, rarity: 1,
+        toughness: 2, field_cluster_size: [2, 5], base_yield: 2,
+      };
       jumpTo(`card-mining-${rid}`, "mining");
     }});
-    addForm = el("div", { class: "add-form" }, [el("span", { text: "Включить ручную добычу для:" }), select, addBtn]);
+    addForm = el("div", { class: "add-form" }, [el("span", { text: "Включить добычу для:" }), select, addBtn]);
   }
   root.appendChild(makeToolbar(addForm, filterBar));
   root.appendChild(cardsBox);
@@ -4524,103 +5124,41 @@ function renderMining() {
     rarityRow.appendChild(el("span", { class: "hint", text: "относительный вес - сравнивается только с rarity других разведанных руд" }));
     card.appendChild(rarityRow);
 
-    const sizeRow = el("div", { class: "field-row" });
-    sizeRow.appendChild(el("label", { text: "Размер жилы (min-max)" }));
-    const minInput = el("input", { type: "number", min: "1", value: info.vein_size_range[0] });
-    const maxInput = el("input", { type: "number", min: "1", value: info.vein_size_range[1] });
-    minInput.addEventListener("change", () => { info.vein_size_range[0] = Number(minInput.value) || 1; });
-    maxInput.addEventListener("change", () => { info.vein_size_range[1] = Number(maxInput.value) || 1; });
-    sizeRow.append(minInput, document.createTextNode(" – "), maxInput);
-    card.appendChild(sizeRow);
+    const clusterRow = el("div", { class: "field-row" });
+    clusterRow.appendChild(el("label", { text: "Размер кластера на поле (min-max клеток)" }));
+    const minInput = el("input", { type: "number", min: "1", value: info.field_cluster_size[0] });
+    const maxInput = el("input", { type: "number", min: "1", value: info.field_cluster_size[1] });
+    minInput.addEventListener("change", () => { info.field_cluster_size[0] = Number(minInput.value) || 1; });
+    maxInput.addEventListener("change", () => { info.field_cluster_size[1] = Number(maxInput.value) || 1; });
+    clusterRow.append(minInput, document.createTextNode(" – "), maxInput);
+    card.appendChild(clusterRow);
+
+    const toughnessRow = el("div", { class: "field-row" });
+    toughnessRow.appendChild(el("label", { text: "Прочность клетки" }));
+    const toughnessInput = el("input", { type: "number", min: "1", value: info.toughness });
+    toughnessInput.addEventListener("change", () => { info.toughness = Number(toughnessInput.value) || 1; });
+    toughnessRow.appendChild(toughnessInput);
+    toughnessRow.appendChild(el("span", { class: "hint", text: "сколько урона (mining_power кирки) нужно снять, чтобы клетка сломалась" }));
+    card.appendChild(toughnessRow);
 
     const yieldRow = el("div", { class: "field-row" });
-    yieldRow.appendChild(el("label", { text: "Добыча за ход (на мин. тире)" }));
+    yieldRow.appendChild(el("label", { text: "Выход с клетки (на мин. тире)" }));
     const yieldInput = el("input", { type: "number", min: "1", value: info.base_yield });
     yieldInput.addEventListener("change", () => { info.base_yield = Number(yieldInput.value) || 1; });
     yieldRow.appendChild(yieldInput);
     card.appendChild(yieldRow);
 
-    const qualityToggleRow = el("div", { class: "field-row" });
-    const qualityEnabled = el("input", { type: "checkbox" });
-    qualityEnabled.checked = Array.isArray(info.quality_tiers) && info.quality_tiers.length > 0;
-    qualityToggleRow.appendChild(qualityEnabled);
-    qualityToggleRow.appendChild(el("label", { text: "Качество жил (зависит от тира инструмента)" }));
-    card.appendChild(qualityToggleRow);
-    card.appendChild(el("p", { class: "hint", text:
-      "Каждая новая найденная жила этого ресурса дополнительно розыгрывается по тирам качества (взвешенно, "
-      + "weight) - в пул попадают только тиры, чей мин. тир инструмента (min_tool_tier) не выше ТЕКУЩЕГО тира "
-      + "required_tool у игрока: чем лучше инструмент, тем больше хороших тиров участвует в розыгрыше. "
-      + "size_multiplier домножает СЛУЧАЙНЫЙ ЗАПАС жилы в момент находки (итог округляется вверх) - на "
-      + "скорость добычи за ход качество не влияет. Хотя бы один тир должен быть доступен уже на пороге "
-      + "required_tier выше - иначе на самом раннем доступном тире инструмента розыгрыш качества окажется "
-      + "пустым." }));
-
-    const qualityBox = el("div", { class: "stages-box" });
-    function renderQualityBox() {
-      qualityBox.innerHTML = "";
-      if (!Array.isArray(info.quality_tiers)) return;
-      const tierCount = DATA.tools[info.required_tool] ? DATA.tools[info.required_tool].tiers.length : 1;
-      info.quality_tiers.forEach((q, qi) => {
-        const qCard = el("div", { class: "stage-card" });
-        const qHead = el("div", { class: "stage-head" }, [el("strong", { text: `Тир качества ${qi + 1}` }), el("div", { class: "spacer" })]);
-        const qRm = el("button", { class: "small danger", text: "Удалить" });
-        qRm.addEventListener("click", () => { info.quality_tiers.splice(qi, 1); renderQualityBox(); });
-        qHead.appendChild(qRm);
-        qCard.appendChild(qHead);
-
-        const nameRow = el("div", { class: "field-row" });
-        nameRow.appendChild(el("label", { text: "Название" }));
-        const nameInput = el("input", { type: "text", value: q.name || "" });
-        nameInput.addEventListener("change", () => { q.name = nameInput.value; });
-        nameRow.appendChild(nameInput);
-        qCard.appendChild(nameRow);
-
-        const weightRow = el("div", { class: "field-row" });
-        weightRow.appendChild(el("label", { text: "Вес" }));
-        const weightInput = el("input", { type: "number", min: "0.01", step: "0.1", value: q.weight ?? 1 });
-        weightInput.addEventListener("change", () => { q.weight = Number(weightInput.value) || 1; });
-        weightRow.appendChild(weightInput);
-        weightRow.appendChild(el("span", { class: "hint", text: "относительный вес - сравнивается только с весами других тиров качества ЭТОГО ЖЕ ресурса" }));
-        qCard.appendChild(weightRow);
-
-        const multRow = el("div", { class: "field-row" });
-        multRow.appendChild(el("label", { text: "Множитель запаса жилы (size_multiplier)" }));
-        const multInput = el("input", { type: "number", min: "0.01", step: "0.1", value: q.size_multiplier ?? 1 });
-        multInput.addEventListener("change", () => { q.size_multiplier = Number(multInput.value) || 1; });
-        multRow.appendChild(multInput);
-        qCard.appendChild(multRow);
-
-        const minTierRow = el("div", { class: "field-row" });
-        minTierRow.appendChild(el("label", { text: "Мин. тир инструмента" }));
-        const minTierInput = el("input", { type: "number", min: "1", max: String(tierCount), value: q.min_tool_tier ?? 1 });
-        minTierInput.addEventListener("change", () => { q.min_tool_tier = Number(minTierInput.value) || 1; });
-        minTierRow.appendChild(minTierInput);
-        minTierRow.appendChild(el("span", { class: "hint", text: `1..${tierCount} - порог входа в пул розыгрыша (у "${info.required_tool}")` }));
-        qCard.appendChild(minTierRow);
-
-        qualityBox.appendChild(qCard);
-      });
-      const addBtn = el("button", { class: "small", text: "+ добавить тир качества", onclick: () => {
-        info.quality_tiers.push({ name: "Новый тир", weight: 1, size_multiplier: 1, min_tool_tier: 1 });
-        renderQualityBox();
-      }});
-      qualityBox.appendChild(addBtn);
-    }
-    renderQualityBox();
-    card.appendChild(qualityBox);
-    qualityBox.hidden = !qualityEnabled.checked;
-
-    qualityEnabled.addEventListener("change", () => {
-      if (qualityEnabled.checked) {
-        info.quality_tiers = [{ name: "Обычная", weight: 1, size_multiplier: 1, min_tool_tier: 1 }];
-      } else {
-        delete info.quality_tiers;
-      }
-      qualityBox.hidden = !qualityEnabled.checked;
-      renderQualityBox();
-    });
-
-    card.appendChild(clickDelayRow(info));
+    // Иконка ЖИЛЫ на поле шахты - НЕЗАВИСИМА от иконки самого ресурса (вкладка
+    // "Ресурсы") по прямому пожеланию, 2026-09-16: жила в забое и добытый
+    // ресурс - разные картинки. Без своей иконки клетка на поле откатывается
+    // на иконку ресурса (тот же resource, что и id этой записи) - fallbackIcon
+    // ниже показывает именно её, чтобы было видно, что покажется по умолчанию.
+    const iconRow = el("div", { class: "field-row" });
+    iconRow.appendChild(el("label", { text: "Иконка жилы на поле" }));
+    const resourceIconFallback = DATA.resources.find(r => r.id === rid)?.icon || null;
+    iconRow.appendChild(iconEditButton(`Жила «${resName}»`, info, resourceIconFallback, () => {}));
+    iconRow.appendChild(el("span", { class: "hint", text: "без своей иконки клетка на поле выглядит как ресурс (вкладка \"Ресурсы\")" }));
+    card.appendChild(iconRow);
 
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
@@ -4684,6 +5222,32 @@ function renderTools() {
       + "game/engine.py:_weapon_bonuses). Уникальный меч-ваншот - обычно отдельная линейка из 2 тиров: тир 1 "
       + "\"не выковано\" (без полей), тир 2 - сам меч с instant_kill_max_hp." }));
     card.appendChild(weaponRow);
+
+    const armorRow = el("div", { class: "field-row" });
+    const armorCheck = el("input", { type: "checkbox" });
+    armorCheck.checked = !!tool.armor;
+    armorCheck.addEventListener("change", () => {
+      if (armorCheck.checked) tool.armor = true; else delete tool.armor;
+      renderTools();
+    });
+    armorRow.appendChild(armorCheck);
+    armorRow.appendChild(el("label", { text: "Броня (armor)" }));
+    armorRow.appendChild(el("span", { class: "hint", text:
+      "зеркало «Оружие» для защиты - поля тиров ниже (максимум HP/снижение урона) читаются ТОЛЬКО у линеек "
+      + "с этой галочкой, несколько линеек брони действуют ОДНОВРЕМЕННО (максимум по каждому полю среди всех "
+      + "владеемых, см. game/engine.py:_armor_bonuses)." }));
+    card.appendChild(armorRow);
+
+    const enchantKindRow = el("div", { class: "field-row" });
+    enchantKindRow.appendChild(el("label", { text: "Тег зачарования (enchant_kind)" }));
+    enchantKindRow.appendChild(enchantKindInput(tool.enchant_kind, (v) => {
+      if (v) tool.enchant_kind = v; else delete tool.enchant_kind;
+    }));
+    enchantKindRow.appendChild(el("span", { class: "hint", text:
+      "пусто - линейку нельзя нести на стол зачарований. Иначе доступны зачарования с ТАКИМ ЖЕ "
+      + "applies_to_kind (вкладка «Зачарования»), плюс любые универсальные (applies_to_kind не задан, "
+      + "например «Прочность»)." }));
+    card.appendChild(enchantKindRow);
 
     const tiersBox = el("div", { class: "stages-box" });
     tool.tiers.forEach((tier, i) => {
@@ -4821,6 +5385,48 @@ function renderTools() {
             "разблокировка КУМУЛЯТИВНА по тирам ЭТОЙ линейки - дойдя до тира N, игрок сохраняет приёмы всех "
             + "тиров 1..N (не только текущего), см. game/engine.py:unlocked_attack_moves" }));
         }
+      }
+
+      if (tool.armor) {
+        const maxHpRow = el("div", { class: "field-row" });
+        maxHpRow.appendChild(el("label", { text: "Бонус к максимуму HP" }));
+        const maxHpInput = el("input", { type: "number", min: "0", step: "1", value: tier.max_hp_bonus ?? "", placeholder: "0 (не задано)" });
+        maxHpInput.addEventListener("change", () => {
+          if (maxHpInput.value === "") delete tier.max_hp_bonus; else tier.max_hp_bonus = Number(maxHpInput.value) || 0;
+        });
+        maxHpRow.appendChild(maxHpInput);
+        tierCard.appendChild(maxHpRow);
+
+        const dmgReductionRow = el("div", { class: "field-row" });
+        dmgReductionRow.appendChild(el("label", { text: "Снижение входящего урона" }));
+        const dmgReductionInput = el("input", { type: "number", min: "0", step: "1", value: tier.damage_reduction ?? "", placeholder: "0 (не задано)" });
+        dmgReductionInput.addEventListener("change", () => {
+          if (dmgReductionInput.value === "") delete tier.damage_reduction; else tier.damage_reduction = Number(dmgReductionInput.value) || 0;
+        });
+        dmgReductionRow.appendChild(dmgReductionInput);
+        dmgReductionRow.appendChild(el("span", { class: "hint", text: "плоское вычитание из урона моба за ответный удар (см. game/engine.py:attack_encounter), до 0 включительно" }));
+        tierCard.appendChild(dmgReductionRow);
+      }
+
+      if (toolId === DATA.mine_field?.dig_tool) {
+        const areaRow = el("div", { class: "field-row" });
+        areaRow.appendChild(el("label", { text: "Зона удара (N×N)" }));
+        const areaInput = el("input", { type: "number", min: "1", step: "1", value: tier.mining_area ?? "", placeholder: "1 (не задано)" });
+        areaInput.addEventListener("change", () => {
+          if (areaInput.value === "") delete tier.mining_area; else tier.mining_area = Number(areaInput.value) || 1;
+        });
+        areaRow.appendChild(areaInput);
+        tierCard.appendChild(areaRow);
+
+        const powerRow = el("div", { class: "field-row" });
+        powerRow.appendChild(el("label", { text: "Урон по клетке поля шахты" }));
+        const powerInput = el("input", { type: "number", min: "1", step: "1", value: tier.mining_power ?? "", placeholder: "1 (не задано)" });
+        powerInput.addEventListener("change", () => {
+          if (powerInput.value === "") delete tier.mining_power; else tier.mining_power = Number(powerInput.value) || 1;
+        });
+        powerRow.appendChild(powerInput);
+        powerRow.appendChild(el("span", { class: "hint", text: "показывается тут, т.к. этот инструмент назначен mine_field.dig_tool (см. вкладку «Добыча»)" }));
+        tierCard.appendChild(powerRow);
       }
 
       tiersBox.appendChild(tierCard);
@@ -5169,6 +5775,14 @@ function renderMobs() {
     hpRow.appendChild(hpInput);
     card.appendChild(hpRow);
 
+    const damageRow = el("div", { class: "field-row" });
+    damageRow.appendChild(el("label", { text: "Урон по игроку (damage)" }));
+    const damageInput = el("input", { type: "number", min: "0", value: mob.damage ?? 0 });
+    damageInput.addEventListener("change", () => { mob.damage = Number(damageInput.value) || 0; });
+    damageRow.appendChild(damageInput);
+    damageRow.appendChild(el("span", { class: "hint", text: "ответный удар, только если атака игрока НЕ убила моба за этот раз - см. game/engine.py:attack_encounter" }));
+    card.appendChild(damageRow);
+
     const xpRow = el("div", { class: "field-row" });
     xpRow.appendChild(el("label", { text: "Опыт за убийство (xp_reward)" }));
     const xpInput = el("input", { type: "number", min: "0", value: mob.xp_reward ?? 0 });
@@ -5442,6 +6056,133 @@ function renderSkills() {
   filterBar._apply();
 }
 
+// ---------- зачарования (стол зачарований) ----------
+
+// Закрытый список типов эффекта - держать в паре с _ENCHANT_EFFECT_TYPES в
+// tools/content_validation.py и с тем, что реально умеет применять
+// game/engine.py (_enchant_effect_value + её вызовы в tool_durability_remaining/
+// _weapon_bonuses/_armor_bonuses/hit_mine_field).
+const ENCHANT_EFFECT_TYPE_OPTIONS = [
+  ["yield_multiplier", "Множитель выхода руды с блока (только applies_to_kind = тег кирки)"],
+  ["durability_multiplier", "Множитель максимальной прочности (обычно универсальное, applies_to_kind не задан)"],
+  ["damage_bonus", "Добавка к урону, ДОЛЯ от текущего множителя (только оружие)"],
+  ["drop_chance_multiplier", "Множитель шанса И дропа, И души разом (только оружие)"],
+  ["soul_chance_multiplier", "Множитель ТОЛЬКО шанса души - стакается перемножением с добычей (только оружие)"],
+  ["armor_defense_bonus", "Добавка к снижению входящего урона (только броня)"],
+  ["max_hp_bonus_add", "Добавка к максимуму HP игрока (только броня)"],
+];
+
+function renderEnchantments() {
+  const root = document.getElementById("tab-enchantments");
+  root.innerHTML = "";
+  if (!DATA.enchantments) DATA.enchantments = {};
+  root.appendChild(el("p", { class: "hint", text:
+    "Зачарования для стола зачарований (постройка с полем enchanting_table, вкладка «Постройки») - каждое "
+    + "применимо к инструментам с СОВПАДАЮЩИМ enchant_kind (вкладка «Инструменты»), либо ко ВСЕМ зачаровываемым "
+    + "инструментам разом, если applies_to_kind не задан (универсальное, например «Прочность»). Три магических "
+    + "круга тянут РАВНОВЕРОЯТНО из барабана всех (зачарование, уровень) этого инструмента - совпадение всех "
+    + "трёх кругов применяет именно этот уровень (никогда не понижая уже стоящий более сильный), несовпадение "
+    + "снимает С ИНСТРУМЕНТА ВСЕ его зачарования разом (см. game/engine.py:enchant_tool)." }));
+
+  const cardsBox = el("div");
+  const filterBar = makeFilterBar("enchantments", cardsBox);
+  const addForm = idPromptAndAdd("зачарование", (id) => {
+    DATA.enchantments[id] = {
+      name: "Новое зачарование", description: "", applies_to_kind: null,
+      effect: { type: "durability_multiplier" }, levels: [{ value: 1.5 }],
+    };
+    renderEnchantments();
+    jumpTo(`card-enchantments-${id}`, "enchantments", { focusName: true });
+  });
+  root.appendChild(makeToolbar(addForm, filterBar));
+  root.appendChild(cardsBox);
+
+  Object.entries(DATA.enchantments).forEach(([eid, ench]) => {
+    const card = el("div", { class: "card", id: `card-enchantments-${eid}` });
+    card.dataset.search = (eid + " " + ench.name).toLowerCase();
+    const nameInput = el("input", { type: "text", value: ench.name });
+    nameInput.addEventListener("change", () => { ench.name = nameInput.value; card.dataset.search = (eid + " " + ench.name).toLowerCase(); });
+    const iconBtn = iconEditButton(ench.name, ench, defaultEnchantIcon(), () => {});
+    const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
+      delete DATA.enchantments[eid];
+      renderEnchantments();
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: eid }), iconBtn, nameInput, el("div", { class: "spacer" }), rm]));
+
+    const descRow = el("div", { class: "field-row" });
+    descRow.appendChild(el("label", { text: "Описание" }));
+    descRow.appendChild(descriptionTextarea(ench.description, "Что оно даёт игроку", (v) => { ench.description = v; }));
+    card.appendChild(descRow);
+
+    const kindRow = el("div", { class: "field-row" });
+    kindRow.appendChild(el("label", { text: "Применимо к тегу (applies_to_kind)" }));
+    kindRow.appendChild(enchantKindInput(ench.applies_to_kind, (v) => { ench.applies_to_kind = v || null; }));
+    kindRow.appendChild(el("span", { class: "hint", text: "пусто = универсальное, доступно ЛЮБОМУ зачаровываемому инструменту" }));
+    card.appendChild(kindRow);
+
+    if (!ench.effect) ench.effect = { type: ENCHANT_EFFECT_TYPE_OPTIONS[0][0] };
+    const effectRow = el("div", { class: "field-row" });
+    effectRow.appendChild(el("label", { text: "Тип эффекта (effect.type)" }));
+    const effectSelect = el("select", {});
+    ENCHANT_EFFECT_TYPE_OPTIONS.forEach(([value, label]) => {
+      const opt = el("option", { value, text: label });
+      if (ench.effect.type === value) opt.selected = true;
+      effectSelect.appendChild(opt);
+    });
+    effectSelect.addEventListener("change", () => { ench.effect.type = effectSelect.value; });
+    effectRow.appendChild(effectSelect);
+    card.appendChild(effectRow);
+
+    if (!Array.isArray(ench.levels) || !ench.levels.length) ench.levels = [{ value: 1.5 }];
+    const levelsBox = el("div", { class: "stages-box" });
+    function renderLevelsBox() {
+      levelsBox.innerHTML = "";
+      ench.levels.forEach((lvl, i) => {
+        const lvlCard = el("div", { class: "stage-card" });
+        const isLast = i === ench.levels.length - 1;
+        const lvlRm = el("button", {
+          class: "small danger", text: "Удалить уровень",
+          disabled: (!isLast || ench.levels.length === 1) ? "true" : null,
+          onclick: () => { ench.levels.pop(); renderLevelsBox(); },
+        });
+        lvlCard.appendChild(el("div", { class: "stage-head" }, [el("strong", { text: `Уровень ${i + 1} (${["I", "II", "III"][i] || i + 1})` }), el("div", { class: "spacer" }), lvlRm]));
+
+        const valueRow = el("div", { class: "field-row" });
+        valueRow.appendChild(el("label", { text: "Значение (value)" }));
+        const valueInput = el("input", { type: "number", step: "any", value: lvl.value ?? 0 });
+        valueInput.addEventListener("change", () => { lvl.value = Number(valueInput.value) || 0; });
+        valueRow.appendChild(valueInput);
+        valueRow.appendChild(el("span", { class: "hint", text: "смысл зависит от effect.type - множитель (x1.5) или доля/добавка (0.25, +2), см. подсказку типа выше" }));
+        lvlCard.appendChild(valueRow);
+
+        const weightRow = el("div", { class: "field-row" });
+        weightRow.appendChild(el("label", { text: "Вес в барабане (weight)" }));
+        const weightInput = el("input", { type: "number", min: "0", step: "any", value: lvl.weight ?? "", placeholder: "1 (не задано)" });
+        weightInput.addEventListener("change", () => {
+          if (weightInput.value === "") delete lvl.weight; else lvl.weight = Number(weightInput.value) || 1;
+        });
+        weightRow.appendChild(weightInput);
+        weightRow.appendChild(el("span", { class: "hint", text: "необязательно - чем больше относительно других символов этого инструмента, тем чаще выпадает на круге" }));
+        lvlCard.appendChild(weightRow);
+
+        levelsBox.appendChild(lvlCard);
+      });
+      const addLvlBtn = el("button", { class: "small", text: "+ добавить уровень", onclick: () => {
+        const prevValue = ench.levels[ench.levels.length - 1]?.value ?? 1;
+        ench.levels.push({ value: prevValue });
+        renderLevelsBox();
+      }});
+      levelsBox.appendChild(addLvlBtn);
+    }
+    renderLevelsBox();
+    card.appendChild(levelsBox);
+
+    makeCardCollapsible(card);
+    cardsBox.appendChild(card);
+  });
+  filterBar._apply();
+}
+
 // ---------- условия квестов (общий словарь типов) ----------
 
 const CONDITION_TYPES = {
@@ -5453,6 +6194,10 @@ const CONDITION_TYPES = {
   all_techs_researched: { label: "Исследовать все технологии", fields: [] },
   turn_at_least: { label: "Дожить до хода не раньше", fields: ["amount"] },
   tool_tier_at_least: { label: "Прокачать инструмент до тира не ниже", fields: ["tool", "amount"] },
+  species_discovered_at_least: { label: "Открыть видов существ не меньше", fields: ["amount"] },
+  species_discovered: { label: "Вывести/поймать конкретный вид", fields: ["species"] },
+  manual_action_performed_at_least: { label: "Выполнить ручное действие не меньше раз", fields: ["action", "amount"] },
+  building_upgrade_purchased: { label: "Купить улучшение постройки", fields: ["building", "upgrade"] },
 };
 
 function requiredBuildingSelect(selected, onchange) {
@@ -5475,6 +6220,30 @@ function requiredTechSelect(selected, onchange) {
   return select;
 }
 
+function requiredActionSelect(selected, onchange) {
+  const select = el("select", { onchange: () => onchange(select.value) });
+  Object.entries(DATA.manual_actions).forEach(([aid, a]) => {
+    const o = el("option", { value: aid, text: a.name });
+    if (aid === selected) o.selected = true;
+    select.appendChild(o);
+  });
+  return select;
+}
+
+// Зависимый от выбранной постройки список её же upgrades - в отличие от
+// requiredBuildingSelect/requiredTechSelect (плоское глобальное пространство id),
+// upgrade.id уникален только ВНУТРИ одной постройки (см. building_upgrade_purchased).
+function requiredBuildingUpgradeSelect(buildingId, selected, onchange) {
+  const select = el("select", { onchange: () => onchange(select.value) });
+  const upgrades = DATA.buildings[buildingId]?.upgrades || [];
+  upgrades.forEach(u => {
+    const o = el("option", { value: u.id, text: u.name });
+    if (u.id === selected) o.selected = true;
+    select.appendChild(o);
+  });
+  return select;
+}
+
 function defaultConditionOfType(type) {
   const fields = CONDITION_TYPES[type].fields;
   const cond = { type };
@@ -5483,6 +6252,9 @@ function defaultConditionOfType(type) {
   if (fields.includes("building")) cond.building = Object.keys(DATA.buildings)[0];
   if (fields.includes("tech")) cond.tech = Object.keys(DATA.techs)[0];
   if (fields.includes("tool")) cond.tool = Object.keys(DATA.tools)[0];
+  if (fields.includes("action")) cond.action = Object.keys(DATA.manual_actions)[0];
+  if (fields.includes("species")) cond.species = Object.keys(DATA.species || {})[0];
+  if (fields.includes("upgrade")) cond.upgrade = (DATA.buildings[cond.building]?.upgrades || [])[0]?.id;
   return cond;
 }
 
@@ -5517,7 +6289,15 @@ function renderConditions(container, conditions) {
     }
     if (info.fields.includes("building")) {
       fieldsRow.appendChild(el("label", { text: "Постройка" }));
-      fieldsRow.appendChild(requiredBuildingSelect(cond.building, v => { cond.building = v; }));
+      fieldsRow.appendChild(requiredBuildingSelect(cond.building, v => {
+        cond.building = v;
+        if (info.fields.includes("upgrade")) {
+          // Смена постройки меняет доступный набор upgrade.id - старый выбор
+          // из другой постройки больше не валиден, перерисовываем строку целиком.
+          cond.upgrade = (DATA.buildings[v]?.upgrades || [])[0]?.id;
+          renderConditions(container, conditions);
+        }
+      }));
     }
     if (info.fields.includes("tech")) {
       fieldsRow.appendChild(el("label", { text: "Технология" }));
@@ -5526,6 +6306,18 @@ function renderConditions(container, conditions) {
     if (info.fields.includes("tool")) {
       fieldsRow.appendChild(el("label", { text: "Инструмент" }));
       fieldsRow.appendChild(toolSelect(cond.tool, v => { cond.tool = v; }));
+    }
+    if (info.fields.includes("action")) {
+      fieldsRow.appendChild(el("label", { text: "Действие" }));
+      fieldsRow.appendChild(requiredActionSelect(cond.action, v => { cond.action = v; }));
+    }
+    if (info.fields.includes("species")) {
+      fieldsRow.appendChild(el("label", { text: "Вид" }));
+      fieldsRow.appendChild(speciesSelect(cond.species, v => { cond.species = v; }));
+    }
+    if (info.fields.includes("upgrade")) {
+      fieldsRow.appendChild(el("label", { text: "Улучшение" }));
+      fieldsRow.appendChild(requiredBuildingUpgradeSelect(cond.building, cond.upgrade, v => { cond.upgrade = v; }));
     }
     if (info.fields.includes("amount")) {
       fieldsRow.appendChild(el("label", { text: "Не меньше" }));
@@ -5602,7 +6394,29 @@ function renderQuestsKeepScroll() {
   }
 }
 
+// Необязательное per-объектное поле-цвет с чекбоксом "включено" (obj[key]
+// отсутствует = используется дефолт, задавать который тут не нужно - см.
+// eraThemeEditor/CSS по статусу в web_ui.html). Общий виджет для quests.*.bg/border.
+function optionalColorField(label, obj, key, onChange) {
+  const row = el("div", { class: "field-row" });
+  row.appendChild(el("label", { text: label }));
+  const enabled = obj[key] !== undefined && obj[key] !== null;
+  const cb = el("input", { type: "checkbox" });
+  cb.checked = enabled;
+  const colorInput = el("input", { type: "color", value: obj[key] || "#f0a030" });
+  colorInput.style.display = enabled ? "" : "none";
+  cb.addEventListener("change", () => {
+    if (cb.checked) { obj[key] = colorInput.value; colorInput.style.display = ""; }
+    else { delete obj[key]; colorInput.style.display = "none"; }
+    onChange();
+  });
+  colorInput.addEventListener("input", () => { obj[key] = colorInput.value; onChange(); });
+  row.append(cb, colorInput);
+  return row;
+}
+
 function renderQuestListView(root) {
+  ensureErasForQuests();
   root.appendChild(el("p", { class: "hint", text:
     "Условия внутри одного квеста нужно выполнить ВСЕ сразу (через И). Квест выполняется один раз и не теряется; "
     + "награда - ВСЕГДА лутбокс (кейс с лутом ниже), который игрок открывает сам отдельным кликом в игре (анимация "
@@ -5650,13 +6464,25 @@ function renderQuestListView(root) {
 
     const eraRow = el("div", { class: "field-row" });
     eraRow.appendChild(el("label", { text: "Эра (колонка графа)" }));
-    const eraInput = el("input", { type: "number", min: "1", value: q.era || 1, style: "width:70px" });
-    eraInput.addEventListener("change", () => {
-      q.era = Math.max(1, Number(eraInput.value) || 1);
-      eraInput.value = q.era;
+    const eraSelect = el("select");
+    sortedEraIds().forEach(eraId => {
+      const opt = el("option", { value: String(eraId), text: `#${eraId} ${DATA.eras[String(eraId)].name}` });
+      if (eraId === (q.era || 1)) opt.selected = true;
+      eraSelect.appendChild(opt);
     });
-    eraRow.appendChild(eraInput);
+    eraSelect.addEventListener("change", () => { q.era = Number(eraSelect.value); });
+    eraRow.appendChild(eraSelect);
+    eraRow.appendChild(el("span", { class: "hint", text: "новую эру заведи в блоке «Эры» на вкладке «Граф»" }));
     card.appendChild(eraRow);
+
+    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Свой значок (центр узла на графе, виден при ЛЮБОМ статусе, включая заблокированный)" })]));
+    card.appendChild(el("div", { class: "field-row" }, [
+      iconEditButton(q.name || qid, q, defaultQuestIcon(), () => renderQuestsKeepScroll()),
+    ]));
+
+    card.appendChild(optionalColorField("Свой фон узла на графе", q, "bg", () => renderQuestsKeepScroll()));
+    card.appendChild(optionalColorField("Своя рамка узла на графе", q, "border", () => renderQuestsKeepScroll()));
+    card.appendChild(optionalColorField("Свой цвет текста подсказки при наведении", q, "tooltip_color", () => renderQuestsKeepScroll()));
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Требует квестов" })]));
     const reqBox = el("div", { class: "req-list" });
@@ -5699,7 +6525,18 @@ function renderQuestListView(root) {
 // задевало состояние другого (переключение вкладок посреди drag - редкий, но
 // дешёво избегаемый край).
 
-const QUEST_NODE_W = 170, QUEST_NODE_H = 54, QUEST_COL_GAP = 90, QUEST_ROW_GAP = 22, QUEST_PAD = 24;
+// 64x64 - РОВНО тот же размер, что .quest-node в игре (tools/web_ui.html) -
+// узел графа тут больше не текстовая карточка, а 1:1 превью финального вида
+// (см. renderQuestGraphView ниже). ROW_GAP чуть больше, чем у остальных
+// графов редактора - под подпись-id, которая торчит ПОД квадратом.
+const QUEST_NODE_W = 64, QUEST_NODE_H = 64, QUEST_COL_GAP = 60, QUEST_ROW_GAP = 30, QUEST_PAD = 24;
+// Дефолтный цвет текста подсказки без q.tooltip_color - держать в паре с
+// QUEST_DEFAULT_TOOLTIP_COLOR в tools/web_ui.html.
+const QUEST_DEFAULT_TOOLTIP_COLOR = "#dbe7ec";
+// Квадратный узел квеста тянется за любую грань (в отличие от узла тех-дерева -
+// там только правая) - квесты не обязаны течь строго слева направо, см.
+// renderQuestGraphView/questEdgeAnchor.
+const QUEST_HANDLE_SIDES = ["top", "right", "bottom", "left"];
 
 let selectedQuestNode = null;
 let questConnectDragState = null;
@@ -5711,6 +6548,130 @@ let questGraphEra = null;
 
 function questEraOf(id) {
   return DATA.quests[id]?.era || 1;
+}
+
+// Оформление эр квестбука (content.json: eras[eraId] -> {name, color}) - хранит
+// имя и главный цвет каждой эры отдельно от самого номера era у квеста
+// (quests.*.era остаётся числом-ключом графа/сортировки, как раньше - см.
+// "Критичные инварианты" в CLAUDE.md про переиспользование позиции как id).
+// ensureEra идемпотентно заводит запись с дефолтным именем/цветом для любого
+// era, у которого её ещё нет (тот же приём, что _ensure_farm_instances в
+// engine.py) - вызывается при каждом обращении к эре в редакторе, поэтому у
+// любого номера, реально использованного квестом, всегда есть что редактировать.
+function ensureEra(eraId) {
+  if (!DATA.eras) DATA.eras = {};
+  const key = String(eraId);
+  if (!DATA.eras[key]) {
+    const palette = tierBandColorEditor(eraId);
+    DATA.eras[key] = { name: `Эра ${eraId}`, color: palette.text };
+  }
+  return DATA.eras[key];
+}
+
+function ensureErasForQuests() {
+  const usedEras = [...new Set(Object.values(DATA.quests).map(q => q.era || 1))];
+  usedEras.forEach(ensureEra);
+}
+
+function sortedEraIds() {
+  ensureErasForQuests();
+  return Object.keys(DATA.eras).map(Number).sort((a, b) => a - b);
+}
+
+function hexToRgbaEditor(hex, alpha) {
+  const m = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex || "");
+  if (!m) return hex;
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Тема эры для отрисовки (вкладка/фон графа) - буквальная копия eraTheme из
+// tools/web_ui.html, держать в паре (два независимых HTML-файла, общего JS-
+// модуля между ними нет - см. CLAUDE.md).
+function eraThemeEditor(eraId) {
+  const info = ensureEra(eraId);
+  return { bg: hexToRgbaEditor(info.color, 0.10), border: hexToRgbaEditor(info.color, 0.35), text: info.color, name: info.name };
+}
+
+// Следующий свободный номер era - максимум среди уже заведённых (и в eras, и у
+// квестов, на случай расхождения) + 1, чтобы "Добавить эру" никогда не
+// перезаписала уже занятый номер.
+function nextFreeEraId() {
+  const used = [
+    ...Object.keys(DATA.eras || {}).map(Number),
+    ...Object.values(DATA.quests || {}).map(q => q.era || 1),
+  ];
+  return (used.length ? Math.max(...used) : 0) + 1;
+}
+
+// Число квестов, использующих эту эру - определяет, можно ли её удалить
+// (удаление эры с квестами оставило бы их era висеть без оформления - не
+// запрещено валидатором, но осмысленнее не пускать это из UI молча).
+function eraUsageCount(eraId) {
+  return Object.values(DATA.quests || {}).filter(q => (q.era || 1) === eraId).length;
+}
+
+// Обмен местами двух эр (реордер вкладок) - номер era квеста ХРАНИТ позицию
+// (тот же принцип, что тир инструмента/апгрейда, см. CLAUDE.md), поэтому
+// "передвинуть эру раньше" означает поменять местами её номер с соседним:
+// перевесить оформление eras[a]/eras[b] И перевести era всех квестов обеих эр.
+function swapEras(idA, idB) {
+  const a = String(idA), b = String(idB);
+  const tmp = DATA.eras[a];
+  DATA.eras[a] = DATA.eras[b];
+  DATA.eras[b] = tmp;
+  Object.values(DATA.quests).forEach(q => {
+    if (q.era === idA) q.era = idB;
+    else if (q.era === idB) q.era = idA;
+  });
+}
+
+function renderEraManager() {
+  ensureErasForQuests();
+  const box = el("div", { class: "card era-manager" });
+  box.appendChild(el("div", { class: "card-head" }, [el("strong", { text: "Эры" })]));
+  box.appendChild(el("p", { class: "hint", text:
+    "Название и главный цвет вкладки/фона графа для каждой эры. Удалить можно только эру, которой не пользуется ни один квест - "
+    + "перенеси их в другую эру на вкладке «Список» или в графе." }));
+
+  const eraIds = sortedEraIds();
+  eraIds.forEach((eraId, i) => {
+    const info = DATA.eras[String(eraId)];
+    const row = el("div", { class: "field-row era-manager-row" });
+    row.appendChild(el("span", { class: "hint", text: `#${eraId}` }));
+
+    const nameInput = el("input", { type: "text", value: info.name, style: "flex:1" });
+    nameInput.addEventListener("change", () => { info.name = nameInput.value || `Эра ${eraId}`; renderQuests(); });
+    row.appendChild(nameInput);
+
+    const colorInput = el("input", { type: "color", value: info.color });
+    colorInput.addEventListener("input", () => { info.color = colorInput.value; renderQuestsKeepScroll(); });
+    row.appendChild(colorInput);
+
+    const upBtn = el("button", { class: "small", text: "↑", disabled: i === 0 ? "true" : null });
+    upBtn.addEventListener("click", () => { swapEras(eraId, eraIds[i - 1]); renderQuests(); });
+    row.appendChild(upBtn);
+    const downBtn = el("button", { class: "small", text: "↓", disabled: i === eraIds.length - 1 ? "true" : null });
+    downBtn.addEventListener("click", () => { swapEras(eraId, eraIds[i + 1]); renderQuests(); });
+    row.appendChild(downBtn);
+
+    const usage = eraUsageCount(eraId);
+    const rmBtn = el("button", { class: "small danger", text: "Удалить", disabled: usage > 0 ? "true" : null,
+      title: usage > 0 ? `Эрой пользуются ${usage} квест(ов) - сначала перенеси их` : "" });
+    rmBtn.addEventListener("click", () => { delete DATA.eras[String(eraId)]; renderQuests(); });
+    row.appendChild(rmBtn);
+
+    box.appendChild(row);
+  });
+
+  const addBtn = el("button", { text: "+ Добавить эру", onclick: () => {
+    const id = nextFreeEraId();
+    ensureEra(id);
+    renderQuests();
+  }});
+  box.appendChild(addBtn);
+
+  return box;
 }
 
 // Локальная глубина зависимостей СРЕДИ id из `ids` (одна эра) - requires на
@@ -5814,15 +6775,29 @@ function renderQuestGraphView(root) {
     renderQuests();
   }});
   addForm.appendChild(resetBtn);
+  // В отличие от техов (всегда линейно слева направо), квесты можно расставить
+  // как угодно (например "плюсом") - авто-раскладка по столбцам тогда покрывает
+  // только часть общей рамки графа, и дефолтный скролл в (0,0) может показать
+  // пустой угол. centerQuestGraphView (вызывается ниже при каждом рендере этой
+  // вкладки) уже центрирует вид по факту содержимого - кнопка нужна, только
+  // чтобы вернуться к центру вручную после того, как игрок сам поскроллил/
+  // попанорамил в сторону.
+  const centerBtn = el("button", { text: "Центрировать", onclick: () => centerQuestGraphView() });
+  addForm.appendChild(centerBtn);
   const toolbar = el("div", { class: "tab-toolbar" }, [addForm]);
   root.appendChild(toolbar);
 
+  root.appendChild(renderEraManager());
+
   root.appendChild(el("p", { class: "hint", text:
     "Перетаскивай узел за тело карточки, чтобы разместить его где угодно в графе - позиция запоминается. " +
-    "Тяни за оранжевый кружок справа от узла к другому узлу ЭТОЙ ЖЕ эры - появится зависимость (узел-источник " +
-    "станет требуемым квестом для узла-цели). Клик по линии удаляет связь. Клик по узлу (без перетаскивания) " +
-    "подсвечивает его связи. Двойной клик открывает карточку в списке для полного редактирования (название, " +
-    "условия, награда, а также requires НА ДРУГУЮ ЭРУ - там список не ограничен текущей вкладкой)." }));
+    "Тяни за один из четырёх оранжевых кружков по граням узла к другому узлу ЭТОЙ ЖЕ эры - появится " +
+    "зависимость (узел-источник станет требуемым квестом для узла-цели); в отличие от техов, квесты не обязаны " +
+    "выстраиваться слева направо, поэтому грань для связи можно выбрать любую - линия сама подбирает, с какой " +
+    "стороны каждого узла ей удобнее выходить/входить, в зависимости от их взаимного расположения. Клик по линии " +
+    "удаляет связь. Клик по узлу (без перетаскивания) подсвечивает его связи. Двойной клик открывает карточку в " +
+    "списке для полного редактирования (название, условия, награда, оформление, а также requires НА ДРУГУЮ ЭРУ - " +
+    "там список не ограничен текущей вкладкой)." }));
 
   if (!Object.keys(DATA.quests).length) {
     root.appendChild(el("p", { class: "hint", text: "Квестов пока нет - добавь их кнопкой выше." }));
@@ -5831,7 +6806,9 @@ function renderQuestGraphView(root) {
 
   const tabs = el("div", { class: "view-toggle era-toggle" });
   eras.forEach(era => {
-    const btn = el("button", { text: `Эра ${era}`, class: era === questGraphEra ? "active" : "" });
+    const theme = eraThemeEditor(era);
+    const btn = el("button", { text: theme.name, class: era === questGraphEra ? "active" : "" });
+    btn.style.setProperty("--era-accent", theme.text);
     btn.addEventListener("click", () => { questGraphEra = era; renderQuests(); });
     tabs.appendChild(btn);
   });
@@ -5844,12 +6821,12 @@ function renderQuestGraphView(root) {
     return;
   }
 
-  const scroll = el("div", { class: "graph-scroll" });
+  const scroll = el("div", { class: "graph-scroll graph-scroll-tab" });
   const graph = el("div", { class: "tech-graph", id: "questGraph" });
   graph.style.width = width + "px";
   graph.style.height = height + "px";
-  const palette = tierBandColorEditor(questGraphEra);
-  graph.style.background = palette.bg;
+  const theme = eraThemeEditor(questGraphEra);
+  graph.style.background = theme.bg;
 
   const svg = svgEl("svg", { class: "tech-graph-svg", width, height });
   const defs = svgEl("defs");
@@ -5866,9 +6843,8 @@ function renderQuestGraphView(root) {
     (q.requires || []).forEach(reqId => {
       const p1 = positions[reqId], p2 = positions[qid];
       if (!p1 || !p2) return; // reqId из другой эры - на этой вкладке не рисуется
-      const x1 = p1.x + p1.w, y1 = p1.y + p1.h / 2;
-      const x2 = p2.x, y2 = p2.y + p2.h / 2;
-      const d = edgePathD(x1, y1, x2, y2);
+      const { x1, y1, x2, y2 } = questEdgeAnchor(p1, p2);
+      const d = questEdgePathD(x1, y1, x2, y2);
 
       const visible = svgEl("path", { d, class: "tech-edge" });
       visible.setAttribute("marker-end", "url(#arrowhead-quest)");
@@ -5892,26 +6868,47 @@ function renderQuestGraphView(root) {
   ids.forEach(qid => {
     const q = DATA.quests[qid];
     const pos = positions[qid];
-    const node = el("div", { class: "tech-node", id: `questnode-${qid}` });
+    const node = el("div", { class: "tech-node quest-node-square", id: `questnode-${qid}` });
     node.dataset.questId = qid;
     node.style.left = pos.x + "px";
     node.style.top = pos.y + "px";
     node.style.width = pos.w + "px";
     node.style.height = pos.h + "px";
-    node.appendChild(el("div", { class: "tech-node-name", text: q.name }));
-    node.appendChild(el("div", { class: "tech-node-id", text: qid }));
+    // 1:1 превью игрового узла (web_ui.html:buildQuestNode) - большая пиксель-
+    // иконка (q.icon, дефолт defaultQuestIcon() - та же {grid,palette} форма,
+    // что у ресурсов/построек/мобов, рисуется через pixelIcon) виден при
+    // ЛЮБОМ статусе, включая locked, поэтому показываем его тут БЕЗУСЛОВНО
+    // (не только если q.icon задан). Подсказка с именем - та же самая, что
+    // всплывает в игре при наведении, тем же шрифтом/цветом - включая
+    // q.tooltip_color, если задан (та же per-квестовая настройка, что
+    // icon/bg/border, не общая на все квесты сразу).
+    const iconDef = q.icon || defaultQuestIcon();
+    const iconWrap = el("div", { class: "quest-node-square-icon" });
+    iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 34));
+    node.appendChild(iconWrap);
+    const tip = el("div", { class: "quest-node-tip", text: q.name });
+    tip.style.color = q.tooltip_color || QUEST_DEFAULT_TOOLTIP_COLOR;
+    node.appendChild(tip);
+    node.appendChild(el("div", { class: "quest-node-square-caption", text: qid }));
+    if (q.bg) node.style.background = q.bg;
+    if (q.border) node.style.borderColor = q.border;
 
-    const handle = el("div", { class: "tech-node-handle" });
-    handle.addEventListener("mousedown", (e) => startQuestConnectDrag(qid, e));
-    node.appendChild(handle);
+    // Квадратный узел квеста тянется за любую из четырёх граней (в отличие от
+    // узла тех-дерева - там только правая, см. handle выше в renderTechGraphView) -
+    // квесты не обязаны течь строго слева направо.
+    QUEST_HANDLE_SIDES.forEach(side => {
+      const handle = el("div", { class: `tech-node-handle handle-${side}` });
+      handle.addEventListener("mousedown", (e) => startQuestConnectDrag(qid, side, e));
+      node.appendChild(handle);
+    });
 
     // Обычный клик (без движения мыши) выделяет узел; клик с движением - перетаскивание.
     node.addEventListener("mousedown", (e) => {
-      if (e.target === handle || e.button !== 0) return;
+      if (e.target.closest(".tech-node-handle") || e.button !== 0) return;
       startQuestNodeDrag(qid, e);
     });
     node.addEventListener("dblclick", (e) => {
-      if (e.target === handle) return;
+      if (e.target.closest(".tech-node-handle")) return;
       jumpToQuestCard(qid);
     });
 
@@ -5920,7 +6917,42 @@ function renderQuestGraphView(root) {
 
   scroll.appendChild(graph);
   root.appendChild(scroll);
+  enableGraphZoomEditor(scroll, graph, questGraphZoom);
   applyQuestSelectionHighlight();
+  // Раскладка по столбцам покрывает не всю рамку графа, если квесты расставлены
+  // вручную не по прямой (см. кнопку "Центрировать" выше) - без этого дефолтный
+  // скролл (0,0) может показать пустой угол вместо содержимого. Синхронно (не
+  // requestAnimationFrame) - иначе перебивало бы восстановление позиции в
+  // renderQuestsKeepScroll (та тоже синхронная, выполняется СРАЗУ после
+  // renderQuests(), см. её код), из-за которого любой клик по ребру/перетаскивание
+  // узла откидывали бы вид обратно к центру вместо сохранения текущего скролла.
+  centerQuestGraphView();
+}
+
+// Центрирует .graph-scroll на фактической рамке уже отрисованных узлов
+// (а не на позициях из DATA - читает live DOM, чтобы работать что для
+// авто-раскладки, что для узлов с ручным pos, одинаково). Вызывается и
+// автоматически при каждом рендере вкладки "Граф" (renderQuestsKeepScroll
+// сразу после неё синхронно восстанавливает прежний скролл, если он был -
+// см. комментарий выше), и вручную кнопкой "Центрировать".
+function centerQuestGraphView() {
+  const scrollEl = document.querySelector(".graph-scroll");
+  const graph = document.getElementById("questGraph");
+  if (!scrollEl || !graph) return;
+  const nodeEls = graph.querySelectorAll(".tech-node.quest-node-square");
+  if (!nodeEls.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodeEls.forEach(n => {
+    const x = parseFloat(n.style.left) || 0, y = parseFloat(n.style.top) || 0;
+    const w = n.offsetWidth || QUEST_NODE_W, h = n.offsetHeight || QUEST_NODE_H;
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+  });
+  // scrollLeft/scrollTop живут в отмасштабированном (экранном) пространстве -
+  // центр рамки, посчитанный в немасштабированных x/y, нужно домножить на zoom.
+  const zoom = questGraphZoom.value;
+  scrollEl.scrollLeft = Math.max(0, ((minX + maxX) / 2) * zoom - scrollEl.clientWidth / 2);
+  scrollEl.scrollTop = Math.max(0, ((minY + maxY) / 2) * zoom - scrollEl.clientHeight / 2);
 }
 
 function applyQuestSelectionHighlight() {
@@ -5959,28 +6991,41 @@ function applyQuestSelectionHighlight() {
   });
 }
 
-function startQuestConnectDrag(fromId, evt) {
+// Точка на конкретной грани узла (в координатах viewport, как getBoundingClientRect)
+// - какую грань тянуть, решает игрок (см. QUEST_HANDLE_SIDES), в отличие от
+// questEdgeAnchor ниже, которая для УЖЕ построенных рёбер выбирает грань сама.
+function questHandlePoint(rect, side) {
+  if (side === "top") return [rect.left + rect.width / 2, rect.top];
+  if (side === "bottom") return [rect.left + rect.width / 2, rect.bottom];
+  if (side === "left") return [rect.left, rect.top + rect.height / 2];
+  return [rect.right, rect.top + rect.height / 2]; // right (дефолт)
+}
+
+function startQuestConnectDrag(fromId, side, evt) {
   evt.preventDefault();
   evt.stopPropagation();
   const graph = document.getElementById("questGraph");
   const svg = graph.querySelector(".tech-graph-svg");
   const line = svgEl("line", { class: "tech-edge-drag" });
   svg.appendChild(line);
-  questConnectDragState = { fromId, line, graph };
+  questConnectDragState = { fromId, side, line, graph, zoom: questGraphZoom.value };
   updateQuestDragLine(evt);
   document.addEventListener("mousemove", onQuestConnectDragMove);
   document.addEventListener("mouseup", onQuestConnectDragEnd);
 }
 
 function updateQuestDragLine(evt) {
-  const { fromId, line, graph } = questConnectDragState;
+  const { fromId, side, line, graph, zoom } = questConnectDragState;
   const graphRect = graph.getBoundingClientRect();
   const fromNode = document.getElementById(`questnode-${fromId}`);
   const fromRect = fromNode.getBoundingClientRect();
-  line.setAttribute("x1", fromRect.right - graphRect.left);
-  line.setAttribute("y1", fromRect.top + fromRect.height / 2 - graphRect.top);
-  line.setAttribute("x2", evt.clientX - graphRect.left);
-  line.setAttribute("y2", evt.clientY - graphRect.top);
+  const [hx, hy] = questHandlePoint(fromRect, side);
+  // См. комментарий в updateDragLine (тех-граф) - те же экранные координаты,
+  // делим на zoom, чтобы попасть в немасштабированную систему координат svg.
+  line.setAttribute("x1", (hx - graphRect.left) / zoom);
+  line.setAttribute("y1", (hy - graphRect.top) / zoom);
+  line.setAttribute("x2", (evt.clientX - graphRect.left) / zoom);
+  line.setAttribute("y2", (evt.clientY - graphRect.top) / zoom);
 }
 
 function onQuestConnectDragMove(evt) {
@@ -6022,6 +7067,42 @@ function questNodeRect(qid) {
   };
 }
 
+// Для УЖЕ существующего ребра (fromId.requires содержит toId) сама выбирает,
+// с какой из четырёх граней каждого узла ей входить/выходить - по направлению
+// между их центрами (доминирует горизонталь -> боковые грани, вертикаль ->
+// верх/низ), а не по тому, за какую грань его тянул игрок при создании связи
+// (это разово, дальше узлы могут переехать перетаскиванием - см.
+// updateQuestEdgesForNode/onQuestNodeDragMove). Тем самым ЛЮБАЯ грань доступна
+// без ручного выбора при каждой перерисовке - ровно то, что нужно для
+// нелинейных по форме квестовых графов (в отличие от edgePathD/дерева
+// технологий, которые всегда текут строго слева направо).
+function questEdgeAnchor(p1, p2) {
+  const c1x = p1.x + p1.w / 2, c1y = p1.y + p1.h / 2;
+  const c2x = p2.x + p2.w / 2, c2y = p2.y + p2.h / 2;
+  const dx = c2x - c1x, dy = c2y - c1y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { x1: p1.x + p1.w, y1: c1y, x2: p2.x, y2: c2y }
+      : { x1: p1.x, y1: c1y, x2: p2.x + p2.w, y2: c2y };
+  }
+  return dy >= 0
+    ? { x1: c1x, y1: p1.y + p1.h, x2: c2x, y2: p2.y }
+    : { x1: c1x, y1: p1.y, x2: c2x, y2: p2.y + p2.h };
+}
+
+// Как edgePathD, но кривая бульжится в сторону, реально ведущую от x1,y1 к
+// x2,y2 (тот всегда предполагает движение слева направо) - нужно для рёбер,
+// которые questEdgeAnchor мог направить вертикально или даже справа налево.
+function questEdgePathD(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const off = Math.max(30, Math.abs(dx) / 2) * (dx < 0 ? -1 : 1);
+    return `M ${x1} ${y1} C ${x1 + off} ${y1}, ${x2 - off} ${y2}, ${x2} ${y2}`;
+  }
+  const off = Math.max(30, Math.abs(dy) / 2) * (dy < 0 ? -1 : 1);
+  return `M ${x1} ${y1} C ${x1} ${y1 + off}, ${x2} ${y2 - off}, ${x2} ${y2}`;
+}
+
 function updateQuestEdgesForNode(qid) {
   const graph = document.getElementById("questGraph");
   const svg = graph.querySelector(".tech-graph-svg");
@@ -6030,9 +7111,8 @@ function updateQuestEdgesForNode(qid) {
     const r1 = questNodeRect(p.dataset.from);
     const r2 = questNodeRect(p.dataset.to);
     if (!r1 || !r2) return;
-    const x1 = r1.x + r1.w, y1 = r1.y + r1.h / 2;
-    const x2 = r2.x, y2 = r2.y + r2.h / 2;
-    p.setAttribute("d", edgePathD(x1, y1, x2, y2));
+    const { x1, y1, x2, y2 } = questEdgeAnchor(r1, r2);
+    p.setAttribute("d", questEdgePathD(x1, y1, x2, y2));
   });
 }
 
@@ -6053,6 +7133,7 @@ function startQuestNodeDrag(qid, evt) {
     startX: evt.clientX, startY: evt.clientY,
     startLeft: parseFloat(nodeEl.style.left) || 0,
     startTop: parseFloat(nodeEl.style.top) || 0,
+    zoom: questGraphZoom.value,
     moved: false,
   };
   document.addEventListener("mousemove", onQuestNodeDragMove);
@@ -6061,8 +7142,8 @@ function startQuestNodeDrag(qid, evt) {
 
 function onQuestNodeDragMove(evt) {
   if (!questNodeDragState) return;
-  const dx = evt.clientX - questNodeDragState.startX;
-  const dy = evt.clientY - questNodeDragState.startY;
+  const dx = (evt.clientX - questNodeDragState.startX) / questNodeDragState.zoom;
+  const dy = (evt.clientY - questNodeDragState.startY) / questNodeDragState.zoom;
   if (!questNodeDragState.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
   questNodeDragState.moved = true;
   const x = Math.max(0, questNodeDragState.startLeft + dx);
@@ -6271,6 +7352,31 @@ function renderSettings() {
   geneticsCard.appendChild(synthesisCostBox);
 
   root.appendChild(geneticsCard);
+
+  if (!DATA.combat) DATA.combat = {};
+
+  const combatCard = el("div", { class: "card" });
+  combatCard.appendChild(el("div", { class: "card-head" }, [el("strong", { text: "Бой" })]));
+  combatCard.appendChild(el("p", { class: "hint", text:
+    "Глобальные настройки HP игрока в схватках (охота, см. game/engine.py:player_max_hp/current_player_hp/"
+    + "is_wounded) - урон по игроку задаётся отдельно на каждом мобе/боссе (вкладка «Мобы»), урон, "
+    + "который наносит сам игрок брони/оружия - вкладка «Инструменты»." }));
+
+  const combatField = (key, label, hint, opts) => {
+    const row = el("div", { class: "field-row" });
+    row.appendChild(el("label", { text: label }));
+    const input = el("input", { type: "number", min: opts.min ?? "0", step: opts.step ?? "1", value: DATA.combat[key] ?? opts.def });
+    input.addEventListener("change", () => { DATA.combat[key] = Number(input.value) || 0; });
+    row.appendChild(input);
+    if (hint) row.appendChild(el("span", { class: "hint", text: hint }));
+    combatCard.appendChild(row);
+  };
+  combatField("player_base_hp", "Базовый максимум HP игрока", "без учёта бонусов боевого навыка и брони", { def: 20 });
+  combatField("hp_regen_per_turn", "Реген HP за ход", "тикает КАЖДЫЙ ход, но ТОЛЬКО вне активной схватки", { def: 3 });
+  combatField("wounded_turns", "Длительность «Ранен» после поражения (ходов)", "выставляется при отступлении на 0 HP - см. attack_encounter", { def: 5 });
+  combatField("wounded_damage_multiplier", "Множитель урона игрока, пока «Ранен»", "число от 0 до 1 - домножает ЛЮБОЙ урон игрока по мобу (обычная атака и приёмы)", { def: 0.5, step: "0.05" });
+
+  root.appendChild(combatCard);
 }
 
 // ---------- вкладки ----------
