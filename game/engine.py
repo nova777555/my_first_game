@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from .content import (
     BREAKDOWN_TYPES, BUILDINGS, COMBAT_MOVES, COMBAT_SETTINGS, ENCHANTMENTS, ENERGY_RECIPES,
     GENETIC_TRAITS, GENETICS_SETTINGS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
-    MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, RESOURCE_FRACTIONAL, RESOURCE_NAMES,
-    RESOURCE_SOUL_KIND, RESOURCE_STORAGE, SKILLS, SOUL_RECIPES, SPECIES, TECHS,
-    TIME, TOOLS,
+    MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, REACTOR_ACCIDENTS, RESOURCE_FRACTIONAL,
+    RESOURCE_NAMES, RESOURCE_REACTOR_CATALYST, RESOURCE_REACTOR_COMPONENT, RESOURCE_SOUL_KIND,
+    RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TIME, TOOLS,
 )
 from .state import HISTORY_MAX_ENTRIES, GameState
 
@@ -362,6 +362,11 @@ class ActionResult:
     # другого действия. Сервер решает исход СРАЗУ (тот же принцип, что prize/_roll_loot_case_prize) -
     # UI анимирует раскрытие трёх кругов до уже готового результата, не подделывая его сам.
     enchant: dict | None = None
+    # Структурные данные результата скрещивания (breed_creatures) - {"mutated",
+    # "parent_a_species_id", "parent_a_name", "parent_b_species_id", "parent_b_name",
+    # "child_species_id", "child_name"} или None у ЛЮБОГО другого действия. Тот же
+    # принцип, что prize/combat/enchant выше.
+    breed: dict | None = None
 
 
 @dataclass
@@ -460,6 +465,51 @@ def _is_farm_building(building_id: str) -> bool:
     return BUILDINGS.get(building_id, {}).get("breeding_slots", 0) > 0
 
 
+def _is_soul_collector_building(building_id: str) -> bool:
+    return bool(BUILDINGS.get(building_id, {}).get("soul_collector"))
+
+
+def _is_reactor_building(building_id: str) -> bool:
+    return bool(BUILDINGS.get(building_id, {}).get("reactor"))
+
+
+def _uses_physical_instances(building_id: str) -> bool:
+    """True для построек, физические копии которых отслеживаются ПО ЭКЗЕМПЛЯРУ
+    (farm_instances/soul_collector_instances/reactor_instances), а не абстрактным
+    счётчиком state.broken[bid] - см. _physical_instances ниже."""
+    return _is_farm_building(building_id) or _is_soul_collector_building(building_id) or _is_reactor_building(building_id)
+
+
+def _physical_instances(state: GameState, building_id: str) -> dict[str, dict]:
+    """Словарь физических экземпляров ИМЕННО этого building_id - farm_instances
+    для ферм, soul_collector_instances для синтезаторов душ, reactor_instances
+    для реакторов, пустой dict для построек без физического отслеживания
+    экземпляров (обычный агрегатный state.broken[bid]). Общая точка, которой
+    пользуются repairable_count/repair_blocked_types/repair/advance_turn, чтобы
+    не дублировать ветвление farm-vs-soul-vs-reactor в каждой из них - сам
+    список экземпляров всё ещё нужно фильтровать по building_id (все три
+    структуры общие на ВСЕ типы построек своего вида, не по одной на
+    building_id)."""
+    if _is_farm_building(building_id):
+        return state.farm_instances
+    if _is_soul_collector_building(building_id):
+        return state.soul_collector_instances
+    if _is_reactor_building(building_id):
+        return state.reactor_instances
+    return {}
+
+
+def _ensure_physical_instances(state: GameState) -> None:
+    """Идемпотентно добирает недостающие физические экземпляры ВСЕХ трёх видов
+    (фермы + синтезаторы душ + реакторы) - тонкая обёртка над
+    _ensure_farm_instances/_ensure_soul_collector_instances/
+    _ensure_reactor_instances, чтобы вызывающему (build/repair/advance_turn и
+    т.п.) не нужно было помнить про все вызовы по отдельности."""
+    _ensure_farm_instances(state)
+    _ensure_soul_collector_instances(state)
+    _ensure_reactor_instances(state)
+
+
 def _ensure_farm_instances(state: GameState) -> None:
     """Синхронизирует state.farm_instances (по одной записи на КАЖДУЮ физическую
     копию постройки-фермы) с агрегатом state.buildings/state.broken, который
@@ -522,6 +572,238 @@ def _ensure_farm_instances(state: GameState) -> None:
                     break
 
 
+def _ensure_soul_collector_instances(state: GameState) -> None:
+    """Зеркало _ensure_farm_instances (см. её докстринг) для построек-синтезаторов
+    душ (BUILDINGS[bid]["soul_collector"]) - синхронизирует
+    state.soul_collector_instances с агрегатом state.buildings/state.broken,
+    добирая недостающие экземпляры (и то же самое одновременно решает и
+    создание новой постройки после build(), и ленивую миграцию старых
+    сохранений).
+
+    Дополнительно (только при миграции, зеркало расселения особей у ферм):
+    души, ещё лежащие в УСТАРЕВШЕМ агрегатном state.soul_slots[building_id]
+    (до перехода на per-instance модель, 2026-09-18), раскладываются
+    round-robin по свободным слотам только что созданных экземпляров ЭТОГО
+    типа - если свободных слотов не хватило на все, остаток остаётся в
+    state.soul_slots[building_id] как есть (заберётся следующим вызовом, как
+    только появится ещё один экземпляр/апгрейд слотов) вместо потери души."""
+    for inst in state.soul_collector_instances.values():
+        inst.setdefault("broken_type", None)
+        inst.setdefault("installed", [])
+    for building_id in BUILDINGS:
+        if not _is_soul_collector_building(building_id):
+            continue
+        target_count = state.buildings.get(building_id, 0)
+        if target_count <= 0:
+            continue
+        existing_ids = [iid for iid, inst in state.soul_collector_instances.items() if inst["building_id"] == building_id]
+        if len(existing_ids) >= target_count:
+            continue
+        already_broken = sum(1 for iid in existing_ids if state.soul_collector_instances[iid]["broken"])
+        need_broken = max(0, state.broken.get(building_id, 0) - already_broken)
+        upgrades_copy = list(state.building_upgrades.get(building_id, []))
+        new_ids = []
+        for i in range(target_count - len(existing_ids)):
+            instance_id = f"soul_inst_{state.next_soul_instance_id}"
+            state.next_soul_instance_id += 1
+            state.soul_collector_instances[instance_id] = {
+                "building_id": building_id,
+                "broken": i < need_broken,
+                "broken_type": _roll_breakdown_type(building_id) if i < need_broken else None,
+                "upgrades": list(upgrades_copy),
+                "installed": [],
+            }
+            new_ids.append(instance_id)
+
+        legacy = state.soul_slots.get(building_id, [])
+        if legacy and new_ids:
+            remaining = []
+            for soul_id in legacy:
+                placed = False
+                for instance_id in new_ids:
+                    inst = state.soul_collector_instances[instance_id]
+                    if len(inst["installed"]) < soul_collector_instance_capacity(state, instance_id):
+                        inst["installed"].append(soul_id)
+                        placed = True
+                        break
+                if not placed:
+                    remaining.append(soul_id)
+            state.soul_slots[building_id] = remaining
+
+
+def _ensure_reactor_instances(state: GameState) -> None:
+    """Зеркало _ensure_soul_collector_instances (см. её докстринг) для построек-
+    реакторов (BUILDINGS[bid]["reactor"]) - синхронизирует state.reactor_instances
+    с агрегатом state.buildings/state.broken. Без миграционной ветки (поле новое,
+    мигрировать неоткуда) - но КАЖДЫЙ новый экземпляр сразу засеивает пустую
+    решётку и зоны (_ensure_reactor_grid/_ensure_reactor_zones), а не оставляет
+    их до первого обращения."""
+    for inst in state.reactor_instances.values():
+        inst.setdefault("broken_type", None)
+        inst.setdefault("grid", [])
+        inst.setdefault("zones", [])
+    for building_id in BUILDINGS:
+        if not _is_reactor_building(building_id):
+            continue
+        target_count = state.buildings.get(building_id, 0)
+        if target_count <= 0:
+            continue
+        existing_ids = [iid for iid, inst in state.reactor_instances.items() if inst["building_id"] == building_id]
+        if len(existing_ids) >= target_count:
+            continue
+        already_broken = sum(1 for iid in existing_ids if state.reactor_instances[iid]["broken"])
+        need_broken = max(0, state.broken.get(building_id, 0) - already_broken)
+        upgrades_copy = list(state.building_upgrades.get(building_id, []))
+        new_ids = []
+        for i in range(target_count - len(existing_ids)):
+            instance_id = f"reactor_inst_{state.next_reactor_instance_id}"
+            state.next_reactor_instance_id += 1
+            state.reactor_instances[instance_id] = {
+                "building_id": building_id,
+                "broken": i < need_broken,
+                "broken_type": _roll_breakdown_type(building_id) if i < need_broken else None,
+                "upgrades": list(upgrades_copy),
+                "grid": [],
+                "zones": [],
+            }
+            new_ids.append(instance_id)
+        for instance_id in new_ids:
+            _ensure_reactor_grid(state, instance_id)
+            _ensure_reactor_zones(state, instance_id)
+
+
+def _reactor_instance_upgrade_defs(instance: dict, upgrade_type: str) -> list[dict]:
+    """Определения (из content, не просто id) апгрейдов заданного type,
+    КУПЛЕННЫХ у ЭТОГО экземпляра реактора - общий хелпер для
+    reactor_grid_dims/reactor_zone_count ниже, оба читают чужой (не
+    мультипликативный) content-эффект по типу апгрейда, а не через
+    _apply_building_upgrades (та функция знает только про scale/*_efficiency)."""
+    defs_by_id = {u["id"]: u for u in building_upgrade_defs(instance["building_id"])}
+    return [defs_by_id[uid] for uid in instance["upgrades"] if defs_by_id.get(uid, {}).get("type") == upgrade_type]
+
+
+def reactor_grid_dims(state: GameState, instance_id: str) -> tuple[int, int]:
+    """(ширина, высота) решётки экземпляра - база из buildings.*.reactor +
+    АБСОЛЮТНАЯ прогрессия купленных апгрейдов типа reactor_grid_size (среди
+    купленных действует тот, что даёт БОЛЬШУЮ площадь - тот же принцип
+    "сильнейшее побеждает", что у scale, не сумма)."""
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return (0, 0)
+    config = BUILDINGS.get(instance["building_id"], {}).get("reactor", {})
+    width, height = config.get("grid_width", 1), config.get("grid_height", 1)
+    for upgrade in _reactor_instance_upgrade_defs(instance, "reactor_grid_size"):
+        value = upgrade.get("value") or {}
+        w, h = value.get("width"), value.get("height")
+        if isinstance(w, int) and isinstance(h, int) and w * h > width * height:
+            width, height = w, h
+    return (width, height)
+
+
+def reactor_zone_count(state: GameState, instance_id: str) -> int:
+    """Число зон экземпляра - база zones_default из buildings.*.reactor, если
+    куплен апгрейд типа reactor_zoning. ВЗАИМОИСКЛЮЧАЮЩИЙ выбор (см.
+    purchase_reactor_instance_upgrade - покупка нового уровня стирает у
+    экземпляра предыдущий купленный reactor_zoning того же типа, зеркало
+    environment_emulation), поэтому среди купленных фактически не больше
+    одного - max() тут просто защита от гипотетического рассинхрона, не
+    основная логика."""
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return 1
+    config = BUILDINGS.get(instance["building_id"], {}).get("reactor", {})
+    count = config.get("zones_default", 1)
+    for upgrade in _reactor_instance_upgrade_defs(instance, "reactor_zoning"):
+        value = upgrade.get("value")
+        if isinstance(value, int) and value > count:
+            count = value
+    return count
+
+
+def reactor_telemetry_available(state: GameState, instance_id: str) -> bool:
+    """Куплен ли у ЭТОГО экземпляра апгрейд типа reactor_telemetry - булево
+    наличие (само число/value не используется по величине), тот же приём, что
+    breakdown_immunity/_instance_has_upgrade_type (та функция уже общая на
+    любой instance-словарь, не завязана на farm_instances конкретно)."""
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return False
+    return _instance_has_upgrade_type(instance["building_id"], instance, "reactor_telemetry")
+
+
+def _reactor_zone_layout(width: int, height: int, zone_count: int) -> list[int]:
+    """Индекс зоны (0..zone_count-1) для КАЖДОЙ ячейки решётки, row-major -
+    чистая функция от (width, height, zone_count), НИГДЕ не хранится (см.
+    GameState.reactor_instances) - топология всегда пересчитывается заново, а
+    не кэшируется в state, тот же принцип, что effective_building_stats.
+    Зоны - смежные горизонтальные полосы строк, максимально ровные по высоте
+    (если высота не делится нацело на zone_count, лишние строки достаются
+    НАЧАЛЬНЫМ зонам - естественный результат целочисленного floor-division по
+    номеру строки, не отдельная ветка кода); zone_count зажимается в
+    [1, height], чтобы не завести зон без единой строки."""
+    if width <= 0 or height <= 0:
+        return []
+    zone_count = max(1, min(zone_count, height))
+    cells: list[int] = []
+    for r in range(height):
+        zone = min(zone_count - 1, r * zone_count // height)
+        cells.extend([zone] * width)
+    return cells
+
+
+def _reactor_zone_heat_cap(state: GameState, instance_id: str, zone_index: int, layout: list[int] | None = None) -> float:
+    """Порог тепла ОДНОЙ зоны, выше которого начинается деградация выхода
+    (soft_threshold_pct её доля) и на 100% которого - авария (см.
+    _process_reactors) - число ячеек ЭТОЙ зоны * buildings.*.reactor.
+    heat_cap_per_cell. layout можно передать готовым (уже посчитан вызывающим,
+    например reactor_instances_view для всех зон разом), иначе считается тут же."""
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return 0.0
+    config = BUILDINGS.get(instance["building_id"], {}).get("reactor", {})
+    if layout is None:
+        width, height = reactor_grid_dims(state, instance_id)
+        layout = _reactor_zone_layout(width, height, len(instance["zones"]))
+    cell_count = sum(1 for z in layout if z == zone_index)
+    return cell_count * config.get("heat_cap_per_cell", 0.0)
+
+
+def _ensure_reactor_grid(state: GameState, instance_id: str) -> None:
+    """Идемпотентно доращивает instance["grid"] до текущего reactor_grid_dims
+    (на свежесозданном экземпляре или после покупки reactor_grid_size) - НИКОГДА
+    не обрезает и не переставляет уже заполненные ячейки, новые слоты
+    добавляются В КОНЕЦ (row-major append-only) - логически более широкая
+    решётка не сдвигает индексы старых ячеек."""
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return
+    width, height = reactor_grid_dims(state, instance_id)
+    target = width * height
+    grid = instance.setdefault("grid", [])
+    while len(grid) < target:
+        grid.append(None)
+
+
+def _ensure_reactor_zones(state: GameState, instance_id: str) -> None:
+    """Идемпотентно синхронизирует instance["zones"] с текущим
+    reactor_zone_count - В ОТЛИЧИЕ от _ensure_reactor_grid (append-only), смена
+    ЧИСЛА зон полностью ПЕРЕСОЗДАЁТ список (топология "ячейка -> зона" меняется
+    целиком при смене zone_count - см. _reactor_zone_layout, частичный перенос
+    тепла между старой и новой разбивкой был бы неоднозначен), поэтому
+    накопленное тепло/рычаги всех зон осознанно сбрасываются при любом
+    изменении числа зон, не только при росте."""
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return
+    target = reactor_zone_count(state, instance_id)
+    if len(instance.get("zones", [])) == target:
+        return
+    instance["zones"] = [
+        {"heat": 0.0, "control_rod_depth": 0, "coolant_flow": 100, "prev_coolant_flow": 100}
+        for _ in range(target)
+    ]
+
+
 def farm_instance_slot_capacity(state: GameState, instance_id: str) -> int:
     """Слотов у ОДНОГО экземпляра фермы - breeding_slots его типа (0, если
     экземпляр сломан - сломанная копия не может держать особей) + АБСОЛЮТНАЯ
@@ -539,6 +821,25 @@ def farm_instance_slot_capacity(state: GameState, instance_id: str) -> int:
 
 def farm_instance_slots_used(state: GameState, instance_id: str) -> int:
     return sum(1 for c in state.creatures.values() if c.get("farm_instance_id") == instance_id)
+
+
+def soul_collector_instance_capacity(state: GameState, instance_id: str) -> int:
+    """Слотов у ОДНОГО экземпляра синтезатора душ - зеркало
+    farm_instance_slot_capacity: soul_collector.slots его типа (0, если
+    экземпляр сломан) + АБСОЛЮТНАЯ добавка от сильнейшего купленного НА ЭТОТ
+    ЭКЗЕМПЛЯР апгрейда типа soul_collector_slots (см.
+    _soul_instance_upgrade_multiplier)."""
+    instance = state.soul_collector_instances.get(instance_id)
+    if instance is None or instance["broken"]:
+        return 0
+    base = BUILDINGS[instance["building_id"]].get("soul_collector", {}).get("slots", 0)
+    bonus = _soul_instance_upgrade_multiplier(state, instance_id, "soul_collector_slots", default=0)
+    return int(base + bonus)
+
+
+def soul_collector_instance_slots_used(state: GameState, instance_id: str) -> int:
+    instance = state.soul_collector_instances.get(instance_id)
+    return len(instance["installed"]) if instance is not None else 0
 
 
 # Базовые скорость и число слотов автокрафта БЕЗ единой профильной постройки - без этой
@@ -1925,7 +2226,15 @@ def hit_mine_field(state: GameState, r: int, c: int) -> ActionResult:
     блок - кирка с площадью N x N (pickaxe_area) изнашивается МЕДЛЕННЕЕ в
     пересчёте на блок, чем кирка с площадью 1x1, это и есть часть награды за
     её прокачку (прямое пожелание, 2026-09-16). Сломанная кирка не бьёт вовсе -
-    удар отклоняется ДО того, как что-либо потрачено/сломано."""
+    удар отклоняется ДО того, как что-либо потрачено/сломано.
+
+    Если этот удар доломал ПОСЛЕДНЮЮ небитую клетку поля (все cells["broken"]
+    == True), забой автоматически перекладывается новым (_generate_mine_field,
+    тот же эффект, что ручная new_mine_field) ПРЯМО В ЭТОМ ЖЕ вызове - прямое
+    пожелание, 2026-09-16, "не заставлять игрока самого жать «Обновить шахту»
+    на пустом поле". Клетка, оставшаяся НЕбитой из-за недостаточного тира кирки
+    (any_locked), блокирует автообновление - это и есть "выкопана ПОЛНОСТЬЮ", а
+    не "выкопано всё, что доступно сейчас"."""
     field = _ensure_mine_field(state)
     size = field["size"]
     if not (0 <= r < size and 0 <= c < size):
@@ -1985,13 +2294,32 @@ def hit_mine_field(state: GameState, r: int, c: int) -> ActionResult:
 
     if not gained:
         message = "Тут пока не по зубам этой кирке." if any_locked else "Порода устояла."
-        return ActionResult(True, message)
-    parts = ", ".join(f"+{amount} {RESOURCE_NAMES[rid]}" for rid, amount in gained.items())
-    return ActionResult(True, f"Добыто: {parts}.")
+    else:
+        parts = ", ".join(f"+{amount} {RESOURCE_NAMES[rid]}" for rid, amount in gained.items())
+        message = f"Добыто: {parts}."
+
+    if all(cell["broken"] for cell in field["cells"]):
+        state.active_mine_field = _generate_mine_field(state)
+        message += " Забой полностью пройден - заложен новый."
+    return ActionResult(True, message)
 
 
 def scanner_tier(state: GameState) -> int:
     return tool_tier(state, MINE_FIELD["scanner_tool"])
+
+
+def _scanner_sense_radius(tier: int) -> int | None:
+    """Наибольший разблокированный радиус подсветки руды сквозь туман
+    (mine_field.scanner_radius_tiers - список {tier, radius}). Среди порогов,
+    которым текущий тир щупа уже соответствует, действует САМЫЙ БОЛЬШОЙ
+    radius, а не сумма и не первый по списку - тот же принцип "сильнейший
+    из купленного", что у building upgrades одного типа. None - ни один
+    порог ещё не разблокирован (радиусной подсветки нет вовсе)."""
+    best = None
+    for entry in MINE_FIELD.get("scanner_radius_tiers", []):
+        if tier >= entry["tier"] and (best is None or entry["radius"] > best):
+            best = entry["radius"]
+    return best
 
 
 def mine_field_view(state: GameState) -> dict:
@@ -2000,30 +2328,54 @@ def mine_field_view(state: GameState) -> dict:
     характеристики кирки и справочник всех видов добычи (для модалки-
     справочника руд, независимо от того, что сейчас реально на поле).
 
-    Щуп (mine_field.scanner_tool) - ЧИСТО ИНФОРМАЦИОННЫЙ инструмент, три
-    независимых порога тира на три уровня детализации (сам тир 1, дефолтный
-    для всех, ничего не даёт - см. CLAUDE.md про тир 1 = "не откалиброван"):
+    Щуп (mine_field.scanner_tool) - ЧИСТО ИНФОРМАЦИОННЫЙ инструмент, тир 1
+    (дефолтный для всех) ничего не даёт - см. CLAUDE.md про тир 1 = "не
+    откалиброван". Дальше пороги независимы друг от друга:
       >= scanner_types_tier       - какие виды руды вообще есть на поле (без
                                      повторов, catalog[].present_on_field)
       >= scanner_counts_tier      - сколько именно КЛЕТОК этой руды на поле
                                      (catalog[].field_count) - только руда,
                                      порода (rock_resource) сюда не входит по
                                      прямому пожеланию, 2026-09-16
-      >= scanner_reveal_all_tier  - клетки руды видны ДАЖЕ в тумане
-                                     (cells[].sensed_resource) - подсказка "где
-                                     копать", сама клетка при этом остаётся
+      scanner_radius_tiers        - НЕ одиночный порог, а список {tier,
+                                     radius}: начиная с любого из этих тиров
+                                     руда в РАДИУСЕ radius клеток (Чебышёв, та
+                                     же метрика, что у _reveal_around) от
+                                     любой уже ОТКРЫТОЙ (revealed) клетки
+                                     светится сквозь туман тем же
+                                     sensed_resource, что и у полного
+                                     сканирования ниже - сама клетка руды
+                                     остаётся в тумане, просто уже видна
+                                     "где-то рядом копать" (см.
+                                     _scanner_sense_radius).
+      >= scanner_reveal_all_tier  - клетки руды видны ДАЖЕ в тумане ПОВСЮДУ
+                                     (cells[].sensed_resource, без ограничения
+                                     радиусом - полностью перекрывает
+                                     scanner_radius_tiers, финальный эффект
+                                     щупа), сама клетка при этом остаётся
                                      нетронутой fog-of-war логикой (revealed
                                      всё ещё False, ломать нельзя, пока не
                                      дойдёшь обычным путём)."""
     field = _ensure_mine_field(state)
+    size = field["size"]
     tier = scanner_tier(state)
     reveal_all = tier >= MINE_FIELD["scanner_reveal_all_tier"]
+    sense_radius = None if reveal_all else _scanner_sense_radius(tier)
+    revealed_coords = None
+    if sense_radius is not None:
+        revealed_coords = [divmod(idx, size) for idx, c in enumerate(field["cells"]) if c["revealed"]]
+
     cells_view = []
-    for cell in field["cells"]:
+    for idx, cell in enumerate(field["cells"]):
         if not cell["revealed"]:
             entry: dict = {"revealed": False}
-            if reveal_all and cell["resource"] is not None:
-                entry["sensed_resource"] = cell["resource"]
+            if cell["resource"] is not None:
+                if reveal_all:
+                    entry["sensed_resource"] = cell["resource"]
+                elif sense_radius is not None:
+                    r, c = divmod(idx, size)
+                    if any(max(abs(r - rr), abs(c - cc)) <= sense_radius for rr, cc in revealed_coords):
+                        entry["sensed_resource"] = cell["resource"]
             cells_view.append(entry)
             continue
         entry = {"revealed": True, "broken": cell["broken"]}
@@ -2257,6 +2609,18 @@ def enchanting_table_cost(state: GameState) -> dict[str, int]:
     return dict(config["cost"]) if config else {}
 
 
+def enchanting_table_strip_on_fail(state: GameState) -> bool:
+    """buildings.*.enchanting_table.strip_on_fail - настройка КОНТЕНТА (правит
+    только автор через редактор, см. content_editor.html: openEnchantingTableSettingsModal),
+    НЕ игрок - в отличие от большинства toggle_*, здесь нет соответствующего
+    API-эндпоинта в web_ui.py. True (дефолт, отсутствие ключа) - старое
+    поведение: провал попытки СНИМАЕТ с инструмента все зачарования разом.
+    False смягчает это до "провал просто ничего не даёт". True и когда стола
+    вовсе нет (enchant_tool такому вызову всё равно откажет раньше)."""
+    config = _enchanting_table_config(state)
+    return bool(config.get("strip_on_fail", True)) if config else True
+
+
 def _roll_enchant_circles(pool: list[dict]) -> list[dict]:
     """Три круга - три НЕЗАВИСИМЫХ равновероятных броска по всему барабану
     (enchantment_pool), без корреляции между ними (в отличие от демо-мокапа,
@@ -2274,8 +2638,12 @@ def enchant_tool(state: GameState, tool_id: str) -> ActionResult:
     анимации, а не семя для клиента). Успех (все 3 круга показали ОДИНАКОВЫЙ
     enchant_id И level) применяет его - см. tool_enchant_level/_enchant_effect_value,
     никогда не ПОНИЖАЕТ уже стоящий более сильный уровень того же зачарования.
-    Провал СНИМАЕТ с инструмента ВСЕ его зачарования разом. Не тратит ход - это
-    манипуляция с предметом, как insert_soul/repair_tool."""
+    Провал при buildings.*.enchanting_table.strip_on_fail (дефолт, старое
+    поведение - настройка КОНТЕНТА, правит автор через редактор, не игрок, см.
+    enchanting_table_strip_on_fail) СНИМАЕТ с инструмента ВСЕ его зачарования
+    разом; с выключенным флагом провал просто ничего не даёт - зачарования
+    остаются как были. Не тратит ход - это манипуляция с предметом, как
+    insert_soul/repair_tool."""
     if tool_id not in TOOLS:
         return ActionResult(False, "Неизвестный инструмент.")
     tool_name = TOOLS[tool_id]["name"]
@@ -2308,11 +2676,14 @@ def enchant_tool(state: GameState, tool_id: str) -> ActionResult:
                   "applied": {"enchant_id": enchant_id, "level": new_level}}
     else:
         had_any = bool(state.tool_enchantments.get(tool_id))
-        state.tool_enchantments.pop(tool_id, None)
-        message = (
-            f"Неудача - с «{tool_name}» сняты все зачарования." if had_any
-            else f"Неудача зачарования «{tool_name}»."
-        )
+        if config.get("strip_on_fail", True):
+            state.tool_enchantments.pop(tool_id, None)
+            message = (
+                f"Неудача - с «{tool_name}» сняты все зачарования." if had_any
+                else f"Неудача зачарования «{tool_name}»."
+            )
+        else:
+            message = f"Неудача зачарования «{tool_name}» - зачарования сохранены."
         result = {"tool_id": tool_id, "circles": circles_out, "success": False, "applied": None}
     return ActionResult(True, message, enchant=result)
 
@@ -2798,21 +3169,22 @@ def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResu
 
 
 def soul_collector_capacity(state: GameState, building_id: str) -> int:
-    """Сколько душ можно разом держать в синтезаторе building_id - per-copy slots
-    (buildings.*.soul_collector.slots) * число РАБОТАЮЩИХ копий, плюс АБСОЛЮТНАЯ
-    добавка от сильнейшего купленного апгрейда типа soul_collector_slots (тот же
-    принцип "сильнейшее побеждает", что у energy_converter_max_energy_per_turn -
-    см. _farm_upgrade_multiplier). 0, если постройка не синтезатор душ вовсе,
-    или если ВСЕ копии сломаны - бонус от апгрейда гейтится тем же working_count,
-    что и база, иначе сломанная постройка с уже купленным апгрейдом слотов
-    продолжала бы бесконечно производить ресурсы (см. _process_soul_collectors,
-    которая сама поломку не проверяет и полагается на capacity == 0)."""
-    config = BUILDINGS.get(building_id, {}).get("soul_collector")
-    if not config or working_count(state, building_id) <= 0:
-        return 0
-    base = config.get("slots", 0) * working_count(state, building_id)
-    bonus = _farm_upgrade_multiplier(state, building_id, "soul_collector_slots", default=0)
-    return int(base + bonus)
+    """Суммарно душ можно держать во ВСЕХ экземплярах синтезатора building_id -
+    сумма soul_collector_instance_capacity по каждому физическому экземпляру
+    ЭТОГО типа (см. state.soul_collector_instances/_ensure_soul_collector_instances).
+    До перехода на per-instance слоты (2026-09-18) это было "per-copy slots *
+    число работающих копий + АБСОЛЮТНАЯ добавка сильнейшего апгрейда ТИПА
+    постройки" - теперь апгрейды свои у КАЖДОГО экземпляра (зеркало
+    farm_instance_slot_capacity), так что сумма даёт то же самое агрегатное
+    число, просто честно собранное по экземплярам. Используется только как
+    сводная цифра (например, для внешних сумм) - сама вставка/выемка душ
+    работает через soul_collector_instance_capacity(state, instance_id)."""
+    _ensure_soul_collector_instances(state)
+    return sum(
+        soul_collector_instance_capacity(state, iid)
+        for iid, inst in state.soul_collector_instances.items()
+        if inst["building_id"] == building_id
+    )
 
 
 def soul_kind(resource_id: str) -> str | None:
@@ -2840,34 +3212,327 @@ def souls_bank_view(state: GameState) -> list[dict]:
     ]
 
 
-def insert_soul(state: GameState, building_id: str, soul_id: str) -> ActionResult:
-    config = BUILDINGS.get(building_id, {}).get("soul_collector")
+def insert_soul(state: GameState, instance_id: str, soul_id: str) -> ActionResult:
+    """instance_id - id ФИЗИЧЕСКОГО экземпляра синтезатора (state.soul_collector_instances,
+    как farm_instance_id у house_creature), НЕ id типа постройки - см.
+    CLAUDE.md/state.py:soul_collector_instances."""
+    _ensure_soul_collector_instances(state)
+    instance = state.soul_collector_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого синтезатора нет.")
+    config = BUILDINGS.get(instance["building_id"], {}).get("soul_collector")
     if not config:
         return ActionResult(False, "Это не синтезатор душ.")
     name = RESOURCE_NAMES.get(soul_id, soul_id)
     accepts_kind = config.get("accepts_kind")
     if accepts_kind is None or soul_kind(soul_id) != accepts_kind:
         return ActionResult(False, f"«{name}» не подходит для этого синтезатора.")
-    installed = state.soul_slots.setdefault(building_id, [])
-    if len(installed) >= soul_collector_capacity(state, building_id):
+    if len(instance["installed"]) >= soul_collector_instance_capacity(state, instance_id):
         return ActionResult(False, "Нет свободных слотов.")
     if state.resources.get(soul_id, 0) < 1:
         return ActionResult(False, f"Нет в наличии: «{name}».")
     state.resources[soul_id] -= 1
-    installed.append(soul_id)
+    instance["installed"].append(soul_id)
     return ActionResult(True, f"«{name}» помещена в синтезатор.")
 
 
-def remove_soul(state: GameState, building_id: str, index: int) -> ActionResult:
+def remove_soul(state: GameState, instance_id: str, index: int) -> ActionResult:
     """Возвращает вставленную душу обратно в инвентарь - не тратит ход, как и
-    cancel_energy_job/house_creature. index - позиция в state.soul_slots[building_id]
-    (список, не фиксированные слоты - см. state.py)."""
-    installed = state.soul_slots.get(building_id, [])
+    cancel_energy_job/house_creature. index - позиция в
+    state.soul_collector_instances[instance_id]["installed"] (список, не
+    фиксированные слоты - см. state.py)."""
+    instance = state.soul_collector_instances.get(instance_id)
+    installed = instance["installed"] if instance is not None else []
     if not isinstance(index, int) or not (0 <= index < len(installed)):
         return ActionResult(False, "Такой души тут нет.")
     soul_id = installed.pop(index)
     _add_resource(state.resources, soul_id, 1)
     return ActionResult(True, f"«{RESOURCE_NAMES.get(soul_id, soul_id)}» возвращена в инвентарь.")
+
+
+def reactor_component_role(resource_id: str) -> str | None:
+    """Тег роли компонента реактора (resources.*.reactor_component.role,
+    например 'fuel'/'moderator'/'coolant'/'absorber') - тот же generic-принцип
+    тега, что soul_kind (см. reactor_accepts_role)."""
+    return RESOURCE_REACTOR_COMPONENT.get(resource_id, {}).get("role")
+
+
+def reactor_accepts_role(building_id: str, role: str) -> bool:
+    """Принимает ли РЕШЁТКА этой постройки данную роль (buildings.*.reactor.
+    accepts_roles) - зеркало soul_collector_accepts_kind, только список тегов
+    сразу, не один (реактору обычно нужны сразу все 4 роли)."""
+    return role in BUILDINGS.get(building_id, {}).get("reactor", {}).get("accepts_roles", [])
+
+
+def reactor_component_bank_view(state: GameState) -> list[dict]:
+    """Все ресурсы-компоненты реактора (ключи RESOURCE_REACTOR_COMPONENT) с их
+    ролью и наличием в инвентаре - источник банка для UI-модалки конкретного
+    реактора (фронтенд фильтрует по accepts_roles нужной постройки, тот же
+    приём, что souls_bank_view/creature_bank)."""
+    return [
+        {"id": rid, "role": tag.get("role"), "amount": state.resources.get(rid, 0)}
+        for rid, tag in RESOURCE_REACTOR_COMPONENT.items()
+    ]
+
+
+def insert_reactor_component(state: GameState, instance_id: str, cell_index: int, resource_id: str) -> ActionResult:
+    """Установка компонента в ячейку решётки - не тратит ход (тот же пул, что
+    insert_soul/house_creature). cell_index - позиция в instance["grid"]
+    (row-major, см. reactor_grid_dims/_ensure_reactor_grid) - В ОТЛИЧИЕ от
+    installed душ (append-only список), решётка ФИКСИРОВАННОЙ формы: индекс
+    обязан существовать И быть пустым, не переиспользуем append."""
+    _ensure_reactor_instances(state)
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого реактора нет.")
+    config = BUILDINGS.get(instance["building_id"], {}).get("reactor")
+    if not config:
+        return ActionResult(False, "Это не реактор.")
+    name = RESOURCE_NAMES.get(resource_id, resource_id)
+    role = reactor_component_role(resource_id)
+    if role is None or not reactor_accepts_role(instance["building_id"], role):
+        return ActionResult(False, f"«{name}» не подходит для этого реактора.")
+    _ensure_reactor_grid(state, instance_id)
+    grid = instance["grid"]
+    if not (0 <= cell_index < len(grid)):
+        return ActionResult(False, "Такой ячейки нет в решётке.")
+    if grid[cell_index] is not None:
+        return ActionResult(False, "Ячейка уже занята.")
+    if state.resources.get(resource_id, 0) < 1:
+        return ActionResult(False, f"Нет в наличии: «{name}».")
+    state.resources[resource_id] -= 1
+    component = RESOURCE_REACTOR_COMPONENT[resource_id]
+    charge = component.get("charge_max") if role == "fuel" else None
+    grid[cell_index] = {"resource_id": resource_id, "charge": charge}
+    return ActionResult(True, f"«{name}» установлена в решётку.")
+
+
+def remove_reactor_component(state: GameState, instance_id: str, cell_index: int) -> ActionResult:
+    """Возвращает компонент из ячейки решётки обратно в инвентарь - не тратит
+    ход, как remove_soul. Выгоревшее топливо (charge == 0) возвращает НЕ
+    исходный ресурс, а его spent_result (resources.*.reactor_component.
+    spent_result) - ячейка очищается в обоих случаях."""
+    instance = state.reactor_instances.get(instance_id)
+    grid = instance["grid"] if instance is not None else []
+    if not (0 <= cell_index < len(grid)) or grid[cell_index] is None:
+        return ActionResult(False, "Тут ничего не установлено.")
+    cell = grid[cell_index]
+    resource_id = cell["resource_id"]
+    if cell.get("charge") == 0:
+        returned_id = RESOURCE_REACTOR_COMPONENT.get(resource_id, {}).get("spent_result", resource_id)
+    else:
+        returned_id = resource_id
+    grid[cell_index] = None
+    _add_resource(state.resources, returned_id, 1)
+    return ActionResult(True, f"«{RESOURCE_NAMES.get(returned_id, returned_id)}» возвращена в инвентарь.")
+
+
+def set_reactor_zone_control(state: GameState, instance_id: str, zone_index: int, depth_pct: int) -> ActionResult:
+    """Глубина стержней управления зоны (0-100%) - постоянная настройка игрока,
+    НЕ тратит ход (тот же пул, что set_energy_priority/
+    set_building_active_count). Демпфирует и heat, и output фьюел-ячеек ЭТОЙ
+    зоны - см. _process_reactors."""
+    _ensure_reactor_instances(state)
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого реактора нет.")
+    _ensure_reactor_zones(state, instance_id)
+    zones = instance["zones"]
+    if not (0 <= zone_index < len(zones)):
+        return ActionResult(False, "Такой зоны нет.")
+    zones[zone_index]["control_rod_depth"] = max(0, min(100, int(depth_pct)))
+    return ActionResult(True, "Глубина стержней управления обновлена.")
+
+
+def set_reactor_zone_coolant(state: GameState, instance_id: str, zone_index: int, flow_pct: int) -> ActionResult:
+    """Поток охлаждения зоны (0-100%) - зеркало set_reactor_zone_control.
+    Резкая перестройка потока (|новое - старое| >= reactor.
+    thermal_shock_flow_delta_pct) на уже разогретой зоне (heat/heat_cap выше
+    soft_threshold_pct НА МОМЕНТ этого вызова, ДО применения нового потока) -
+    "термоудар": зона немедленно (не дожидаясь advance_turn) получает
+    единовременную добавку тепла = heat_cap * reactor.
+    thermal_shock_heat_bonus_pct. Это НАМЕРЕННО мгновенный эффект самого
+    действия игрока (как insert_reactor_component/set_reactor_zone_control -
+    не тратит ход), а не что-то, что ждёт следующей обработки хода - дёрнул
+    клапан на горячей зоне, тут же почувствовал последствия. Добавка не
+    провоцирует бросок аварии тут же (тот считается только в _process_reactors
+    в конце хода) - просто поднимает исходную точку heat, с которой начнётся
+    очередной ход."""
+    _ensure_reactor_instances(state)
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого реактора нет.")
+    _ensure_reactor_zones(state, instance_id)
+    zones = instance["zones"]
+    if not (0 <= zone_index < len(zones)):
+        return ActionResult(False, "Такой зоны нет.")
+    zone = zones[zone_index]
+    old_flow = zone["coolant_flow"]
+    zone["prev_coolant_flow"] = old_flow
+    new_flow = max(0, min(100, int(flow_pct)))
+    zone["coolant_flow"] = new_flow
+
+    config = BUILDINGS.get(instance["building_id"], {}).get("reactor", {})
+    delta_threshold = config.get("thermal_shock_flow_delta_pct", 0)
+    if delta_threshold and abs(new_flow - old_flow) >= delta_threshold:
+        cap = _reactor_zone_heat_cap(state, instance_id, zone_index)
+        soft_pct = min(config.get("soft_threshold_pct", 1.0), 1.0)
+        if cap > 0 and zone["heat"] / cap > soft_pct:
+            zone["heat"] += cap * config.get("thermal_shock_heat_bonus_pct", 0.0)
+            return ActionResult(True, "Термоудар! Резкий скачок потока охлаждения на разогретой зоне подстегнул температуру.")
+    return ActionResult(True, "Поток охлаждения обновлён.")
+
+
+def ritual_pedestal_capacity(state: GameState, building_id: str) -> int:
+    """Сколько ингредиентов можно разом разложить по внешнему кольцу ритуального
+    круга building_id - per-copy база (buildings.*.ritual_circle.ring_pedestals)
+    * число РАБОТАЮЩИХ копий, плюс АБСОЛЮТНАЯ добавка от сильнейшего купленного
+    апгрейда типа ritual_pedestals (тот же принцип "сильнейшее побеждает", что у
+    soul_collector_capacity/automation_slots_capacity - см. _farm_upgrade_multiplier).
+    0, если постройка не алтарь вовсе, или если ВСЕ копии сломаны - тот же
+    принцип, что у soul_collector_capacity: сломанный алтарь с уже купленным
+    апгрейдом не должен оставаться "открытым" для больших рецептов. Центральный
+    пьедестал (ritual_recipes.*.center_cost) сюда НЕ входит - он есть у алтаря
+    всегда, вне прокачки колец."""
+    config = BUILDINGS.get(building_id, {}).get("ritual_circle")
+    if not config or working_count(state, building_id) <= 0:
+        return 0
+    base = config.get("ring_pedestals", 0) * working_count(state, building_id)
+    bonus = _farm_upgrade_multiplier(state, building_id, "ritual_pedestals", default=0)
+    return int(base + bonus)
+
+
+def is_ritual_recipe_available(recipe_id: str, state: GameState) -> bool:
+    """Рецепт открыт, только если технология исследована (если задана),
+    указанная в requires_building постройка-алтарь работает хотя бы одной
+    копией, и её текущая ёмкость кольца (ritual_pedestal_capacity) хватает на
+    суммарное количество ингредиентов ring_cost - совпадение с рецептом
+    проверяется ПО КОЛИЧЕСТВУ, без привязки к конкретному пьедesталу (как
+    cost у любого другого рецепта в игре), поэтому расстановка по конкретным
+    чашам - дело только клиента (web_ui.html), сервер её не хранит."""
+    recipe = RITUAL_RECIPES[recipe_id]
+    req_tech = recipe.get("requires_tech")
+    if req_tech and req_tech not in state.techs:
+        return False
+    building_id = recipe["requires_building"]
+    if working_count(state, building_id) <= 0:
+        return False
+    needed = sum(recipe.get("ring_cost", {}).values())
+    return needed <= ritual_pedestal_capacity(state, building_id)
+
+
+def available_ritual_recipes(state: GameState) -> list[str]:
+    return [r for r in RITUAL_RECIPES if is_ritual_recipe_available(r, state)]
+
+
+def _ritual_full_cost(recipe: dict) -> dict[str, int]:
+    """ring_cost + center_cost (1 шт.) + extra_cost, слитые в один платёж -
+    именно это списывается ОДНИМ разом при старте (см. start_ritual). НЕ
+    включает extra_consumes_per_turn - тот тикает отдельно каждый ход,
+    см. _process_ritual_jobs."""
+    cost = dict(recipe.get("ring_cost", {}))
+    center = recipe["center_cost"]
+    cost[center] = cost.get(center, 0) + 1
+    for r, amount in recipe.get("extra_cost", {}).items():
+        cost[r] = cost.get(r, 0) + amount
+    return cost
+
+
+def start_ritual(state: GameState, recipe_id: str) -> ActionResult:
+    """Запускает ритуал: ring_cost + center_cost + extra_cost списываются ОДНИМ
+    платежом (через _pay_or_defer - как do_manual_action/start_energy_recipe,
+    автокрафт может докрафтить нехватающее сырьё в фоне, если скорости не
+    хватает на один ход). duration_turns <= 1 - результат начисляется сразу
+    (как мгновенное ручное действие); иначе заводится
+    state.ritual_jobs[building_id] - один активный ритуал НА ПОСТРОЙКУ
+    (агрегация по типу постройки, как automation_rules, а не по физическому
+    экземпляру, как farm_instances/soul_collector_instances) - повторный запуск
+    на ту же постройку, пока задача не завершилась, отклоняется без траты
+    платежа."""
+    if recipe_id not in RITUAL_RECIPES:
+        return ActionResult(False, "Такого ритуала не существует.")
+    recipe = RITUAL_RECIPES[recipe_id]
+    if not is_ritual_recipe_available(recipe_id, state):
+        return ActionResult(False, "Этот ритуал ещё не доступен.")
+    building_id = recipe["requires_building"]
+    if building_id in state.ritual_jobs:
+        return ActionResult(False, "На этом алтаре уже идёт другой ритуал.")
+    cost = _ritual_full_cost(recipe)
+    deferred = _pay_or_defer(state, cost, f"ритуал «{recipe['name']}»", "start_ritual", recipe_id)
+    if deferred is not None:
+        return deferred
+    duration = recipe.get("duration_turns", 1)
+    if duration <= 1:
+        produces = dict(recipe.get("produces", {}))
+        produces_chance = recipe.get("produces_chance")
+        if produces_chance:
+            produces = _roll_chance_amounts(produces, produces_chance)
+        produces = _roll_range_amounts(produces)
+        _gain(state.resources, produces)
+        return ActionResult(True, f"Ритуал завершён: {recipe['name']}.")
+    state.ritual_jobs[building_id] = {
+        "recipe_id": recipe_id,
+        "turns_total": duration,
+        "turns_done": 0,
+        "extra_consumes_per_turn": dict(recipe.get("extra_consumes_per_turn", {})),
+        "extra_consumes_chance": recipe.get("extra_consumes_chance"),
+        "produces": dict(recipe.get("produces", {})),
+        "produces_chance": recipe.get("produces_chance"),
+        "cost": cost,
+    }
+    return ActionResult(True, f"Начат ритуал: {recipe['name']} (займётся {duration} х.).")
+
+
+def cancel_ritual(state: GameState, building_id: str) -> ActionResult:
+    """Снимает ритуал немедленно, БЕЗ траты хода - как cancel_manual_job.
+    Возвращает игроку весь списанный при старте cost целиком; накопленные
+    turns_done и уже потраченные по ходу extra_consumes_per_turn возврату НЕ
+    подлежат - тот же принцип, что и у manual_jobs/energy_jobs."""
+    if building_id not in state.ritual_jobs:
+        return ActionResult(False, "На этом алтаре сейчас ничего не происходит.")
+    job = state.ritual_jobs.pop(building_id)
+    _gain(state.resources, job["cost"])
+    name = RITUAL_RECIPES.get(job["recipe_id"], {}).get("name", job["recipe_id"])
+    return ActionResult(True, f"Ритуал «{name}» отменён, затраты возвращены.")
+
+
+def ritual_jobs_view(state: GameState) -> list[dict]:
+    return [
+        {"building_id": bid, "recipe_id": j["recipe_id"], "turns_done": j["turns_done"], "turns_total": j["turns_total"]}
+        for bid, j in state.ritual_jobs.items()
+    ]
+
+
+def _process_ritual_jobs(state: GameState, report: ProductionReport) -> None:
+    """Каждый ход продвигает активные ритуалы (state.ritual_jobs) на один тик.
+    Сначала - попытка extra_consumes_per_turn (если задан): шанс на КАЖДЫЙ
+    ресурс независимо (extra_consumes_chance, тот же _roll_chance_amounts, что
+    cost_chance), затем - хватает ли склада на получившийся набор ЦЕЛИКОМ; не
+    хватает - этот ход просто ничего не списывает (ритуал НЕ отменяется и НЕ
+    тормозится, тот же принцип, что consumes обычной постройки). turns_done
+    тикает БЕЗУСЛОВНО, как у _process_manual_jobs (cost уже списан целиком при
+    старте). По достижении turns_total - produces/produces_chance
+    разворачиваются РОВНО ОДИН РАЗ, job удаляется."""
+    for building_id, job in list(state.ritual_jobs.items()):
+        extra = job.get("extra_consumes_per_turn")
+        if extra:
+            to_consume = extra
+            chance = job.get("extra_consumes_chance")
+            if chance:
+                to_consume = _roll_chance_amounts(extra, chance)
+            if to_consume and all(state.resources.get(r, 0) >= amount for r, amount in to_consume.items()):
+                for r, amount in to_consume.items():
+                    state.resources[r] -= amount
+        job["turns_done"] += 1
+        if job["turns_done"] < job["turns_total"]:
+            continue
+        produces = dict(job["produces"])
+        if job["produces_chance"]:
+            produces = _roll_chance_amounts(produces, job["produces_chance"])
+        produces = _roll_range_amounts(produces)
+        _gain(state.resources, produces)
+        del state.ritual_jobs[building_id]
+        report.ritual_completed.append(job["recipe_id"])
 
 
 # Операторы условий автоматизации (state.automation_rules) - держать в паре с
@@ -3200,6 +3865,11 @@ def farm_instance_upgrade_purchase_count(state: GameState, instance_id: str, upg
     return instance["upgrades"].count(upgrade_id) if instance is not None else 0
 
 
+def soul_collector_instance_upgrade_purchase_count(state: GameState, instance_id: str, upgrade_id: str) -> int:
+    instance = state.soul_collector_instances.get(instance_id)
+    return instance["upgrades"].count(upgrade_id) if instance is not None else 0
+
+
 def building_upgrade_prerequisite(building_id: str, upgrade_id: str) -> dict | None:
     """Улучшение НЕПОСРЕДСТВЕННО ПЕРЕД данным СРЕДИ улучшений ТОГО ЖЕ ТИПА этой
     постройки (по порядку в content.json["buildings"][id]["upgrades"]) - следующий
@@ -3316,6 +3986,106 @@ def purchase_farm_instance_upgrade(state: GameState, instance_id: str, upgrade_i
     return ActionResult(True, f"Улучшение «{upgrade['name']}» куплено для «{building_name}»{suffix}.")
 
 
+def purchase_soul_collector_instance_upgrade(state: GameState, instance_id: str, upgrade_id: str) -> ActionResult:
+    """Аналог purchase_farm_instance_upgrade, но для ОДНОГО экземпляра
+    синтезатора душ (state.soul_collector_instances[instance_id]["upgrades"]) -
+    см. CLAUDE.md/state.py:soul_collector_instances. Упрощённая версия (без
+    ветки environment_emulation - этого типа апгрейдов у soul_collector построек
+    не бывает, взаимоисключающие среды - только у ферм)."""
+    _ensure_soul_collector_instances(state)
+    instance = state.soul_collector_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого синтезатора нет.")
+    building_id = instance["building_id"]
+    building_name = BUILDINGS[building_id]["name"]
+    defs = building_upgrade_defs(building_id)
+    upgrade = next((u for u in defs if u["id"] == upgrade_id), None)
+    if upgrade is None:
+        return ActionResult(False, "Такого улучшения не существует.")
+    times = soul_collector_instance_upgrade_purchase_count(state, instance_id, upgrade_id)
+    repeatable = upgrade.get("repeatable", False)
+    if not repeatable and times > 0:
+        return ActionResult(False, "Уже куплено.")
+    max_purchases = upgrade.get("max_purchases")
+    if repeatable and max_purchases is not None and times >= max_purchases:
+        return ActionResult(False, "Куплено максимальное число раз.")
+    req_tech = upgrade.get("requires_tech")
+    if req_tech and req_tech not in state.techs:
+        return ActionResult(False, "Не выполнены условия для покупки улучшения.")
+    prerequisite = building_upgrade_prerequisite(building_id, upgrade_id)
+    if prerequisite is not None and prerequisite["id"] not in instance["upgrades"]:
+        return ActionResult(False, f"Сначала нужно купить «{prerequisite['name']}».")
+    cost = repeatable_upgrade_cost(upgrade, times)
+    deferred = _pay_or_defer(
+        state, cost, f"улучшение «{upgrade['name']}» для «{building_name}»",
+        "soul_instance_upgrade", f"{instance_id}:{upgrade_id}",
+    )
+    if deferred is not None:
+        return deferred
+    instance["upgrades"].append(upgrade_id)
+    suffix = f" (куплено {times + 1}-й раз)" if repeatable else ""
+    return ActionResult(True, f"Улучшение «{upgrade['name']}» куплено для «{building_name}»{suffix}.")
+
+
+def reactor_instance_upgrade_purchase_count(state: GameState, instance_id: str, upgrade_id: str) -> int:
+    instance = state.reactor_instances.get(instance_id)
+    return instance["upgrades"].count(upgrade_id) if instance is not None else 0
+
+
+def purchase_reactor_instance_upgrade(state: GameState, instance_id: str, upgrade_id: str) -> ActionResult:
+    """Аналог purchase_farm_instance_upgrade, но для ОДНОГО экземпляра реактора
+    (state.reactor_instances[instance_id]["upgrades"]). "reactor_zoning" -
+    взаимоисключающий выбор (зеркало environment_emulation у ферм - покупка
+    нового уровня зонирования заменяет предыдущий купленный того же типа на
+    ЭТОМ экземпляре, а не участвует в цепочке "предыдущий уровень" через
+    building_upgrade_prerequisite). "reactor_grid_size" - обычная позиционная
+    прогрессия (как scale), prerequisite-цепочка работает как обычно. После
+    успешной покупки СРАЗУ доращивает решётку/зоны (_ensure_reactor_grid/
+    _ensure_reactor_zones) - новая ёмкость видна немедленно, не дожидаясь
+    следующего advance_turn. Не тратит ход - управление имуществом, как
+    house_creature/insert_soul."""
+    _ensure_reactor_instances(state)
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого реактора нет.")
+    building_id = instance["building_id"]
+    building_name = BUILDINGS[building_id]["name"]
+    defs = building_upgrade_defs(building_id)
+    upgrade = next((u for u in defs if u["id"] == upgrade_id), None)
+    if upgrade is None:
+        return ActionResult(False, "Такого улучшения не существует.")
+    times = reactor_instance_upgrade_purchase_count(state, instance_id, upgrade_id)
+    repeatable = upgrade.get("repeatable", False)
+    if not repeatable and times > 0:
+        return ActionResult(False, "Уже куплено.")
+    max_purchases = upgrade.get("max_purchases")
+    if repeatable and max_purchases is not None and times >= max_purchases:
+        return ActionResult(False, "Куплено максимальное число раз.")
+    req_tech = upgrade.get("requires_tech")
+    if req_tech and req_tech not in state.techs:
+        return ActionResult(False, "Не выполнены условия для покупки улучшения.")
+    is_zoning = upgrade["type"] == "reactor_zoning"
+    if not is_zoning:
+        prerequisite = building_upgrade_prerequisite(building_id, upgrade_id)
+        if prerequisite is not None and prerequisite["id"] not in instance["upgrades"]:
+            return ActionResult(False, f"Сначала нужно купить «{prerequisite['name']}».")
+    cost = repeatable_upgrade_cost(upgrade, times)
+    deferred = _pay_or_defer(
+        state, cost, f"улучшение «{upgrade['name']}» для «{building_name}»",
+        "reactor_instance_upgrade", f"{instance_id}:{upgrade_id}",
+    )
+    if deferred is not None:
+        return deferred
+    if is_zoning:
+        zoning_ids = {u["id"] for u in defs if u["type"] == "reactor_zoning"}
+        instance["upgrades"] = [uid for uid in instance["upgrades"] if uid not in zoning_ids]
+    instance["upgrades"].append(upgrade_id)
+    _ensure_reactor_grid(state, instance_id)
+    _ensure_reactor_zones(state, instance_id)
+    suffix = f" (куплено {times + 1}-й раз)" if repeatable else ""
+    return ActionResult(True, f"Улучшение «{upgrade['name']}» куплено для «{building_name}»{suffix}.")
+
+
 def broken_buildings(state: GameState) -> list[str]:
     return [b for b, count in state.broken.items() if count > 0]
 
@@ -3360,10 +4130,10 @@ def repairable_count(state: GameState, building_id: str) -> int:
     """Сколько из СЕЙЧАС сломанных копий этой постройки можно починить прямо
     сейчас (хватает нужных инструментов на их вид поломки) - используется и
     ценой ремонта (repair_cost_total), и самим repair()."""
-    if _is_farm_building(building_id):
-        _ensure_farm_instances(state)
+    if _uses_physical_instances(building_id):
+        _ensure_physical_instances(state)
         return sum(
-            1 for inst in state.farm_instances.values()
+            1 for inst in _physical_instances(state, building_id).values()
             if inst["building_id"] == building_id and inst["broken"]
             and _is_breakdown_type_fixable(state, inst.get("broken_type"))
         )
@@ -3384,10 +4154,10 @@ def repair_blocked_types(state: GameState, building_id: str) -> list[tuple[str |
     починить (не хватает инструмента) - список (type_id, сколько сломанных
     копий этого вида) для подсказки в UI рядом с кнопкой ремонта (см.
     tools/web_ui.py:repair_blocked_view). Порядок - по первому появлению вида."""
-    if _is_farm_building(building_id):
-        _ensure_farm_instances(state)
+    if _uses_physical_instances(building_id):
+        _ensure_physical_instances(state)
         types = [
-            inst.get("broken_type") for inst in state.farm_instances.values()
+            inst.get("broken_type") for inst in _physical_instances(state, building_id).values()
             if inst["building_id"] == building_id and inst["broken"]
         ]
     else:
@@ -3699,6 +4469,22 @@ def _farm_instance_has_upgrade(state: GameState, instance_id: str, upgrade_type:
     return any(uid in defs and defs[uid]["type"] == upgrade_type for uid in instance["upgrades"])
 
 
+def _soul_instance_upgrade_multiplier(state: GameState, instance_id: str, upgrade_type: str, default: float = 1.0) -> float:
+    """Зеркало _farm_instance_upgrade_multiplier для экземпляров синтезатора
+    душ (state.soul_collector_instances[instance_id]["upgrades"])."""
+    instance = state.soul_collector_instances.get(instance_id)
+    if instance is None:
+        return default
+    purchased = instance["upgrades"]
+    values = [
+        _purchased_upgrade_value(purchased, u)
+        for u in BUILDINGS.get(instance["building_id"], {}).get("upgrades", [])
+        if u["type"] == upgrade_type
+    ]
+    values = [v for v in values if v is not None]
+    return max(values) if values else default
+
+
 def _instance_environment_id(state: GameState, instance_id: str) -> str | None:
     """id среды (аллели genetic_traits.environment), которую эмулирует ЭТОТ
     экземпляр фермы прямо сейчас - value единственного (по дизайну; апгрейды типа
@@ -3916,19 +4702,42 @@ def breed_creatures(state: GameState, parent_a_id: str, parent_b_id: str) -> Act
     бесплатно, кроме самих родителей (списываются целиком) - никакой доп. цены
     сверху (раньше была настраиваемая content.json["genetics"]["breeding_cost"],
     убрана по прямому решению). Ребёнок добавляется в банк НЕОПОЗНАННЫМ. Тратит
-    ход."""
+    ход. Родители ДОЛЖНЫ быть одного семейства (species_family) - скрещивать,
+    например, пчелу с цветком нельзя: family - это как раз generic-тег,
+    отделяющий один "вид существ" от другого (см. breeding_accepts_family), а
+    ни одна мутация в контенте не пересекает семейства (MUTATIONS_BY_PAIR
+    всегда bee×bee/flower×flower и т.п.) - смешение семейств никогда не имело
+    смысла, только не было запрещено явно."""
     if not breeding_station_available(state):
         return ActionResult(False, "Нужна работающая станция скрещивания.")
     if parent_a_id == parent_b_id or parent_a_id not in state.creatures or parent_b_id not in state.creatures:
         return ActionResult(False, "Нужны две разные существующие особи.")
+    family_a = species_family(state.creatures[parent_a_id]["species_id"])
+    family_b = species_family(state.creatures[parent_b_id]["species_id"])
+    if family_a != family_b:
+        return ActionResult(False, "Можно скрещивать только особей одного семейства.")
     parent_a = state.creatures.pop(parent_a_id)
     parent_b = state.creatures.pop(parent_b_id)
     genotype, mutated = _cross_genotype(state, parent_a["genotype"], parent_b["genotype"])
     child_id = spawn_creature(state, genotype, identified=False)
-    name = RESOURCE_NAMES.get(state.creatures[child_id]["species_id"], "?")
+    child_species_id = state.creatures[child_id]["species_id"]
+    name = RESOURCE_NAMES.get(child_species_id, "?")
+    # Структурные данные для центрального визуального эффекта в UI (сведение
+    # родителей -> вспышка -> материализация потомка) - тот же принцип, что
+    # ActionResult.prize/combat/enchant: message уже содержит то же самое
+    # текстом, но фронтенду нужны id видов (для иконок), а не парсинг строки.
+    breed_info = {
+        "mutated": mutated,
+        "parent_a_species_id": parent_a["species_id"],
+        "parent_a_name": RESOURCE_NAMES.get(parent_a["species_id"], "?"),
+        "parent_b_species_id": parent_b["species_id"],
+        "parent_b_name": RESOURCE_NAMES.get(parent_b["species_id"], "?"),
+        "child_species_id": child_species_id,
+        "child_name": name,
+    }
     if mutated:
-        return ActionResult(True, f"Мутация! Скрещивание дало новый вид: «{name}».")
-    return ActionResult(True, f"Скрещивание удалось: детёныш вида «{name}» (без мутации).")
+        return ActionResult(True, f"Мутация! Скрещивание дало новый вид: «{name}».", breed=breed_info)
+    return ActionResult(True, f"Скрещивание удалось: детёныш вида «{name}» (без мутации).", breed=breed_info)
 
 
 def analyze_creature(state: GameState, creature_id: str) -> ActionResult:
@@ -4072,10 +4881,98 @@ def farms_view(state: GameState) -> list[dict]:
     return result
 
 
+def soul_collector_instances_view(state: GameState) -> list[dict]:
+    """Зеркало farms_view для синтезаторов душ - один элемент на КАЖДЫЙ
+    физический экземпляр (см. state.soul_collector_instances/
+    _ensure_soul_collector_instances), а не на тип постройки, как было до
+    2026-09-18. "name" нумерует экземпляры одного типа по порядку встречи
+    ("Синтезатор душ №1", "Синтезатор душ №2", ...), у разных типов своя
+    независимая нумерация - тот же принцип, что у farms_view."""
+    _ensure_soul_collector_instances(state)
+    counts_by_type: dict[str, int] = {}
+    result = []
+    for instance_id, instance in state.soul_collector_instances.items():
+        building_id = instance["building_id"]
+        counts_by_type[building_id] = counts_by_type.get(building_id, 0) + 1
+        result.append({
+            "id": instance_id,
+            "building_id": building_id,
+            "name": f"{BUILDINGS[building_id]['name']} №{counts_by_type[building_id]}",
+            "working": not instance["broken"],
+            "capacity": soul_collector_instance_capacity(state, instance_id),
+            "accepts_kind": soul_collector_accepts_kind(building_id),
+            "installed": [
+                {"id": rid, "index": i}
+                for i, rid in enumerate(instance["installed"])
+            ],
+        })
+    return result
+
+
+def reactor_instances_view(state: GameState) -> list[dict]:
+    """Зеркало soul_collector_instances_view для реакторов - один элемент на
+    КАЖДЫЙ физический экземпляр (см. state.reactor_instances/
+    _ensure_reactor_instances). Решётка отдаётся ПЛОСКИМ списком ячеек
+    (row-major, как хранится в state) + отдельно width/height - сама раскладка
+    в 2D-сетку остаётся на стороне UI (см. tools/web_ui.html:renderReactorGrid,
+    ближайший прецедент - renderMineFieldGrid)."""
+    _ensure_reactor_instances(state)
+    counts_by_type: dict[str, int] = {}
+    result = []
+    for instance_id, instance in state.reactor_instances.items():
+        building_id = instance["building_id"]
+        counts_by_type[building_id] = counts_by_type.get(building_id, 0) + 1
+        width, height = reactor_grid_dims(state, instance_id)
+        config = BUILDINGS.get(building_id, {}).get("reactor", {})
+        layout = _reactor_zone_layout(width, height, len(instance["zones"]))
+        result.append({
+            "id": instance_id,
+            "building_id": building_id,
+            "name": f"{BUILDINGS[building_id]['name']} №{counts_by_type[building_id]}",
+            "working": not instance["broken"],
+            "width": width,
+            "height": height,
+            "accepts_roles": config.get("accepts_roles", []),
+            "telemetry": reactor_telemetry_available(state, instance_id),
+            "projection": reactor_zone_projection(state, instance_id),
+            "grid": [
+                None if cell is None else {
+                    "resource_id": cell["resource_id"],
+                    "name": RESOURCE_NAMES.get(cell["resource_id"], cell["resource_id"]),
+                    "role": reactor_component_role(cell["resource_id"]),
+                    "charge": cell.get("charge"),
+                    "zone_index": layout[i] if i < len(layout) else None,
+                }
+                for i, cell in enumerate(instance["grid"])
+            ],
+            "zones": [
+                {
+                    "index": i,
+                    "heat": z["heat"],
+                    "heat_cap": _reactor_zone_heat_cap(state, instance_id, i, layout),
+                    "control_rod_depth": z["control_rod_depth"],
+                    "coolant_flow": z["coolant_flow"],
+                }
+                for i, z in enumerate(instance["zones"])
+            ],
+        })
+    return result
+
+
 def known_alleles_view(state: GameState) -> dict[str, list[dict]]:
+    # "value" - сырое числовое значение аллели (lifespan в ходах,
+    # output_multiplier как множитель), если оно у признака вообще есть
+    # (species/active_period/environment его не имеют - None); нужно фронту
+    # для подсказки в паджере синтеза (см. renderSynthesizeSection), сам
+    # known_alleles_view уже фильтрует по уже ИЗУЧЕННЫМ аллелям, так что
+    # раскрывать значение тут не проблема - игрок и так его видел при опознании.
     return {
         trait_id: [
-            {"id": aid, "name": trait_alleles(trait_id).get(aid, {}).get("name", aid)}
+            {
+                "id": aid,
+                "name": trait_alleles(trait_id).get(aid, {}).get("name", aid),
+                "value": trait_alleles(trait_id).get(aid, {}).get("value"),
+            }
             for aid in state.known_alleles.get(trait_id, [])
         ]
         for trait_id in GENOTYPE_TRAIT_IDS
@@ -4131,6 +5028,9 @@ def species_catalog_view(state: GameState) -> list[dict]:
         catalog.append({
             "id": species_id,
             "description": SPECIES[species_id].get("description", ""),
+            "family": SPECIES[species_id].get("family"),
+            "produces": dict(SPECIES[species_id].get("produces", {})),
+            "consumes": dict(SPECIES[species_id].get("consumes", {})),
             "breedable": species_id in bred_species_ids,
             "recipes": recipes,
         })
@@ -4284,7 +5184,7 @@ def build(state: GameState, building_id: str) -> ActionResult:
         if deferred is not None:
             return deferred
         state.buildings[building_id] = state.buildings.get(building_id, 0) + 1
-        _ensure_farm_instances(state)
+        _ensure_physical_instances(state)
         return ActionResult(True, f"Построено: {building['name']}.")
 
     # Многоэтапное строительство: каждый вызов build() оплачивает РОВНО один
@@ -4302,7 +5202,7 @@ def build(state: GameState, building_id: str) -> ActionResult:
     if stage["number"] >= stage["total"]:
         state.construction_progress.pop(building_id, None)
         state.buildings[building_id] = state.buildings.get(building_id, 0) + 1
-        _ensure_farm_instances(state)
+        _ensure_physical_instances(state)
         return ActionResult(True, f"Построено: {building['name']}.")
     state.construction_progress[building_id] = stage["index"] + 1
     # Эта ветка (прогресс продвинулся, но постройка ещё не готова) достижима, только
@@ -4337,6 +5237,174 @@ def tech_research_turns(tech_id: str, state: GameState) -> int:
             continue
         reduction = max(reduction, _farm_upgrade_multiplier(state, building_id, "research_speed", default=0))
     return max(1, duration - reduction)
+
+
+_HYP_N, _HYP_E, _HYP_S, _HYP_W = 1, 2, 4, 8
+# (dr, dc) на каждый бит направления - используется и при прокладке пути, и при
+# переводе "клетка A -> соседняя клетка B" обратно в биты.
+_HYP_DIR_DELTAS = [(_HYP_N, -1, 0), (_HYP_E, 0, 1), (_HYP_S, 1, 0), (_HYP_W, 0, -1)]
+
+
+def _hyp_rotate_cw(mask: int) -> int:
+    """N->E->S->W->N - см. rotateCW в web_ui.html, ОБЕ реализации обязаны
+    совпадать бит в бит (клиент вращает локально, сервер только генерирует
+    initial_masks, см. generate_hypothesis_puzzle)."""
+    return ((mask << 1) | (mask >> 3)) & 0b1111
+
+
+def hypothesis_puzzle_grid(tech_id: str) -> tuple[int, int]:
+    """(rows, cols) головоломки этапа 1 ("Гипотеза") - чистая функция ТОЛЬКО от
+    TECHS[tech_id]["tier"], без нового поля в content.json (формула, не
+    авторский баланс - см. CLAUDE.md). rows фиксирован, cols растёт с тиром и
+    насыщается на 9, чтобы модалка не разрасталась бесконечно на дальних тирах."""
+    tier = TECHS[tech_id].get("tier", 1)
+    return 3, min(9, 3 + tier)
+
+
+def generate_hypothesis_puzzle(tech_id: str) -> dict:
+    """Детерминированная генерация головоломки этапа 1 - ЧИСТАЯ функция tech_id
+    (тот же tech_id => тот же результат на любом перезапуске процесса:
+    random.Random(str) хэширует строку сам, в отличие от встроенного hash(),
+    не зависит от PYTHONHASHSEED). Возвращает {rows, cols, start_idx, end_idx,
+    initial_masks, move_budget} - БЕЗ решённых масок: клиент сам прогоняет BFS
+    по initial_masks после локальных поворотов (см. openHypothesisModal в
+    web_ui.html), сервер не валидирует решение вообще (см. docstring
+    solve_hypothesis - однопользовательская игра без анти-чита).
+
+    Алгоритм: 1) прокладывается ПРОСТОЙ путь (без ветвлений/повторов) от
+    стартовой клетки (1,0) к финишной (0,cols-1) рандомизированным DFS с
+    бэктрекингом ("recursive backtracker") - гарантированно завершается, т.к. в
+    конечном связном графе сетки простой путь между любыми двумя клетками
+    существует всегда, а DFS с бэктрекингом полон. 2) Клетки НЕ на пути - чисто
+    декоративный мусор со случайной маской. 3) Каждая клетка ПУТИ скремблится
+    поворотом решённой маски на 1 или 3 шага (гарантированно не совпадает с
+    решённой - см. _hyp_rotate_cw), после чего расстояние обратно до решения
+    считается прямой симуляцией (не формулой - меньше риска алгебраической
+    ошибки), а не берётся "на веру" из числа шагов скрамбла."""
+    rows, cols = hypothesis_puzzle_grid(tech_id)
+    rng = random.Random(tech_id)  # ЛОКАЛЬНЫЙ Random - НЕ модульный random.*,
+    # иначе результат зависел бы от порядка вызовов между технологиями, а не
+    # только от tech_id.
+
+    def idx(r, c):
+        return r * cols + c
+
+    start_r, start_c = 1, 0
+    end_r, end_c = 0, cols - 1
+
+    def grid_neighbors(r, c):
+        result = []
+        for _bit, dr, dc in _HYP_DIR_DELTAS:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols:
+                result.append((nr, nc))
+        return result
+
+    visited = {(start_r, start_c)}
+    path = [(start_r, start_c)]
+
+    def carve(r, c):
+        if (r, c) == (end_r, end_c):
+            return True
+        # Смещаем порядок обхода к соседям, СОКРАЩАЮЩИМ манхэттенское расстояние
+        # до финиша (в 85% случаев) - без этого случайный DFS-бэктрекер обычным
+        # образом склонен извилисто обходить БОЛЬШУЮ часть сетки, прежде чем
+        # наткнуться на финиш (стандартное свойство "recursive backtracker" для
+        # генерации лабиринтов), что для маленькой сетки этапа 1 даёт сильно
+        # завышенную (в разы больше ожидаемой по тиру) сложность. Обход всё
+        # равно ПОЛНЫЙ (closer+other вместе покрывают всех соседей) - гарантия
+        # нахождения пути при бэктрекинге не теряется, меняется только порядок
+        # перебора, то есть ТИПИЧНАЯ форма получившегося пути.
+        cur_dist = abs(r - end_r) + abs(c - end_c)
+        options = grid_neighbors(r, c)
+        closer = [n for n in options if abs(n[0] - end_r) + abs(n[1] - end_c) < cur_dist]
+        other = [n for n in options if n not in closer]
+        rng.shuffle(closer)
+        rng.shuffle(other)
+        ordered = closer + other if rng.random() < 0.85 else other + closer
+        for nr, nc in ordered:
+            if (nr, nc) in visited:
+                continue
+            visited.add((nr, nc))
+            path.append((nr, nc))
+            if carve(nr, nc):
+                return True
+            path.pop()
+            visited.remove((nr, nc))
+        return False
+
+    carve(start_r, start_c)
+
+    def direction_bit(a, b):
+        ar, ac = a
+        br, bc = b
+        for bit, dr, dc in _HYP_DIR_DELTAS:
+            if ar + dr == br and ac + dc == bc:
+                return bit
+        raise AssertionError("соседние клетки пути должны быть смежны по сетке")
+
+    solved_masks = {}
+    for i, cell in enumerate(path):
+        mask = 0
+        if i == 0:
+            mask |= _HYP_W  # виртуальный порт "Импульса"
+        else:
+            entry_bit = direction_bit(path[i - 1], cell)
+            mask |= {_HYP_N: _HYP_S, _HYP_E: _HYP_W, _HYP_S: _HYP_N, _HYP_W: _HYP_E}[entry_bit]
+        if i == len(path) - 1:
+            mask |= _HYP_E  # виртуальный порт "Инсайта"
+        else:
+            mask |= direction_bit(cell, path[i + 1])
+        solved_masks[cell] = mask
+
+    path_set = set(path)
+    initial_masks = [0] * (rows * cols)
+    min_clicks = 0
+    for r in range(rows):
+        for c in range(cols):
+            if (r, c) in path_set:
+                solved = solved_masks[(r, c)]
+                turns = rng.choice([1, 3])
+                mask = solved
+                for _ in range(turns):
+                    mask = _hyp_rotate_cw(mask)
+                dist = 0
+                probe = mask
+                while probe != solved:
+                    probe = _hyp_rotate_cw(probe)
+                    dist += 1
+                min_clicks += dist
+                initial_masks[idx(r, c)] = mask
+            else:
+                base = (_HYP_N | _HYP_S) if rng.choice(["straight", "corner"]) == "straight" else (_HYP_N | _HYP_E)
+                mask = base
+                for _ in range(rng.randint(0, 3)):
+                    mask = _hyp_rotate_cw(mask)
+                initial_masks[idx(r, c)] = mask
+
+    return {
+        "rows": rows,
+        "cols": cols,
+        "start_idx": idx(start_r, start_c),
+        "end_idx": idx(end_r, end_c),
+        "initial_masks": initial_masks,
+        "move_budget": min_clicks + 2,  # небольшой бесплатный запас, как в макете
+    }
+
+
+def solve_hypothesis(state: GameState, tech_id: str) -> ActionResult:
+    """Отмечает головоломку этапа 1 решённой - НЕ тратит ход (тот же принцип,
+    что claim_quest_reward/insert_soul/remove_soul). НЕ принимает и НЕ проверяет
+    состояние головоломки от клиента - клиент уже сам прогнал BFS локально и
+    прислал только факт победы (однопользовательская игра без анти-чита, см.
+    CLAUDE.md про клиентский cooldown). Повторный вызов на уже решённой
+    технологии - явный отказ, как research() на уже изученную."""
+    if tech_id not in TECHS:
+        return ActionResult(False, "Неизвестная технология.")
+    if tech_id in state.solved_hypotheses:
+        return ActionResult(False, "Уже решено.")
+    state.solved_hypotheses.add(tech_id)
+    return ActionResult(True, f"Гипотеза «{TECHS[tech_id]['name']}» подтверждена.")
 
 
 def research(state: GameState, tech_id: str) -> ActionResult:
@@ -4421,10 +5489,11 @@ def repair(state: GameState, building_id: str) -> ActionResult:
     if deferred is not None:
         return deferred
     used_tools: set[str] = set()
-    if _is_farm_building(building_id):
-        _ensure_farm_instances(state)
+    if _uses_physical_instances(building_id):
+        _ensure_physical_instances(state)
+        instances = _physical_instances(state, building_id)
         fixed = 0
-        for instance in state.farm_instances.values():
+        for instance in instances.values():
             if instance["building_id"] != building_id or not instance["broken"]:
                 continue
             broken_type = instance.get("broken_type")
@@ -4435,7 +5504,7 @@ def repair(state: GameState, building_id: str) -> ActionResult:
             instance["broken_type"] = None
             fixed += 1
         state.broken[building_id] = sum(
-            1 for inst in state.farm_instances.values()
+            1 for inst in instances.values()
             if inst["building_id"] == building_id and inst["broken"]
         )
     else:
@@ -4507,6 +5576,15 @@ def resolve_action_cost(state: GameState, action_type: str, action_id: str, scal
         if upgrade is None:
             return None
         return repeatable_upgrade_cost(upgrade, farm_instance_upgrade_purchase_count(state, instance_id, upgrade_id))
+    if action_type == "soul_instance_upgrade":
+        instance_id, _, upgrade_id = action_id.partition(":")
+        instance = state.soul_collector_instances.get(instance_id)
+        if instance is None:
+            return None
+        upgrade = next((u for u in building_upgrade_defs(instance["building_id"]) if u["id"] == upgrade_id), None)
+        if upgrade is None:
+            return None
+        return repeatable_upgrade_cost(upgrade, soul_collector_instance_upgrade_purchase_count(state, instance_id, upgrade_id))
     if action_type == "storage_upgrade":
         next_info = next_storage_tier_info(state, action_id)
         return dict(next_info["cost"]) if next_info else None
@@ -4516,6 +5594,12 @@ def resolve_action_cost(state: GameState, action_type: str, action_id: str, scal
         # (_process_energy_jobs), а не мгновенно при запуске, поэтому её здесь нет.
         recipe = ENERGY_RECIPES.get(action_id)
         return dict(recipe.get("consumes", {})) if recipe else None
+    if action_type == "start_ritual":
+        # Полная разовая цена (ring_cost + center_cost + extra_cost) - без
+        # extra_consumes_per_turn, который списывается постепенно по ходам
+        # (_process_ritual_jobs), а не мгновенно при запуске.
+        recipe = RITUAL_RECIPES.get(action_id)
+        return _ritual_full_cost(recipe) if recipe else None
     if action_type == "synthesize":
         return dict(GENETICS_SETTINGS.get("synthesis_cost", {}))
     if action_type == "summon_boss":
@@ -4558,6 +5642,14 @@ class ProductionReport:
     # (включая ход, где research() сама мгновенно завершила тир-1/безапгрейдную
     # технологию без прохода через active_research вовсе).
     research_completed: str | None = None
+    # recipe_id ритуалов (ritual_recipes), завершившихся именно в этот ход - см.
+    # _process_ritual_jobs. Тот же принцип, что manual_completed.
+    ritual_completed: list[str] = field(default_factory=list)
+    # Аварии реакторных зон (перегрев зоны выше 100% ёмкости - см.
+    # _process_reactors/_roll_reactor_accident), сработавшие именно в этот ход.
+    # Каждый элемент - {"instance_id","building_id","zone_index","result","message"} -
+    # тот же принцип, что automation_fired (лог для UI, не сохраняется в save.json).
+    reactor_accidents: list[dict] = field(default_factory=list)
 
 
 def _is_active_period_now(active_period: str, daytime: bool) -> bool:
@@ -4652,18 +5744,24 @@ def _process_soul_collectors(state: GameState, report: ProductionReport, daytime
     НЕ расходуется и не портится - работает бесконечно, пока не сломана постройка
     (active_period/is_building_active_now той же постройки тоже уважается) или
     пока игрок сам её не вынет (remove_soul). Продукция домножается на сильнейший
-    купленный апгрейд типа soul_generation_efficiency ЭТОЙ постройки (тот же
-    принцип, что breeding_output у ферм - см. _farm_upgrade_multiplier),
-    округляется по правилам ресурса (см. _round_amounts). produces может быть
-    диапазоном (см. _is_range_amount/_roll_range_amounts) - бросается отдельно
-    для КАЖДОЙ вставленной души, независимо от остальных."""
-    for building_id, installed in state.soul_slots.items():
+    купленный апгрейд типа soul_generation_efficiency ИМЕННО ЭТОГО ЭКЗЕМПЛЯРА
+    (тот же принцип, что breeding_output у ферм - см.
+    _soul_instance_upgrade_multiplier), округляется по правилам ресурса (см.
+    _round_amounts). produces может быть диапазоном (см. _is_range_amount/
+    _roll_range_amounts) - бросается отдельно для КАЖДОЙ вставленной души,
+    независимо от остальных. Сломанный экземпляр (instance["broken"]) сам по
+    себе ничего не гейтит тут явно - его capacity уже 0 (см.
+    soul_collector_instance_capacity), поэтому installed[:capacity] естественно
+    пропускает все его души."""
+    for instance_id, instance in state.soul_collector_instances.items():
+        installed = instance["installed"]
         if not installed:
             continue
+        building_id = instance["building_id"]
         if not is_building_active_now(building_id, daytime):
             continue
-        capacity = soul_collector_capacity(state, building_id)
-        efficiency = _farm_upgrade_multiplier(state, building_id, "soul_generation_efficiency", default=1.0)
+        capacity = soul_collector_instance_capacity(state, instance_id)
+        efficiency = _soul_instance_upgrade_multiplier(state, instance_id, "soul_generation_efficiency", default=1.0)
         for soul_id in installed[:capacity]:
             recipe = SOUL_RECIPES.get(soul_id)
             if not recipe:
@@ -4679,6 +5777,367 @@ def _process_soul_collectors(state: GameState, report: ProductionReport, daytime
             # (каждая душа в слоте бросает НЕЗАВИСИМО от других).
             produces = _roll_range_amounts(produces)
             _gain(state.resources, produces)
+
+
+def _reactor_cell_catalyst(grid: list[dict | None], cell_index: int) -> dict | None:
+    """Катализатор УСТАНОВЛЕННЫЙ в данной ячейке (cell["catalyst_id"]), если
+    есть - тот же generic-принцип тега, что RESOURCE_REACTOR_COMPONENT, только
+    отдельный слот поверх основного компонента (см. insert_reactor_catalyst)."""
+    if not (0 <= cell_index < len(grid)):
+        return None
+    cell = grid[cell_index]
+    if cell is None:
+        return None
+    catalyst_id = cell.get("catalyst_id")
+    if catalyst_id is None:
+        return None
+    return RESOURCE_REACTOR_CATALYST.get(catalyst_id)
+
+
+def _reactor_effective_component(grid: list[dict | None], width: int, height: int, cell_index: int) -> dict:
+    """heat/output/power/burnup_per_turn ОДНОЙ занятой ячейки решётки С УЧЁТОМ
+    катализатора - собственного (self_stat/self_pct: "heat_output" растит heat
+    И output топливу, "burnup" снижает расход заряда топливу, "power" растит
+    power немодератору-роли; "field" собственные характеристики НЕ трогает -
+    он усиливает то, как ячейка радиирует на соседей-топливо, см.
+    _reactor_fuel_adjacency_bonus) и ШТРАФА от катализаторов ОРТОГОНАЛЬНЫХ
+    СОСЕДЕЙ (neighbor_malus_pct - действует ОДИНАКОВО на heat/output/power,
+    какая бы роль у этой ячейки ни была, стакается МУЛЬТИПЛИКАТИВНО по всем
+    закатализированным соседям разом). ЧИСТАЯ функция - не мутирует grid, не
+    путать с _reactor_fuel_adjacency_bonus (та считает бонус СОСЕДСТВА МЕЖДУ
+    РОЛЯМИ - moderator/absorber/reflector/shield/fuel - эта же считает "личные"
+    характеристики ячейки ДО того, как их читает бонус соседства)."""
+    cell = grid[cell_index]
+    base = RESOURCE_REACTOR_COMPONENT.get(cell["resource_id"], {})
+    heat = base.get("heat", 0.0)
+    output = base.get("output", 0.0)
+    power = base.get("power", 0.0)
+    burnup = base.get("burnup_per_turn", 0.0)
+
+    catalyst = _reactor_cell_catalyst(grid, cell_index)
+    if catalyst is not None:
+        self_stat = catalyst.get("self_stat")
+        pct = catalyst.get("self_pct", 0.0)
+        if self_stat == "heat_output":
+            heat *= 1 + pct
+            output *= 1 + pct
+        elif self_stat == "burnup":
+            burnup *= max(0.0, 1 - pct)
+        elif self_stat == "power":
+            power *= 1 + pct
+
+    malus_mult = 1.0
+    row, col = divmod(cell_index, width)
+    for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        nr, nc = row + dr, col + dc
+        if not (0 <= nr < height and 0 <= nc < width):
+            continue
+        neighbor_catalyst = _reactor_cell_catalyst(grid, nr * width + nc)
+        if neighbor_catalyst is not None:
+            malus_mult *= max(0.0, 1 - neighbor_catalyst.get("neighbor_malus_pct", 0.0))
+
+    return {
+        "heat": heat * malus_mult,
+        "output": output * malus_mult,
+        "power": power * malus_mult,
+        "burnup_per_turn": burnup,
+    }
+
+
+def _reactor_fuel_adjacency_bonus(
+    grid: list[dict | None], width: int, height: int, cell_index: int, config: dict,
+) -> tuple[float, float, float]:
+    """Бонус СОСЕДСТВА для ОДНОЙ fuel-ячейки - считает 4 ортогональных соседа:
+    каждый соседний fuel ускоряет ОБА множителя (heat растёт БЫСТРЕЕ output -
+    цепная реакция всегда невыгодна по чистому отношению риск/выгода без
+    компенсации замедлителями), каждый moderator даёт ПЛОСКИЙ бонус к output
+    (пропорционально его resources.*.reactor_component.power, не растит heat),
+    каждый absorber снижает ОБА множителя (тоже пропорционально его power),
+    каждый shield снижает ТОЛЬКО heat_mult (тем же способом, что absorber, но
+    output_mult не трогает вовсе - "щит без потери выработки", зеркало
+    moderator: тот усиливает output не трогая heat, этот гасит heat не трогая
+    output), каждый reflector УМНОЖАЕТ output_mult (а не складывает, как
+    moderator) на (1 + power * reflector_adjacency_output_mult_step) -
+    несколько отражателей вокруг одной ячейки перемножаются между собой, а не
+    складываются, и тоже не растит heat - возвращает (heat_mult, output_mult,
+    flat_output_bonus), heat_mult не уходит в минус (output_mult может
+    обнулиться поглотителями, но reflector его дальше только умножает,
+    никогда не компенсирует поглотитель обратно в плюс). Коэффициенты -
+    content-driven (buildings.*.reactor.*_adjacency_*), не хардкод.
+    Теплоноситель (coolant) в соседстве не участвует вовсе - его эффект
+    другой: суммарная мощность охлаждения ВСЕЙ зоны, см. _process_reactors."""
+    heat_mult = 1.0
+    output_mult = 1.0
+    flat_output_bonus = 0.0
+    row, col = divmod(cell_index, width)
+    for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        nr, nc = row + dr, col + dc
+        if not (0 <= nr < height and 0 <= nc < width):
+            continue
+        n_index = nr * width + nc
+        neighbor = grid[n_index]
+        if neighbor is None:
+            continue
+        role = reactor_component_role(neighbor["resource_id"])
+        if role == "fuel":
+            heat_step = config.get("fuel_adjacency_heat_step", 0.0)
+            output_step = config.get("fuel_adjacency_output_step", 0.0)
+            field_catalyst = _reactor_cell_catalyst(grid, n_index)
+            if field_catalyst is not None and field_catalyst.get("self_stat") == "field":
+                field_mult = 1 + field_catalyst.get("self_pct", 0.0)
+                heat_step *= field_mult
+                output_step *= field_mult
+            heat_mult += heat_step
+            output_mult += output_step
+            continue
+        power = _reactor_effective_component(grid, width, height, n_index)["power"]
+        if role == "moderator":
+            flat_output_bonus += config.get("moderator_adjacency_output_bonus", 0.0) * power
+        elif role == "absorber":
+            reduction = config.get("absorber_adjacency_reduction", 0.0) * power
+            heat_mult -= reduction
+            output_mult -= reduction
+        elif role == "shield":
+            heat_mult -= config.get("shield_adjacency_reduction", 0.0) * power
+        elif role == "reflector":
+            output_mult *= 1 + config.get("reflector_adjacency_output_mult_step", 0.0) * power
+    return (max(0.0, heat_mult), max(0.0, output_mult), flat_output_bonus)
+
+
+def _roll_reactor_accident(entries: list[dict]) -> dict | None:
+    """Буквальная копия _roll_loot_case_prize (см. её докстринг) над
+    {"result", "weight", "message"} вместо {"resource", "amount", "weight"} -
+    "result" тут закрытый хардкод-enum движка (_apply_reactor_accident_result),
+    не ссылка на ресурс."""
+    total_weight = sum(e.get("weight", 1) for e in entries)
+    if total_weight <= 0:
+        return None
+    roll = random.uniform(0, total_weight)
+    upto = 0.0
+    for entry in entries:
+        upto += entry.get("weight", 1)
+        if roll <= upto:
+            return entry
+    return entries[-1]  # подстраховка на случай погрешности плавающей точки
+
+
+def _apply_reactor_accident_result(state: GameState, instance_id: str, zone_index: int, layout: list[int], result: str) -> None:
+    """Применяет ИСХОД аварии (result - закрытый хардкод-enum, интерпретируется
+    ТОЛЬКО тут, контент лишь ссылается на него по имени, см.
+    tools/content_validation.py:_REACTOR_ACCIDENT_RESULTS):
+    - "destroy_one_fuel_cell": одна СЛУЧАЙНАЯ fuel-ячейка ЭТОЙ зоны очищается
+      (без возврата ресурса игроку - авария, не разбор, в отличие от
+      remove_reactor_component);
+    - "destroy_zone_grid": ВСЕ ячейки ЭТОЙ зоны очищаются целиком.
+    Неизвестный result (гипотетический рассинхрон с content_validation.py) -
+    молча ничего не делает, без падения."""
+    instance = state.reactor_instances[instance_id]
+    grid = instance["grid"]
+    zone_cells = [i for i, z in enumerate(layout) if z == zone_index and i < len(grid)]
+    if result == "destroy_zone_grid":
+        for i in zone_cells:
+            grid[i] = None
+    elif result == "destroy_one_fuel_cell":
+        fuel_cells = [
+            i for i in zone_cells
+            if grid[i] is not None and reactor_component_role(grid[i]["resource_id"]) == "fuel"
+        ]
+        if fuel_cells:
+            grid[random.choice(fuel_cells)] = None
+
+
+def _reactor_zone_raw_totals(
+    grid: list[dict | None], width: int, height: int, layout: list[int], zone_count: int, config: dict,
+) -> tuple[list[float], list[float], list[int], list[float]]:
+    """Сырые heat/output/охлаждение КАЖДОЙ зоны по ТЕКУЩЕМУ состоянию решётки -
+    ЧИСТАЯ функция (не списывает burnup, не трогает state) - используется и
+    реальной обработкой хода (_process_reactors, которая burnup списывает
+    ОТДЕЛЬНЫМ проходом сразу после вызова этой функции), и прогнозом телеметрии
+    (reactor_zone_projection) - расчёт один и тот же, прогноз не может разойтись
+    с тем, что реально произойдёт в конце хода. Возвращает (raw_heat,
+    raw_output, zone_cell_count, coolant_power) - по списку на зону."""
+    raw_heat = [0.0] * zone_count
+    raw_output = [0.0] * zone_count
+    zone_cell_count = [0] * zone_count
+    coolant_power = [0.0] * zone_count
+    for cell_index, cell in enumerate(grid):
+        if cell_index >= len(layout):
+            break  # решётка успела вырасти позже последнего пересчёта зон - лишние ячейки временно вне зон
+        zone_idx = layout[cell_index]
+        zone_cell_count[zone_idx] += 1
+        if cell is None:
+            continue
+        role = reactor_component_role(cell["resource_id"])
+        if role == "coolant":
+            coolant_power[zone_idx] += _reactor_effective_component(grid, width, height, cell_index)["power"]
+            continue
+        if role != "fuel":
+            continue
+        charge = cell.get("charge")
+        if charge is not None and charge <= 0:
+            continue  # выгорело - простаивает, ждёт замены
+        eff = _reactor_effective_component(grid, width, height, cell_index)
+        heat_mult, output_mult, flat_bonus = _reactor_fuel_adjacency_bonus(grid, width, height, cell_index, config)
+        raw_heat[zone_idx] += eff["heat"] * heat_mult
+        raw_output[zone_idx] += eff["output"] * output_mult + flat_bonus
+    return raw_heat, raw_output, zone_cell_count, coolant_power
+
+
+def _reactor_zone_next_state(
+    zone: dict, raw_heat: float, raw_output: float, coolant_power: float,
+    cell_count: int, heat_cap_per_cell: float, soft_pct: float,
+) -> tuple[float, float, float, bool]:
+    """ОДИН шаг хода ОДНОЙ зоны - демпфирует raw_heat/raw_output рычагом
+    control_rod_depth (`эффективное = сырое * (1 - depth/100*0.9)` - даже на
+    100% остаётся фон, полностью заглушить нельзя одним рычагом), вычитает из
+    накопленного зоной тепла охлаждение (coolant_power * coolant_flow/100),
+    выше soft_pct от ёмкости зоны (cell_count * heat_cap_per_cell) линейно
+    гасит output. ЧИСТАЯ функция (не мутирует zone/state, не бросает
+    аварию/не сбрасывает heat - это решает вызывающий) - используется и
+    реальной обработкой хода, и прогнозом телеметрии. Возвращает (new_heat,
+    ratio, effective_output, would_trip) - would_trip = ratio достигла 100%
+    (сам факт срабатывания детерминирован, в отличие от того, КАКАЯ авария
+    выпадет - см. _roll_reactor_accident)."""
+    damp = 1 - (zone.get("control_rod_depth", 0) / 100) * 0.9
+    effective_heat = raw_heat * damp
+    effective_output = raw_output * damp
+    removed = coolant_power * (zone.get("coolant_flow", 100) / 100)
+    new_heat = max(0.0, zone["heat"] + effective_heat - removed)
+
+    cap = cell_count * heat_cap_per_cell
+    ratio = new_heat / cap if cap > 0 else 0.0
+    if ratio > soft_pct:
+        span = max(1.0 - soft_pct, 1e-9)
+        falloff = min(1.0, (ratio - soft_pct) / span)
+        effective_output *= max(0.0, 1.0 - falloff)
+    would_trip = cap > 0 and ratio >= 1.0
+    return new_heat, ratio, effective_output, would_trip
+
+
+def reactor_zone_projection(state: GameState, instance_id: str) -> list[dict] | None:
+    """Прогноз на СЛЕДУЮЩИЙ ход по каждой зоне реактора - ТОЛЬКО если у
+    экземпляра куплена телеметрия (reactor_telemetry_available), иначе None
+    (нет смысла отдавать данные, которые UI всё равно не покажет). Полностью
+    детерминирован при условии, что решётка/рычаги/поток не изменятся и
+    постройка останется активна ещё один ход - переиспользует ТЕ ЖЕ самые
+    _reactor_zone_raw_totals/_reactor_zone_next_state, что и реальная
+    обработка хода (_process_reactors), поэтому прогноз не может разойтись с
+    тем, что случится по факту. НЕ мутирует state (burnup/heat/аварийный
+    бросок остаются на _process_reactors) - чистое чтение."""
+    if not reactor_telemetry_available(state, instance_id):
+        return None
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return None
+    config = BUILDINGS.get(instance["building_id"], {}).get("reactor")
+    if not config:
+        return None
+    _ensure_reactor_grid(state, instance_id)
+    _ensure_reactor_zones(state, instance_id)
+    grid = instance["grid"]
+    zones = instance["zones"]
+    width, height = reactor_grid_dims(state, instance_id)
+    layout = _reactor_zone_layout(width, height, len(zones))
+    raw_heat, raw_output, zone_cell_count, coolant_power = _reactor_zone_raw_totals(
+        grid, width, height, layout, len(zones), config,
+    )
+    heat_cap_per_cell = config.get("heat_cap_per_cell", 0.0)
+    soft_pct = min(config.get("soft_threshold_pct", 1.0), 1.0)
+
+    result = []
+    for zone_idx, zone in enumerate(zones):
+        new_heat, ratio, effective_output, would_trip = _reactor_zone_next_state(
+            zone, raw_heat[zone_idx], raw_output[zone_idx], coolant_power[zone_idx],
+            zone_cell_count[zone_idx], heat_cap_per_cell, soft_pct,
+        )
+        result.append({
+            "zone_index": zone_idx,
+            "next_heat": 0.0 if would_trip else new_heat,
+            "next_ratio": 0.0 if would_trip else ratio,
+            "next_output": effective_output,
+            "will_trip": would_trip,
+        })
+    return result
+
+
+def _process_reactors(state: GameState, report: ProductionReport, daytime: bool) -> None:
+    """Каждый ход, сразу после _process_soul_collectors (тот же принцип - обе
+    работают ПО ЭКЗЕМПЛЯРУ и производят раньше _process_energy_jobs/*, чтобы их
+    выход был доступен энергоконвертерам в тот же ход, как и у обычных
+    генераторов): для КАЖДОЙ рабочей (не сломанной, is_building_active_now)
+    решётки - сырые heat/output каждой активной fuel-ячейки (адjacency-бонус,
+    см. _reactor_fuel_adjacency_bonus, суммируются _reactor_zone_raw_totals)
+    демпфируются рычагом control_rod_depth и охлаждением ЭТОЙ зоны
+    (_reactor_zone_next_state - та же функция, что использует прогноз
+    телеметрии, см. reactor_zone_projection). При достижении 100% ёмкости зоны -
+    бросок по таблице аварий (accident_table) и сброс накопленного тепла зоны в
+    0 независимо от того, произошла ли авария вообще (порог 100% сам по себе -
+    момент разрядки, не только точка входа в рулетку). Топливо расходует
+    burnup_per_turn НЕЗАВИСИМО от глубины стержней (демпинг снижает выход
+    реакции, но не защищает сам стержень от выгорания) - выгоревшая
+    (charge <= 0) ячейка простаивает (не производит, не тратит заряд), пока
+    игрок не заменит её вручную (remove_reactor_component/
+    insert_reactor_component). Суммарный эффективный output ВСЕХ зон одного
+    экземпляра идёт в общий пул энергии ОДНИМ начислением (энергия дробная -
+    ceil не нужен, в отличие от большинства остальных ресурсов)."""
+    for instance_id, instance in state.reactor_instances.items():
+        building_id = instance["building_id"]
+        if instance["broken"] or not is_building_active_now(building_id, daytime):
+            continue
+        config = BUILDINGS.get(building_id, {}).get("reactor")
+        if not config:
+            continue
+        _ensure_reactor_grid(state, instance_id)
+        _ensure_reactor_zones(state, instance_id)
+        grid = instance["grid"]
+        zones = instance["zones"]
+        width, height = reactor_grid_dims(state, instance_id)
+        layout = _reactor_zone_layout(width, height, len(zones))
+        heat_cap_per_cell = config.get("heat_cap_per_cell", 0.0)
+        soft_pct = min(config.get("soft_threshold_pct", 1.0), 1.0)
+
+        raw_heat, raw_output, zone_cell_count, coolant_power = _reactor_zone_raw_totals(
+            grid, width, height, layout, len(zones), config,
+        )
+
+        # Burnup - ОТДЕЛЬНЫЙ проход, ПОСЛЕ сбора raw-тоталов (те читают charge
+        # до его списания в этом ходу) - та же граница "активна fuel-ячейка",
+        # что и в _reactor_zone_raw_totals, продублирована намеренно: список
+        # активных ячеек там не сохраняется наружу, чтобы не плодить лишнее
+        # состояние ради одного прохода.
+        for cell in grid:
+            if cell is None:
+                continue
+            component = RESOURCE_REACTOR_COMPONENT.get(cell["resource_id"], {})
+            if component.get("role") != "fuel":
+                continue
+            charge = cell.get("charge")
+            if charge is None or charge <= 0:
+                continue
+            cell["charge"] = max(0, charge - component.get("burnup_per_turn", 0))
+
+        total_output = 0.0
+        for zone_idx, zone in enumerate(zones):
+            new_heat, ratio, effective_output, would_trip = _reactor_zone_next_state(
+                zone, raw_heat[zone_idx], raw_output[zone_idx], coolant_power[zone_idx],
+                zone_cell_count[zone_idx], heat_cap_per_cell, soft_pct,
+            )
+            zone["heat"] = new_heat
+            if would_trip:
+                accident_table = REACTOR_ACCIDENTS.get(config.get("accident_table"), {})
+                entry = _roll_reactor_accident(accident_table.get("entries", []))
+                if entry:
+                    _apply_reactor_accident_result(state, instance_id, zone_idx, layout, entry.get("result"))
+                    report.reactor_accidents.append({
+                        "instance_id": instance_id, "building_id": building_id,
+                        "zone_index": zone_idx, "result": entry.get("result"),
+                        "message": entry.get("message", ""),
+                    })
+                zone["heat"] = 0.0
+            total_output += effective_output
+
+        if total_output:
+            _add_resource(state.resources, ENERGY_RESOURCE_ID, total_output)
 
 
 def _process_energy_jobs(state: GameState, report: ProductionReport) -> None:
@@ -4867,8 +6326,11 @@ _PENDING_RETRY = {
     "upgrade_tool": lambda state, pending: upgrade_tool(state, pending["target_id"]),
     "building_upgrade": lambda state, pending: purchase_building_upgrade(state, *pending["target_id"].split(":", 1)),
     "farm_instance_upgrade": lambda state, pending: purchase_farm_instance_upgrade(state, *pending["target_id"].split(":", 1)),
+    "reactor_instance_upgrade": lambda state, pending: purchase_reactor_instance_upgrade(state, *pending["target_id"].split(":", 1)),
+    "soul_instance_upgrade": lambda state, pending: purchase_soul_collector_instance_upgrade(state, *pending["target_id"].split(":", 1)),
     "storage_upgrade": lambda state, pending: upgrade_storage(state, pending["target_id"]),
     "start_energy_recipe": lambda state, pending: start_energy_recipe(state, pending["target_id"]),
+    "start_ritual": lambda state, pending: start_ritual(state, pending["target_id"]),
     "synthesize": lambda state, pending: synthesize_creature(state, pending["chosen_alleles"]),
     "summon_boss": lambda state, pending: summon_boss(state, pending["target_id"]),
 }
@@ -4941,11 +6403,17 @@ def advance_turn(state: GameState) -> ProductionReport:
     ЭКЗЕМПЛЯРУ фермы (farm_instance_id, см. state.farm_instances), а не к типу
     постройки и не к какой-то одной "общей" копии.
 
-    Следом - синтезаторы душ (_process_soul_collectors, см. state.soul_slots):
-    каждая вставленная душа (в пределах текущей capacity постройки) производит по
-    своему soul_recipes[soul_id], независимо от обычных produces/consumes постройки.
+    Следом - синтезаторы душ (_process_soul_collectors, см.
+    state.soul_collector_instances): каждая вставленная душа (в пределах текущей
+    capacity ИМЕННО ЭТОГО экземпляра) производит по своему soul_recipes[soul_id],
+    независимо от обычных produces/consumes постройки.
 
-    Третьим проходом, уже после этих двух, идут активные крафты за энергию
+    Следом за ними - реакторы (_process_reactors, см. state.reactor_instances):
+    решётка ячеек каждого экземпляра считается по зонам (тепло/выход/аварии,
+    см. докстринг самой функции), суммарный выход идёт в тот же общий пул
+    энергии этого хода, что и обычные генераторы.
+
+    Третьим проходом, уже после этих трёх, идут активные крафты за энергию
     (_process_energy_jobs, см. state.energy_jobs - список запущенных в энергетических
     преобразователях рецептов) - им достаётся то, что осталось после построек с
     обычным consumes.energy, чтобы "накопление про запас" не отбирало энергию у
@@ -4964,7 +6432,7 @@ def advance_turn(state: GameState) -> ProductionReport:
     босса (mobs.*.turn_limit) - не уложились вовремя, босс сбегает сам (report.boss_fled)."""
     report = ProductionReport()
 
-    _ensure_farm_instances(state)
+    _ensure_physical_instances(state)
     daytime = is_daytime(state)
     # Считаем effective_building_stats РОВНО ОДИН раз на тип постройки за ход и
     # переиспользуем в process() - без кэша она бы считалась дважды (тут же ниже,
@@ -5016,17 +6484,18 @@ def advance_turn(state: GameState) -> ProductionReport:
         )
         if chance <= 0:
             return
-        if _is_farm_building(building_id):
+        if _uses_physical_instances(building_id):
             # Поломка катается ПО ЭКЗЕМПЛЯРУ (не по абстрактному "working" числу) -
             # иначе не получилось бы отметить, КАКАЯ именно копия сломалась, а
             # состояние экземпляра (broken) обязано совпадать с агрегатом
-            # state.broken[bid] (см. _ensure_farm_instances). Пересчёт агрегата
+            # state.broken[bid] (см. _ensure_physical_instances). Пересчёт агрегата
             # ТОЧНЫЙ (не инкремент), т.к. этот проход - единственное место, где он
-            # вообще может вырасти для фермы. breakdown_immunity у ферм - ВСЕГДА
-            # per-instance (см. _instance_has_upgrade_type, purchase_farm_instance_upgrade) -
+            # вообще может вырасти для ферм/синтезаторов душ. breakdown_immunity -
+            # ВСЕГДА per-instance (см. _instance_has_upgrade_type,
+            # purchase_farm_instance_upgrade/purchase_soul_collector_instance_upgrade) -
             # иммунный экземпляр просто не участвует в ролле вовсе, независимо от
             # общего chance этого типа построек.
-            instances = [inst for inst in state.farm_instances.values() if inst["building_id"] == building_id]
+            instances = [inst for inst in _physical_instances(state, building_id).values() if inst["building_id"] == building_id]
             newly_broken = 0
             for instance in instances:
                 if instance["broken"] or _instance_has_upgrade_type(building_id, instance, "breakdown_immunity"):
@@ -5070,9 +6539,11 @@ def advance_turn(state: GameState) -> ProductionReport:
 
     _process_habitat(state, report)
     _process_soul_collectors(state, report, daytime)
+    _process_reactors(state, report, daytime)
     _process_energy_jobs(state, report)
     _process_autocraft_jobs(state, report)
     _process_manual_jobs(state, report)
+    _process_ritual_jobs(state, report)
     _process_research(state, report)
     process_automation_rules(state, report, daytime)
     _process_pending_actions(state, report)
