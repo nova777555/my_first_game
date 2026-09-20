@@ -9855,7 +9855,16 @@ function hypEndpointIcon(isStart, color) {
 
 function hypEndpointColumn(isStart, solved, confirmed) {
   const col = el("div", { class: "hyp-endpoint-col" });
-  col.appendChild(el("div"));
+  // Импульс всегда входит в СРЕДНЮЮ строку сетки (start_idx = row 1, col 0 -
+  // см. game/engine.py:generate_hypothesis_puzzle), а Инсайт - в ВЕРХНЮЮ
+  // (end_idx = row 0, cols-1) - две РАЗНЫЕ строки, поэтому пустые распорки
+  // вокруг слота с бейджем не симметричны: у старта распорка идёт и до, и
+  // после (слот в середине), у финиша распорки только ПОСЛЕ (слот сразу
+  // первым). Раньше тут была одна и та же раскладка для обоих - бейдж
+  // "Инсайт" рисовался в средней строке вместо верхней, и путь визуально
+  // как будто обрывался, не доходя до значка, хотя логика решения уже
+  // засчитывала связь верно.
+  if (isStart) col.appendChild(el("div"));
   const color = isStart ? "#5fd0e8" : (solved ? "#4ac9a0" : "#4a5560");
   const bg = isStart ? "rgba(95,208,232,.1)" : (solved ? "rgba(74,201,160,.12)" : "rgba(255,255,255,.04)");
   const anim = (!isStart && confirmed) ? "hypPulse 1.6s ease-in-out infinite" : "none";
@@ -9872,6 +9881,7 @@ function hypEndpointColumn(isStart, solved, confirmed) {
   else slot.append(stub, badge, label);
   col.appendChild(slot);
   col.appendChild(el("div"));
+  if (!isStart) col.appendChild(el("div"));
   return col;
 }
 
