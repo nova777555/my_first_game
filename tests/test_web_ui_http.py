@@ -142,7 +142,7 @@ class WebUiHttpTests(unittest.TestCase):
         status, state = self._get("/api/state")
         self.assertIn("tools", state)
         tool_ids = {t["id"] for t in state["tools"]}
-        self.assertEqual(tool_ids, {"pickaxe", "drill", "wrench", "sword"})
+        self.assertEqual(tool_ids, {"pickaxe", "drill", "wrench", "sword", "armor", "ore_scanner"})
         pickaxe = next(t for t in state["tools"] if t["id"] == "pickaxe")
         self.assertEqual(pickaxe["tier"], 1)
         self.assertEqual(pickaxe["max_tier"], len(fixtures.TOOLS["pickaxe"]["tiers"]))
@@ -223,17 +223,12 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertIsInstance(state["default_action_delay_ms"], (int, float))
         self.assertGreaterEqual(state["default_action_delay_ms"], 0)
 
-    def test_build_manual_and_mining_items_expose_click_delay_field(self):
+    def test_build_and_manual_items_expose_click_delay_field(self):
         status, state = self._get("/api/state")
         gen = next(b for b in state["categories"]["build"] if b["id"] == "gen")
         self.assertIn("click_delay_ms", gen)
         gather_a = next(m for m in state["categories"]["manual"] if m["id"] == "gather_a")
         self.assertIn("click_delay_ms", gather_a)
-
-        self._post("/api/action", {"type": "mining_search", "id": None})
-        status, state = self._get("/api/state")
-        mine_item = next(m for m in state["categories"]["mining"] if m.get("kind") == "mine")
-        self.assertIn("click_delay_ms", mine_item)
 
     def test_manual_action_exposes_sound_url(self):
         status, state = self._get("/api/state")
@@ -263,9 +258,38 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertIsNone(resp["log"]["sound_url"])
 
     def test_non_manual_action_response_has_no_sound_url(self):
-        status, resp = self._post("/api/action", {"type": "mining_search", "id": None})
+        status, resp = self._post("/api/action", {"type": "skip", "id": None})
         self.assertEqual(status, 200)
         self.assertIsNone(resp["log"]["sound_url"])
+
+    def test_ritual_recipe_exposes_sound_url(self):
+        web_ui.STATE.buildings["ritual_altar"] = 1
+        status, state = self._get("/api/state")
+        altar = next(a for a in state["ritual_altars"] if a["building_id"] == "ritual_altar")
+        recipe = next(r for r in altar["recipes"] if r["id"] == "ritual_basic")
+        self.assertIsNone(recipe["sound_url"])  # у fixtures ritual_basic нет sound
+
+        web_ui.RITUAL_RECIPES["ritual_basic"]["sound"] = "ritual_basic.wav"
+        try:
+            status, state = self._get("/api/state")
+            altar = next(a for a in state["ritual_altars"] if a["building_id"] == "ritual_altar")
+            recipe = next(r for r in altar["recipes"] if r["id"] == "ritual_basic")
+            self.assertEqual(recipe["sound_url"], "/sounds/ritual_basic.wav")
+        finally:
+            del web_ui.RITUAL_RECIPES["ritual_basic"]["sound"]
+
+    def test_action_response_includes_resolved_sound_url_for_ritual(self):
+        web_ui.STATE.buildings["ritual_altar"] = 1
+        web_ui.STATE.resources["raw_a"] = 2
+        web_ui.STATE.resources["raw_b"] = 1
+        web_ui.RITUAL_RECIPES["ritual_basic"]["sound"] = "ritual_basic.wav"
+        try:
+            status, resp = self._post("/api/action", {"type": "start_ritual", "id": "ritual_basic"})
+            self.assertEqual(status, 200)
+            self.assertTrue(resp["log"]["ok"])
+            self.assertEqual(resp["log"]["sound_url"], "/sounds/ritual_basic.wav")
+        finally:
+            del web_ui.RITUAL_RECIPES["ritual_basic"]["sound"]
 
     def test_sounds_route_serves_uploaded_file_with_content_type(self):
         sounds_dir = Path(web_ui.SOUNDS_DIR)
@@ -617,13 +641,38 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertNotIn("slot_hub", [b["id"] for b in resp["state"]["categories"]["build"]])
         self.assertEqual(next(b for b in resp["state"]["buildings"] if b["id"] == "slot_hub")["count"], 1)
 
-    def test_mining_search_finds_a_vein_without_a_resource_id(self):
-        # mineral в фикстуре разведан без технологии - доступен для поиска сразу
-        status, resp = self._post("/api/action", {"type": "mining_search", "id": None})
+    def test_mining_new_field_and_hit_cell_over_http(self):
+        # Поле шахты - отдельные эндпоинты (как insert_soul/house_creature), НЕ
+        # общий /api/action - клики по клеткам не должны тратить ход.
+        status, resp = self._post("/api/mining_new_field", {})
         self.assertEqual(status, 200)
-        self.assertTrue(resp["log"]["ok"])
-        mining = resp["state"]["categories"]["mining"]
-        self.assertTrue(any(m["kind"] == "mine" and m["resource_id"] == "mineral" for m in mining))
+        self.assertTrue(resp["ok"])
+        turn_before = resp["state"]["turn"]
+        mine_field = resp["state"]["mine_field"]
+        size = mine_field["size"]
+        center = size // 2
+        center_cell = mine_field["cells"][center * size + center]
+        self.assertTrue(center_cell["broken"])
+
+        # клетка, ортогонально граничащая с уже открытым центром - достижима сразу
+        status, resp = self._post("/api/mining_hit_cell", {"r": center, "c": center + 1})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"])
+        self.assertEqual(resp["state"]["turn"], turn_before)
+
+    def test_mining_vein_icon_is_independent_from_resource_icon(self):
+        # mining_info.*.icon - как выглядит ЖИЛА на поле, отдельно от icons.resources
+        # того же id (как выглядит уже добытый ресурс), по прямому пожеланию,
+        # 2026-09-16. Без своей иконки (rare_mineral) в icons.mining_veins записи
+        # вообще нет - клиент сам откатывается на resourceIcon (veinIcon() в
+        # web_ui.html), проверять тут нечего сверх самого отсутствия ключа.
+        vein_icon = {"grid": ["A"], "palette": {"A": "#123456"}}
+        patched = {**fixtures.MINING_INFO["mineral"], "icon": vein_icon}
+        with mock.patch.dict(web_ui.MINING_INFO, {"mineral": patched}):
+            status, state = self._get("/api/state")
+        self.assertEqual(status, 200)
+        self.assertEqual(state["icons"]["mining_veins"]["mineral"], vein_icon)
+        self.assertNotIn("rare_mineral", state["icons"]["mining_veins"])
 
     def test_converter_category_lists_recipes_and_converter_location_flag(self):
         status, state = self._get("/api/state")
@@ -710,6 +759,26 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertFalse(resp["log"]["ok"])
         self.assertEqual(web_ui.STATE.turn, turn_before)
 
+    def test_manual_action_card_exposes_blocked_by_for_other_action_in_same_location(self):
+        # craft_delayed_sibling живёт в той же location, что craft_delayed
+        # ("workshop_loc") - см. game/engine.py:do_manual_action.
+        web_ui.STATE.resources["raw_a"] = 10
+        status, resp = self._post("/api/action", {"type": "manual", "id": "craft_delayed"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+
+        sibling = next(m for m in resp["state"]["categories"]["manual"] if m["id"] == "craft_delayed_sibling")
+        self.assertFalse(sibling["already_running"])
+        self.assertEqual(sibling["blocked_by"], "Затяжной крафт")
+
+        status, resp = self._post("/api/action", {"type": "manual", "id": "craft_delayed_sibling"})
+        self.assertFalse(resp["log"]["ok"])
+
+        # Действие в подлокации ("sub_workshop") под ограничение не подпадает.
+        sub = next(m for m in resp["state"]["categories"]["manual"] if m["id"] == "craft_delayed_sub")
+        self.assertIsNone(sub["blocked_by"])
+        status, resp = self._post("/api/action", {"type": "manual", "id": "craft_delayed_sub"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+
     def test_cancel_manual_job_refunds_cost_and_frees_the_action_immediately(self):
         web_ui.STATE.resources["raw_a"] = 10
         self._post("/api/action", {"type": "manual", "id": "craft_delayed"})
@@ -728,6 +797,60 @@ class WebUiHttpTests(unittest.TestCase):
         # действие сразу можно запустить заново
         status, resp = self._post("/api/action", {"type": "manual", "id": "craft_delayed"})
         self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+
+    def test_multiturn_research_exposes_active_research_and_completes_via_advance_turn(self):
+        web_ui.STATE.buildings["lab2"] = 1
+        web_ui.STATE.resources["raw_a"] = 10
+        web_ui.STATE.solved_hypotheses.add("tech_tier2_slow")
+        status, resp = self._post("/api/action", {"type": "tech", "id": "tech_tier2_slow"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        state = resp["state"]
+        # advance_turn уже прогнан ВНУТРИ этого же запроса - к моменту ответа job
+        # успел тикнуть один раз (тот же принцип, что у craft_delayed выше).
+        self.assertEqual(state["active_research"], {
+            "tech_id": "tech_tier2_slow", "name": "Технология тира 2 (долгая)",
+            "turns_done": 1, "turns_total": 5,
+        })
+        tech_entry = next(t for t in state["tech_tree"] if t["id"] == "tech_tier2_slow")
+        self.assertEqual(tech_entry["research_turns"], 5)
+        self.assertEqual(tech_entry["status"], "available")  # ещё не изучена
+
+        for _ in range(4):
+            self._post("/api/action", {"type": "skip", "id": None})
+        status, state = self._get("/api/state")
+        self.assertIsNone(state["active_research"])
+        tech_entry = next(t for t in state["tech_tree"] if t["id"] == "tech_tier2_slow")
+        self.assertEqual(tech_entry["status"], "researched")
+
+    def test_switching_research_over_http_cancels_the_old_one_and_refunds_it(self):
+        web_ui.STATE.buildings["lab2"] = 1
+        web_ui.STATE.resources["raw_a"] = 10
+        web_ui.STATE.solved_hypotheses.update({"tech_tier2_slow", "tech_tier2"})
+        self._post("/api/action", {"type": "tech", "id": "tech_tier2_slow"})
+        self.assertEqual(web_ui.STATE.resources["raw_a"], 9)
+        status, resp = self._post("/api/action", {"type": "tech", "id": "tech_tier2"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        self.assertIn("отменено, затраты возвращены", resp["log"]["message"])
+        self.assertIsNone(resp["state"]["active_research"])  # tech_tier2 мгновенная
+        tech_entry = next(t for t in resp["state"]["tech_tree"] if t["id"] == "tech_tier2_slow")
+        self.assertEqual(tech_entry["status"], "available")  # отменённая - осталась неисследованной
+        tech_entry = next(t for t in resp["state"]["tech_tree"] if t["id"] == "tech_tier2")
+        self.assertEqual(tech_entry["status"], "researched")
+        self.assertEqual(resp["state"]["resources"]["raw_a"], 9)  # 10 - 1 (новый cost), старый вернулся
+
+    def test_cancel_research_refunds_cost_over_http(self):
+        web_ui.STATE.buildings["lab2"] = 1
+        web_ui.STATE.resources["raw_a"] = 10
+        web_ui.STATE.solved_hypotheses.add("tech_tier2_slow")
+        self._post("/api/action", {"type": "tech", "id": "tech_tier2_slow"})
+        self.assertEqual(web_ui.STATE.resources["raw_a"], 9)  # cost списан сразу при старте
+        status, resp = self._post("/api/cancel_job", {"kind": "research"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertIsNone(resp["state"]["active_research"])
+        self.assertEqual(resp["state"]["resources"]["raw_a"], 10)  # cost возвращён целиком
 
     def test_farms_and_creature_bank_are_empty_before_any_farm_is_built(self):
         status, state = self._get("/api/state")
@@ -817,6 +940,156 @@ class WebUiHttpTests(unittest.TestCase):
         purchased_2 = {u["id"] for u in farm_2["upgrades"]["upgrades"] if u["purchased"]}
         self.assertIn("ia_output", purchased_1)
         self.assertNotIn("ia_output", purchased_2)
+
+    def test_insert_and_remove_soul_via_http_uses_instance_id(self):
+        # Зеркало test_house_creature_.../test_purchase_farm_upgrade_... выше,
+        # но для синтезатора душ - с 2026-09-18 insert_soul/remove_soul тоже
+        # берут instance_id (физический экземпляр, state.soul_collector_instances),
+        # а не building_id (тип постройки) - см. CLAUDE.md/game/engine.py.
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/action", {"type": "build", "id": "soul_synth"})
+        self._post("/api/action", {"type": "build", "id": "soul_synth"})
+        status, state = self._get("/api/state")
+        instances = [e["id"] for e in state["soul_collectors"] if e["building_id"] == "soul_synth"]
+        self.assertEqual(len(instances), 2)
+        web_ui.STATE.resources["test_soul"] = 1
+        turn_before = web_ui.STATE.turn
+
+        status, resp = self._post("/api/insert_soul", {"instance_id": instances[0], "soul_id": "test_soul"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+        entry_1 = next(e for e in resp["state"]["soul_collectors"] if e["id"] == instances[0])
+        entry_2 = next(e for e in resp["state"]["soul_collectors"] if e["id"] == instances[1])
+        self.assertEqual(len(entry_1["installed"]), 1)
+        self.assertEqual(len(entry_2["installed"]), 0)
+
+        status, resp = self._post("/api/remove_soul", {"instance_id": instances[0], "index": 0})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(web_ui.STATE.resources["test_soul"], 1)
+
+    def test_purchase_soul_upgrade_does_not_advance_turn_and_is_isolated_per_instance(self):
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/action", {"type": "build", "id": "soul_synth"})
+        self._post("/api/action", {"type": "build", "id": "soul_synth"})
+        status, state = self._get("/api/state")
+        instances = [e["id"] for e in state["soul_collectors"] if e["building_id"] == "soul_synth"]
+        turn_before = web_ui.STATE.turn
+
+        status, resp = self._post("/api/purchase_soul_upgrade", {"instance_id": instances[0], "upgrade_id": "soul_synth_slot"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+
+        entry_1 = next(e for e in resp["state"]["soul_collectors"] if e["id"] == instances[0])
+        entry_2 = next(e for e in resp["state"]["soul_collectors"] if e["id"] == instances[1])
+        self.assertEqual(entry_1["capacity"], 2)  # base 1 + repeatable upgrade x1
+        self.assertEqual(entry_2["capacity"], 1)
+        purchased_1 = {u["id"] for u in entry_1["upgrades"]["upgrades"] if u["purchased"]}
+        purchased_2 = {u["id"] for u in entry_2["upgrades"]["upgrades"] if u["purchased"]}
+        self.assertIn("soul_synth_slot", purchased_1)
+        self.assertNotIn("soul_synth_slot", purchased_2)
+
+    def test_insert_and_remove_reactor_component_via_http_uses_instance_id(self):
+        # Зеркало test_insert_and_remove_soul_via_http_uses_instance_id - установка/
+        # снятие компонента реактора тоже берёт instance_id (см. state.py:
+        # reactor_instances), не building_id.
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/action", {"type": "build", "id": "test_reactor"})
+        self._post("/api/action", {"type": "build", "id": "test_reactor"})
+        status, state = self._get("/api/state")
+        instances = [e["id"] for e in state["reactors"] if e["building_id"] == "test_reactor"]
+        self.assertEqual(len(instances), 2)
+        web_ui.STATE.resources["test_fuel"] = 1
+        turn_before = web_ui.STATE.turn
+
+        status, resp = self._post("/api/insert_reactor_component", {"instance_id": instances[0], "cell_index": 0, "resource_id": "test_fuel"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+        entry_1 = next(e for e in resp["state"]["reactors"] if e["id"] == instances[0])
+        entry_2 = next(e for e in resp["state"]["reactors"] if e["id"] == instances[1])
+        self.assertIsNotNone(entry_1["grid"][0])
+        self.assertIsNone(entry_2["grid"][0])
+
+        status, resp = self._post("/api/remove_reactor_component", {"instance_id": instances[0], "cell_index": 0})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(web_ui.STATE.resources["test_fuel"], 1)
+
+    def test_set_reactor_zone_control_and_coolant_do_not_advance_turn(self):
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/action", {"type": "build", "id": "test_reactor"})
+        status, state = self._get("/api/state")
+        instance_id = next(e for e in state["reactors"] if e["building_id"] == "test_reactor")["id"]
+        turn_before = web_ui.STATE.turn
+
+        status, resp = self._post("/api/set_reactor_zone_control", {"instance_id": instance_id, "zone_index": 0, "depth_pct": 40})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        status, resp = self._post("/api/set_reactor_zone_coolant", {"instance_id": instance_id, "zone_index": 0, "flow_pct": 60})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+        entry = next(e for e in resp["state"]["reactors"] if e["id"] == instance_id)
+        self.assertEqual(entry["zones"][0]["control_rod_depth"], 40)
+        self.assertEqual(entry["zones"][0]["coolant_flow"], 60)
+
+    def test_purchase_reactor_upgrade_does_not_advance_turn_and_is_isolated_per_instance(self):
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/action", {"type": "build", "id": "test_reactor"})
+        self._post("/api/action", {"type": "build", "id": "test_reactor"})
+        status, state = self._get("/api/state")
+        instances = [e["id"] for e in state["reactors"] if e["building_id"] == "test_reactor"]
+        turn_before = web_ui.STATE.turn
+
+        status, resp = self._post("/api/purchase_reactor_upgrade", {"instance_id": instances[0], "upgrade_id": "test_reactor_zoning_2"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+
+        entry_1 = next(e for e in resp["state"]["reactors"] if e["id"] == instances[0])
+        entry_2 = next(e for e in resp["state"]["reactors"] if e["id"] == instances[1])
+        self.assertEqual(len(entry_1["zones"]), 2)
+        self.assertEqual(len(entry_2["zones"]), 1)
+        purchased_1 = {u["id"] for u in entry_1["upgrades"]["upgrades"] if u["purchased"]}
+        purchased_2 = {u["id"] for u in entry_2["upgrades"]["upgrades"] if u["purchased"]}
+        self.assertIn("test_reactor_zoning_2", purchased_1)
+        self.assertNotIn("test_reactor_zoning_2", purchased_2)
+
+    def test_purchase_reactor_grid_upgrade_with_dict_value_does_not_crash_view(self):
+        # Регрессия: reactor_grid_size хранит value как dict ({"width","height"}),
+        # а не число - фильтр "скрыть более слабый купленный уровень того же типа"
+        # раньше сравнивал value через max()/< напрямую и падал TypeError на
+        # сравнении dict с dict сразу при первой покупке. См.
+        # web_ui.py:_superseded_upgrade_ids.
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/action", {"type": "build", "id": "test_reactor"})
+        status, state = self._get("/api/state")
+        instance_id = next(e for e in state["reactors"] if e["building_id"] == "test_reactor")["id"]
+
+        status, resp = self._post("/api/purchase_reactor_upgrade", {"instance_id": instance_id, "upgrade_id": "test_reactor_grid_3x2"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+
+        # build_view уже пересобран сервером внутри resp - убеждаемся, что
+        # список апгрейдов вообще пришёл (а не свалился до ответа) и что
+        # купленный dict-value апгрейд помечен purchased.
+        entry = next(e for e in resp["state"]["reactors"] if e["id"] == instance_id)
+        by_id = {u["id"]: u for u in entry["upgrades"]["upgrades"]}
+        self.assertTrue(by_id["test_reactor_grid_3x2"]["purchased"])
+
+        # Повторный GET /api/state (полный build_view с нуля) тоже не должен падать.
+        status, state = self._get("/api/state")
+        self.assertEqual(status, 200)
+
+    def test_reactor_component_bank_lists_tagged_resources(self):
+        web_ui.STATE.resources["test_fuel"] = 3
+        status, state = self._get("/api/state")
+        bank = {e["id"]: e for e in state["reactor_bank"]}
+        self.assertEqual(bank["test_fuel"]["role"], "fuel")
+        self.assertEqual(bank["test_fuel"]["amount"], 3)
 
     def test_breed_action_advances_turn_and_removes_both_parents(self):
         # Скрещивание требует ОТДЕЛЬНЫЙ работающий механизм (crossing_station,
@@ -919,6 +1192,18 @@ class WebUiHttpTests(unittest.TestCase):
 
         status, resp = self._post("/api/autocraft_toggle", {})
         self.assertTrue(resp["state"]["autocraft_enabled"])
+
+    def test_enchanting_view_exposes_strip_on_fail_as_a_content_setting(self):
+        # strip_on_fail - настройка КОНТЕНТА (buildings.*.enchanting_table, правит
+        # автор в редакторе), не игрока - нет отдельного API-эндпоинта, чтобы
+        # игрок мог её переключить сам.
+        status, resp = self._get("/api/state")
+        self.assertTrue(resp["enchanting"]["strip_on_fail"])  # дефолт, стола ещё нет
+
+        web_ui.STATE.buildings["ench_table"] = 1
+        with mock.patch.dict(engine.BUILDINGS["ench_table"]["enchanting_table"], {"strip_on_fail": False}):
+            status, resp = self._get("/api/state")
+        self.assertFalse(resp["enchanting"]["strip_on_fail"])
 
     def test_set_action_priority_overrides_default_without_advancing_turn(self):
         status, resp = self._get("/api/state")
@@ -1112,6 +1397,21 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 400)
         status, resp = self._post("/api/saves/save", {"name": ""})
         self.assertEqual(status, 400)
+
+    def test_save_rejects_reserved_autosave_name(self):
+        # "autosave" зарезервировано под SAVE_PATH (файл autosave.json в той же
+        # SAVES_DIR) - иначе именованное сохранение перезаписало бы автосейв.
+        status, resp = self._post("/api/saves/save", {"name": "autosave"})
+        self.assertEqual(status, 400)
+        status, resp = self._post("/api/saves/save", {"name": "AutoSave"})
+        self.assertEqual(status, 400)
+
+    def test_saves_list_excludes_the_autosave_file(self):
+        web_ui.SAVES_DIR.mkdir(exist_ok=True)
+        web_ui.STATE.save(str(web_ui.SAVES_DIR / "autosave.json"))
+        status, resp = self._get("/api/saves")
+        self.assertEqual(status, 200)
+        self.assertNotIn("autosave", [s["name"] for s in resp["saves"]])
 
 
 if __name__ == "__main__":

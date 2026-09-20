@@ -3311,20 +3311,86 @@ def remove_reactor_component(state: GameState, instance_id: str, cell_index: int
     """Возвращает компонент из ячейки решётки обратно в инвентарь - не тратит
     ход, как remove_soul. Выгоревшее топливо (charge == 0) возвращает НЕ
     исходный ресурс, а его spent_result (resources.*.reactor_component.
-    spent_result) - ячейка очищается в обоих случаях."""
+    spent_result) - ячейка очищается в обоих случаях. Если в ячейке ещё стоял
+    катализатор (cell["catalyst_id"]) - он тоже возвращается в инвентарь
+    ЦЕЛИКОМ (не теряется вместе со снятым компонентом), см.
+    remove_reactor_catalyst для съёма ОДНОГО катализатора без демонтажа
+    самого компонента."""
     instance = state.reactor_instances.get(instance_id)
     grid = instance["grid"] if instance is not None else []
     if not (0 <= cell_index < len(grid)) or grid[cell_index] is None:
         return ActionResult(False, "Тут ничего не установлено.")
     cell = grid[cell_index]
     resource_id = cell["resource_id"]
+    catalyst_id = cell.get("catalyst_id")
     if cell.get("charge") == 0:
         returned_id = RESOURCE_REACTOR_COMPONENT.get(resource_id, {}).get("spent_result", resource_id)
     else:
         returned_id = resource_id
     grid[cell_index] = None
     _add_resource(state.resources, returned_id, 1)
-    return ActionResult(True, f"«{RESOURCE_NAMES.get(returned_id, returned_id)}» возвращена в инвентарь.")
+    message = f"«{RESOURCE_NAMES.get(returned_id, returned_id)}» возвращена в инвентарь."
+    if catalyst_id is not None:
+        _add_resource(state.resources, catalyst_id, 1)
+        message += f" Катализатор «{RESOURCE_NAMES.get(catalyst_id, catalyst_id)}» снят вместе с ней."
+    return ActionResult(True, message)
+
+
+def reactor_catalyst_bank_view(state: GameState) -> list[dict]:
+    """Все ресурсы-катализаторы (ключи RESOURCE_REACTOR_CATALYST) с их
+    applies_to и наличием в инвентаре - зеркало reactor_component_bank_view,
+    источник банка для UI-модалки выбора катализатора конкретной ячейки
+    (фронтенд фильтрует по роли компонента, уже стоящего в этой ячейке)."""
+    return [
+        {"id": rid, "applies_to": tag.get("applies_to", []), "amount": state.resources.get(rid, 0)}
+        for rid, tag in RESOURCE_REACTOR_CATALYST.items()
+    ]
+
+
+def insert_reactor_catalyst(state: GameState, instance_id: str, cell_index: int, resource_id: str) -> ActionResult:
+    """Установка катализатора В УЖЕ занятую ячейку решётки - один слот на
+    клетку (cell["catalyst_id"]), не тратит ход (тот же пул, что
+    insert_reactor_component). Требует, чтобы роль УЖЕ стоящего в клетке
+    компонента входила в resources.*.reactor_catalyst.applies_to катализатора
+    - в пустую клетку катализатор не ставится (усиливать нечего)."""
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого реактора нет.")
+    grid = instance.get("grid", [])
+    if not (0 <= cell_index < len(grid)) or grid[cell_index] is None:
+        return ActionResult(False, "Сюда нечего усиливать - клетка пуста.")
+    cell = grid[cell_index]
+    name = RESOURCE_NAMES.get(resource_id, resource_id)
+    catalyst = RESOURCE_REACTOR_CATALYST.get(resource_id)
+    if catalyst is None:
+        return ActionResult(False, f"«{name}» не катализатор.")
+    role = reactor_component_role(cell["resource_id"])
+    if role not in catalyst.get("applies_to", []):
+        return ActionResult(False, f"«{name}» не подходит для этой роли.")
+    if cell.get("catalyst_id") is not None:
+        return ActionResult(False, "В этой клетке уже есть катализатор.")
+    if state.resources.get(resource_id, 0) < 1:
+        return ActionResult(False, f"Нет в наличии: «{name}».")
+    state.resources[resource_id] -= 1
+    cell["catalyst_id"] = resource_id
+    return ActionResult(True, f"«{name}» установлен.")
+
+
+def remove_reactor_catalyst(state: GameState, instance_id: str, cell_index: int) -> ActionResult:
+    """Снятие катализатора обратно в инвентарь БЕЗ демонтажа самого
+    компонента - не тратит ход. Катализатор возвращается 1:1 (не выгорает и
+    не расходуется сам по себе, в отличие от топлива)."""
+    instance = state.reactor_instances.get(instance_id)
+    grid = instance["grid"] if instance is not None else []
+    if not (0 <= cell_index < len(grid)) or grid[cell_index] is None:
+        return ActionResult(False, "Тут ничего не установлено.")
+    cell = grid[cell_index]
+    catalyst_id = cell.get("catalyst_id")
+    if catalyst_id is None:
+        return ActionResult(False, "Тут нет катализатора.")
+    cell["catalyst_id"] = None
+    _add_resource(state.resources, catalyst_id, 1)
+    return ActionResult(True, f"«{RESOURCE_NAMES.get(catalyst_id, catalyst_id)}» возвращён в инвентарь.")
 
 
 def set_reactor_zone_control(state: GameState, instance_id: str, zone_index: int, depth_pct: int) -> ActionResult:
@@ -5430,6 +5496,8 @@ def research(state: GameState, tech_id: str) -> ActionResult:
         return ActionResult(False, "Уже исследуется.")
     if not is_tech_available(tech_id, state):
         return ActionResult(False, "Не выполнены условия для исследования.")
+    if tech_id not in state.solved_hypotheses:
+        return ActionResult(False, "Сначала нужно решить гипотезу.")
     tech = TECHS[tech_id]
     tier = tech.get("tier", 1)
     # Тир 1 доступен всегда без лаборатории; тир N>1 требует хотя бы одну РАБОТАЮЩУЮ
@@ -6105,16 +6173,16 @@ def _process_reactors(state: GameState, report: ProductionReport, daytime: bool)
         # что и в _reactor_zone_raw_totals, продублирована намеренно: список
         # активных ячеек там не сохраняется наружу, чтобы не плодить лишнее
         # состояние ради одного прохода.
-        for cell in grid:
+        for cell_index, cell in enumerate(grid):
             if cell is None:
                 continue
-            component = RESOURCE_REACTOR_COMPONENT.get(cell["resource_id"], {})
-            if component.get("role") != "fuel":
+            if reactor_component_role(cell["resource_id"]) != "fuel":
                 continue
             charge = cell.get("charge")
             if charge is None or charge <= 0:
                 continue
-            cell["charge"] = max(0, charge - component.get("burnup_per_turn", 0))
+            burnup = _reactor_effective_component(grid, width, height, cell_index)["burnup_per_turn"]
+            cell["charge"] = max(0, charge - burnup)
 
         total_output = 0.0
         for zone_idx, zone in enumerate(zones):

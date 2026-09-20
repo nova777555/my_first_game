@@ -760,6 +760,52 @@ class ManualJobTests(FixtureTestCase):
         self.assertEqual(s.turn, turn_before)  # клик заблокирован ДО advance_turn
         self.assertEqual(s.resources, resources_before)  # cost не списан второй раз
 
+    def test_other_multiturn_action_in_same_location_is_blocked(self):
+        # craft_delayed_sibling живёт в той же location, что craft_delayed
+        # ("workshop_loc") - пока craft_delayed тикает, второе многоходовое
+        # действие той же локации стартовать нельзя, даже другим action_id.
+        s = GameState(resources={"raw_a": 10})
+        engine.do_manual_action(s, "craft_delayed")
+        turn_before = s.turn
+        resources_before = dict(s.resources)
+
+        result = engine.do_manual_action(s, "craft_delayed_sibling")
+        self.assertFalse(result.ok)
+        self.assertNotIn("craft_delayed_sibling", s.manual_jobs)
+        self.assertEqual(s.turn, turn_before)
+        self.assertEqual(s.resources, resources_before)  # cost не списан
+
+    def test_multiturn_action_in_child_location_is_not_blocked(self):
+        # craft_delayed_sub - в "sub_workshop" (parent_location=workshop_loc) -
+        # ограничение НЕ рекурсивное: подлокация свободна, даже пока в родительской
+        # локации уже тикает свой многоходовой job.
+        s = GameState(resources={"raw_a": 10})
+        engine.do_manual_action(s, "craft_delayed")
+
+        result = engine.do_manual_action(s, "craft_delayed_sub")
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("craft_delayed_sub", s.manual_jobs)
+
+    def test_location_frees_up_once_the_running_job_completes(self):
+        s = GameState(resources={"raw_a": 10})
+        engine.do_manual_action(s, "craft_delayed")  # 3 хода
+        for _ in range(3):
+            engine.advance_turn(s)
+        self.assertNotIn("craft_delayed", s.manual_jobs)
+
+        result = engine.do_manual_action(s, "craft_delayed_sibling")
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("craft_delayed_sibling", s.manual_jobs)
+
+    def test_location_frees_up_after_explicit_cancel(self):
+        s = GameState(resources={"raw_a": 10})
+        engine.do_manual_action(s, "craft_delayed")
+        engine.cancel_manual_job(s, "craft_delayed")
+
+        result = engine.do_manual_action(s, "craft_delayed_sibling")
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("craft_delayed_sibling", s.manual_jobs)
+
     def test_cancel_manual_job_refunds_already_paid_cost(self):
         s = GameState(resources={"raw_a": 10})
         engine.do_manual_action(s, "craft_delayed")
@@ -1302,7 +1348,7 @@ class BuildResearchRepairTests(FixtureTestCase):
         self.assertNotIn("reactor", s.construction_progress)
 
     def test_research_requires_prerequisites(self):
-        s = GameState(resources={"mid": 10})
+        s = GameState(resources={"mid": 10}, solved_hypotheses={"tech2"})
         result = engine.research(s, "tech2")  # requires tech1
         self.assertFalse(result.ok)
         s.techs.add("tech1")
@@ -1311,11 +1357,31 @@ class BuildResearchRepairTests(FixtureTestCase):
         self.assertIn("tech2", s.techs)
 
     def test_research_twice_fails(self):
-        s = GameState(resources={"raw_a": 100})
+        s = GameState(resources={"raw_a": 100}, solved_hypotheses={"tech1"})
         result = engine.research(s, "tech1")
         self.assertTrue(result.ok)
         result2 = engine.research(s, "tech1")
         self.assertFalse(result2.ok)
+
+    def test_research_requires_solved_hypothesis(self):
+        s = GameState(resources={"raw_a": 100})
+        result = engine.research(s, "tech1")
+        self.assertFalse(result.ok)
+        engine.solve_hypothesis(s, "tech1")
+        result = engine.research(s, "tech1")
+        self.assertTrue(result.ok)
+
+    def test_solve_hypothesis_twice_fails(self):
+        s = GameState()
+        result = engine.solve_hypothesis(s, "tech1")
+        self.assertTrue(result.ok)
+        result2 = engine.solve_hypothesis(s, "tech1")
+        self.assertFalse(result2.ok)
+
+    def test_solve_hypothesis_unknown_tech_fails(self):
+        s = GameState()
+        result = engine.solve_hypothesis(s, "no_such_tech")
+        self.assertFalse(result.ok)
 
     def test_repair_nothing_broken(self):
         s = GameState()
@@ -1592,8 +1658,18 @@ class ResourceCapTests(FixtureTestCase):
         self.assertEqual(s.resources["raw_b"], engine.MAX_RESOURCE_AMOUNT)
 
     def test_mining_extraction_is_capped(self):
-        s = GameState(resources={"mineral": engine.MAX_RESOURCE_AMOUNT - 1}, veins={"mineral": 100})
-        engine.mine_vein(s, "mineral")
+        s = GameState(resources={"mineral": engine.MAX_RESOURCE_AMOUNT - 1})
+        field = {
+            "size": 3,
+            "cells": [
+                {"resource": None, "hp": 1, "hp_max": 1, "broken": False, "revealed": False}
+                for _ in range(9)
+            ],
+        }
+        field["cells"][1 * 3 + 0] = {"resource": None, "hp": 1, "hp_max": 1, "broken": True, "revealed": True}
+        field["cells"][1 * 3 + 1] = {"resource": "mineral", "hp": 2, "hp_max": 2, "broken": False, "revealed": False}
+        s.active_mine_field = field
+        engine.hit_mine_field(s, 1, 1)
         self.assertEqual(s.resources["mineral"], engine.MAX_RESOURCE_AMOUNT)
 
     def test_energy_craft_output_is_capped(self):
@@ -1800,28 +1876,142 @@ class LabTierTests(FixtureTestCase):
         self.assertEqual(engine.lab_tier_capacity(s), 1)
 
     def test_tier1_tech_researchable_without_any_lab(self):
-        s = GameState(resources={"raw_a": 5})
+        s = GameState(resources={"raw_a": 5}, solved_hypotheses={"tech1"})
         result = engine.research(s, "tech1")
         self.assertTrue(result.ok)
         self.assertIn("tech1", s.techs)
 
     def test_tier2_tech_fails_without_a_tier2_lab(self):
-        s = GameState(resources={"raw_a": 5})
+        s = GameState(resources={"raw_a": 5}, solved_hypotheses={"tech_tier2"})
         result = engine.research(s, "tech_tier2")
         self.assertFalse(result.ok)
         self.assertNotIn("tech_tier2", s.techs)
         self.assertIn("лаборатория", result.message.lower())
 
     def test_tier2_tech_succeeds_once_the_lab_is_built_and_working(self):
-        s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1})
+        s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2"})
         result = engine.research(s, "tech_tier2")
         self.assertTrue(result.ok)
         self.assertIn("tech_tier2", s.techs)
 
     def test_tier2_tech_fails_again_once_the_lab_breaks(self):
-        s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1}, broken={"lab2": 1})
+        s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1}, broken={"lab2": 1}, solved_hypotheses={"tech_tier2"})
         result = engine.research(s, "tech_tier2")
         self.assertFalse(result.ok)
+
+
+class MultiTurnResearchTests(FixtureTestCase):
+    """techs.*.research_turns > 1 (см. TECHS["tech_tier2_slow"], research_turns=5) -
+    research() запускает state.active_research вместо мгновенного завершения,
+    как техи без research_turns (tech1/tech_tier2 и т.п., покрыты выше)."""
+
+    def test_starting_multiturn_research_pays_cost_but_defers_completion(self):
+        s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2_slow"})
+        result = engine.research(s, "tech_tier2_slow")
+        self.assertTrue(result.ok)
+        self.assertIn("Начато", result.message)
+        self.assertNotIn("tech_tier2_slow", s.techs)
+        self.assertEqual(s.resources["raw_a"], 4)  # cost списан сразу
+        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow", "turns_total": 5, "turns_done": 0})
+
+    def test_advancing_turns_completes_research_after_turns_total(self):
+        s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2_slow"})
+        engine.research(s, "tech_tier2_slow")
+        for _ in range(4):
+            report = engine.advance_turn(s)
+            self.assertIsNone(report.research_completed)
+            self.assertNotIn("tech_tier2_slow", s.techs)
+        report = engine.advance_turn(s)
+        self.assertEqual(report.research_completed, "tech_tier2_slow")
+        self.assertIn("tech_tier2_slow", s.techs)
+        self.assertIsNone(s.active_research)
+
+    def test_switching_to_a_different_research_cancels_the_old_one_and_refunds_it(self):
+        s = GameState(
+            resources={"raw_a": 10},
+            buildings={"lab2": 1},
+            solved_hypotheses={"tech_tier2_slow", "tech_tier2"},
+        )
+        engine.research(s, "tech_tier2_slow")
+        self.assertEqual(s.resources["raw_a"], 9)  # cost старого исследования уже списан
+        result = engine.research(s, "tech_tier2")  # мгновенная технология (без research_turns)
+        self.assertTrue(result.ok)
+        self.assertIn("отменено, затраты возвращены", result.message)
+        self.assertIn("Изучено", result.message)
+        self.assertNotIn("tech_tier2_slow", s.techs)
+        self.assertIn("tech_tier2", s.techs)
+        self.assertIsNone(s.active_research)  # новая - мгновенная, слот снова пуст
+        self.assertEqual(s.resources["raw_a"], 9)  # старый cost вернулся (10), новый списан (-1) => 9
+
+    def test_switching_between_two_multiturn_researches_starts_a_fresh_job(self):
+        s = GameState(
+            resources={"raw_a": 10, "raw_b": 10},
+            buildings={"lab2": 1},
+            solved_hypotheses={"tech_tier2_slow", "tech_tier2_slow_b"},
+        )
+        engine.research(s, "tech_tier2_slow")
+        engine.advance_turn(s)  # turns_done=1 из turns_total=5
+        self.assertEqual(s.resources["raw_a"], 9)
+        result = engine.research(s, "tech_tier2_slow_b")
+        self.assertTrue(result.ok)
+        self.assertIn("«Технология тира 2 (долгая)» отменено, затраты возвращены", result.message)
+        self.assertEqual(s.resources["raw_a"], 10)  # старый cost вернулся целиком
+        self.assertEqual(s.resources["raw_b"], 9)  # новый cost списан
+        # Новый job СВЕЖИЙ (своё research_turns=4, turns_done=0), не донашивает
+        # turns_done=1, накопленный отменённым tech_tier2_slow.
+        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow_b", "turns_total": 4, "turns_done": 0})
+
+    def test_reclicking_the_same_active_research_is_a_no_op(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2_slow"})
+        engine.research(s, "tech_tier2_slow")
+        result = engine.research(s, "tech_tier2_slow")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.message, "Уже исследуется.")
+        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow", "turns_total": 5, "turns_done": 0})
+        self.assertEqual(s.resources["raw_a"], 9)  # cost не списан повторно
+
+    def test_failed_switch_does_not_touch_the_original_research(self):
+        # raw_a хватает РОВНО на первую технологию - вторая (тоже стоит raw_a) не
+        # может быть оплачена и не может быть докрафчена (нет автокрафт-построек в
+        # этой фикстуре) - значит research() должен вернуть отказ ДО того, как
+        # тронул старый active_research (см. порядок проверок в research()).
+        s = GameState(
+            resources={"raw_a": 1},
+            buildings={"lab2": 1},
+            solved_hypotheses={"tech_tier2_slow", "tech_tier2"},
+        )
+        engine.research(s, "tech_tier2_slow")
+        original = dict(s.active_research)
+        result = engine.research(s, "tech_tier2")
+        self.assertFalse(result.ok)
+        self.assertEqual(s.active_research, original)  # старый прогресс не тронут
+        self.assertEqual(s.resources["raw_a"], 0)  # не возвращён и не списан повторно
+
+    def test_cancel_research_refunds_cost_and_clears_slot(self):
+        s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2_slow"})
+        engine.research(s, "tech_tier2_slow")
+        result = engine.cancel_research(s)
+        self.assertTrue(result.ok)
+        self.assertIsNone(s.active_research)
+        self.assertEqual(s.resources["raw_a"], 5)  # cost возвращён целиком
+
+    def test_cancel_research_fails_when_nothing_is_active(self):
+        s = GameState()
+        result = engine.cancel_research(s)
+        self.assertFalse(result.ok)
+
+    def test_research_speed_upgrade_reduces_turns_for_matching_tier_only(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"lab2": 1})
+        engine.purchase_building_upgrade(s, "lab2", "lab2_speed")
+        self.assertEqual(engine.tech_research_turns("tech_tier2_slow", s), 3)  # 5 - 2
+        # Тир 1 не имеет лаборатории вовсе - апгрейд лаборатории тира 2 его не касается.
+        self.assertEqual(engine.tech_research_turns("tech1", s), 1)
+
+    def test_research_speed_upgrade_shortens_the_actual_job(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2_slow"})
+        engine.purchase_building_upgrade(s, "lab2", "lab2_speed")
+        engine.research(s, "tech_tier2_slow")
+        self.assertEqual(s.active_research["turns_total"], 3)
 
 
 class BuildingUpgradesTests(FixtureTestCase):
@@ -2313,193 +2503,315 @@ class RandomProduceTests(FixtureTestCase):
         self.assertEqual(s.resources.get("variable_output", 0), 7)  # 2 + 5, независимые броски
 
 
-class MiningTests(FixtureTestCase):
-    def test_common_mineral_available_at_starting_pickaxe_tier(self):
+def _blank_mine_field(size: int, overrides: dict[tuple[int, int], dict] | None = None) -> dict:
+    cells = [
+        {"resource": None, "hp": 1, "hp_max": 1, "broken": False, "revealed": False}
+        for _ in range(size * size)
+    ]
+    for (r, c), patch in (overrides or {}).items():
+        cells[r * size + c].update(patch)
+    return {"size": size, "cells": cells}
+
+
+class MiningFieldGenerationTests(FixtureTestCase):
+    def test_generated_field_has_broken_and_revealed_center(self):
         s = GameState()
-        self.assertTrue(engine.is_mining_unlocked("mineral", s))
+        field = engine._generate_mine_field(s)
+        size = field["size"]
+        center = size // 2
+        center_cell = field["cells"][engine._mine_field_idx(size, center, center)]
+        self.assertTrue(center_cell["broken"])
+        self.assertTrue(center_cell["revealed"])
+        neighbor = field["cells"][engine._mine_field_idx(size, center, center - 1)]
+        self.assertTrue(neighbor["revealed"])
+        self.assertFalse(neighbor["broken"])
 
-    def test_rare_mineral_needs_tier_2_pickaxe(self):
-        s = GameState()
-        self.assertFalse(engine.is_mining_unlocked("rare_mineral", s))
-        s.tool_tiers["pickaxe"] = 2
-        self.assertTrue(engine.is_mining_unlocked("rare_mineral", s))
-
-    def test_search_any_always_finds_exactly_one_vein(self):
-        # на тире 3 разведаны обе руды фикстуры - поиск должен приносить ровно
-        # одну из них за раз, а не обе сразу (редкость определяет ТОЛЬКО то,
-        # какая из них найдётся, а не сколько штук)
-        s = GameState(tool_tiers={"pickaxe": 3})
-        found = engine.search_vein_any(s)
-        self.assertTrue(found.ok)
-        self.assertEqual(len(s.veins), 1)
-        self.assertTrue(set(s.veins) <= {"mineral", "rare_mineral"})
-
-    def test_search_then_mine_cycle(self):
-        # на тире 1 разведан только mineral (rare_mineral нужен тир 2) - единственный
-        # кандидат, результат детерминирован без seed
-        s = GameState()
-        found = engine.search_vein_any(s)
-        self.assertTrue(found.ok)
-        self.assertIn("mineral", s.veins)
-        remaining_before = s.veins["mineral"]
-        result = engine.mine_vein(s, "mineral")
-        self.assertTrue(result.ok)
-        # жила (20-30) не может истощиться за один ход с добычей 4/ход на тире 1
-        self.assertIn("mineral", s.veins)
-        self.assertLess(s.veins["mineral"], remaining_before)
-
-    def test_search_any_fails_only_when_nothing_is_surveyed_at_all(self):
-        # тир 0 не встречается в реальной игре (кирка стартует с тира 1), но как
-        # предельный случай показывает, что поиск отказывает ТОЛЬКО когда вообще
-        # ни одна руда не разведана - а не когда единственная разведанная уже
-        # когда-то была найдена (это больше не блокирует поиск, см. тесты ниже)
+    def test_ore_spawns_regardless_of_tool_tier(self):
+        # rare_mineral требует тир 2 - гейт спавна на поле только по requires_tech
+        # (тут None), тир инструмента решает лишь ломаемость, а не появление.
+        # Состав поля теперь лотерея (см. _roll_field_cluster_counts) - не
+        # гарантия "каждый исследованный вид хотя бы раз", поэтому здесь
+        # фиксируем розыгрыш мокой, чтобы проверить именно независимость от
+        # тира инструмента, а не удачу.
         s = GameState(tool_tiers={"pickaxe": 0})
-        result = engine.search_vein_any(s)
+        with mock.patch.object(engine.random, "choices", return_value=["mineral", "rare_mineral", "mineral", "mineral"]):
+            field = engine._generate_mine_field(s)
+        self.assertTrue(any(cell["resource"] == "rare_mineral" for cell in field["cells"]))
+
+    def test_ore_requiring_unresearched_tech_does_not_spawn(self):
+        patched = {**engine.MINING_INFO["mineral"], "requires_tech": "tech1"}
+        s = GameState()  # tech1 не исследована
+        with mock.patch.dict(engine.MINING_INFO, {"mineral": patched}):
+            field = engine._generate_mine_field(s)
+        self.assertFalse(any(cell["resource"] == "mineral" for cell in field["cells"]))
+        self.assertTrue(any(cell["resource"] == "rare_mineral" for cell in field["cells"]))
+
+    def test_new_mine_field_regenerates_and_discards_progress(self):
+        s = GameState()
+        old_field = engine._generate_mine_field(s)
+        s.active_mine_field = old_field
+        result = engine.new_mine_field(s)
+        self.assertTrue(result.ok)
+        self.assertIsNot(s.active_mine_field, old_field)
+
+    def test_cluster_lottery_respects_budget_and_weights(self):
+        # Состав поля - взвешенная лотерея на cluster_budget слотов (см.
+        # _roll_field_cluster_counts), НЕ гарантия "каждому исследованному
+        # виду хотя бы 1 кластер" - проверяем и сам вызов (population/k), и
+        # что подсчёт повторов работает как ожидается.
+        s = GameState()
+        with mock.patch.object(engine.random, "choices") as choices_mock:
+            choices_mock.return_value = ["mineral", "mineral", "rare_mineral", "mineral"]
+            counts = engine._roll_field_cluster_counts(s)
+        args, kwargs = choices_mock.call_args
+        self.assertEqual(set(args[0]), {"mineral", "rare_mineral"})
+        self.assertEqual(kwargs["k"], engine.MINE_FIELD["cluster_budget"])
+        self.assertEqual(counts, {"mineral": 3, "rare_mineral": 1})
+
+    def test_rock_cells_get_icon_variant_within_pool_range(self):
+        # rock_icon_variants - чисто косметический пул спрайтов породы (см.
+        # CLAUDE.md: "разнообразие обычной породы - только визуально"), тут
+        # проверяем только что индекс не выходит за пул [rock_icon, *variants]
+        # и что реально используются разные варианты, а не всегда 0.
+        variants = [{"grid": ["."], "palette": {}}, {"grid": ["."], "palette": {}}]
+        patched = {**engine.MINE_FIELD, "rock_icon_variants": variants}
+        s = GameState()
+        with mock.patch.dict(engine.MINE_FIELD, patched, clear=True):
+            field = engine._generate_mine_field(s)
+        rock_cells = [c for c in field["cells"] if c["resource"] is None]
+        self.assertTrue(rock_cells)
+        self.assertTrue(all(0 <= c["icon_variant"] < 3 for c in rock_cells))
+        self.assertTrue(any(c["icon_variant"] != 0 for c in rock_cells))
+
+    def test_mine_field_view_exposes_rock_icon_pool_and_cell_variant(self):
+        s = GameState()
+        view = engine.mine_field_view(s)
+        self.assertEqual(view["rock_icons"][0], engine.MINE_FIELD.get("rock_icon"))
+        rock_cell_view = next(
+            cell for cell in view["cells"]
+            if cell.get("revealed") and not cell.get("broken") and "resource" not in cell
+        )
+        self.assertIn("icon_variant", rock_cell_view)
+
+
+class MineFieldScannerTests(FixtureTestCase):
+    """Щуп-детектор (mine_field.scanner_tool) - чисто информационный, пороги
+    тира (fixtures.py: ore_scanner, 6 тиров: types=2, counts=3, radius=4/5,
+    reveal_all=6). Тир 1 - дефолтный для всех (см. CLAUDE.md: тир 1 = "не
+    откалиброван"), намеренно ничего не даёт."""
+
+    def test_scanner_tier1_reveals_nothing(self):
+        s = GameState(tool_tiers={"ore_scanner": 1})
+        s.active_mine_field = _blank_mine_field(4, {(0, 0): {"resource": "mineral"}})
+        view = engine.mine_field_view(s)
+        mineral_entry = next(c for c in view["ore_catalog"] if c["id"] == "mineral")
+        self.assertNotIn("present_on_field", mineral_entry)
+        self.assertNotIn("field_count", mineral_entry)
+
+    def test_scanner_tier2_reveals_types_without_counts(self):
+        s = GameState(tool_tiers={"ore_scanner": 2})
+        s.active_mine_field = _blank_mine_field(4, {
+            (0, 0): {"resource": "mineral"}, (0, 1): {"resource": "mineral"},
+        })
+        view = engine.mine_field_view(s)
+        mineral_entry = next(c for c in view["ore_catalog"] if c["id"] == "mineral")
+        rare_entry = next(c for c in view["ore_catalog"] if c["id"] == "rare_mineral")
+        self.assertTrue(mineral_entry["present_on_field"])
+        self.assertFalse(rare_entry["present_on_field"])
+        self.assertNotIn("field_count", mineral_entry)
+
+    def test_scanner_tier3_reveals_field_counts(self):
+        s = GameState(tool_tiers={"ore_scanner": 3})
+        s.active_mine_field = _blank_mine_field(4, {
+            (0, 0): {"resource": "mineral"}, (0, 1): {"resource": "mineral"}, (1, 0): {"resource": "mineral"},
+        })
+        view = engine.mine_field_view(s)
+        mineral_entry = next(c for c in view["ore_catalog"] if c["id"] == "mineral")
+        self.assertEqual(mineral_entry["field_count"], 3)
+
+    def test_scanner_does_not_count_plain_rock(self):
+        # по прямому пожеланию, 2026-09-16: подсказки о количестве - только
+        # по РУДЕ (mining_info), обычный камень (rock_resource) щуп не считает
+        # и не подсвечивает - структурно это уже гарантировано тем, что
+        # каталог собирается по MINING_INFO, а не по всем ресурсам поля.
+        s = GameState(tool_tiers={"ore_scanner": 3})
+        s.active_mine_field = _blank_mine_field(4)  # везде resource=None (порода)
+        view = engine.mine_field_view(s)
+        for entry in view["ore_catalog"]:
+            self.assertEqual(entry["field_count"], 0)
+
+    def test_scanner_tier6_senses_ore_through_fog_anywhere(self):
+        s = GameState(tool_tiers={"ore_scanner": 6})
+        s.active_mine_field = _blank_mine_field(6, {(5, 5): {"resource": "mineral"}})
+        view = engine.mine_field_view(s)
+        sensed = view["cells"][engine._mine_field_idx(6, 5, 5)]
+        self.assertFalse(sensed["revealed"])
+        self.assertEqual(sensed["sensed_resource"], "mineral")
+
+    def test_scanner_below_radius_tier_does_not_sense_fog(self):
+        s = GameState(tool_tiers={"ore_scanner": 3})
+        s.active_mine_field = _blank_mine_field(6, {
+            (0, 0): {"revealed": True}, (0, 1): {"resource": "mineral"},
+        })
+        view = engine.mine_field_view(s)
+        sensed = view["cells"][engine._mine_field_idx(6, 0, 1)]
+        self.assertNotIn("sensed_resource", sensed)
+
+    def test_scanner_tier4_senses_ore_within_radius_only(self):
+        # тир 4 фикстуры - radius 1 (см. fixtures.py: MINE_FIELD.scanner_radius_tiers)
+        s = GameState(tool_tiers={"ore_scanner": 4})
+        s.active_mine_field = _blank_mine_field(6, {
+            (0, 0): {"revealed": True},
+            (0, 1): {"resource": "mineral"},  # Чебышёв-расстояние 1 - в радиусе
+            (5, 5): {"resource": "mineral"},  # далеко за радиусом
+        })
+        view = engine.mine_field_view(s)
+        near = view["cells"][engine._mine_field_idx(6, 0, 1)]
+        far = view["cells"][engine._mine_field_idx(6, 5, 5)]
+        self.assertEqual(near["sensed_resource"], "mineral")
+        self.assertNotIn("sensed_resource", far)
+
+    def test_scanner_tier5_senses_wider_radius(self):
+        # тир 5 фикстуры - radius 2, сильнее тира 4 (радиусы не складываются,
+        # действует только самый большой разблокированный)
+        s = GameState(tool_tiers={"ore_scanner": 5})
+        s.active_mine_field = _blank_mine_field(6, {
+            (0, 0): {"revealed": True},
+            (0, 2): {"resource": "mineral"},  # расстояние ровно 2 - на границе радиуса
+        })
+        view = engine.mine_field_view(s)
+        sensed = view["cells"][engine._mine_field_idx(6, 0, 2)]
+        self.assertEqual(sensed["sensed_resource"], "mineral")
+
+    def test_scanner_radius_measured_from_any_revealed_cell_not_just_ore(self):
+        # источник радиуса - ЛЮБАЯ уже открытая клетка (в т.ч. пустая порода),
+        # а не только клетки руды
+        s = GameState(tool_tiers={"ore_scanner": 4})
+        s.active_mine_field = _blank_mine_field(6, {
+            (2, 2): {"revealed": True, "broken": True},  # пустая порода, уже пройдена
+            (2, 3): {"resource": "mineral"},
+        })
+        view = engine.mine_field_view(s)
+        sensed = view["cells"][engine._mine_field_idx(6, 2, 3)]
+        self.assertEqual(sensed["sensed_resource"], "mineral")
+
+
+class MiningFieldHitTests(FixtureTestCase):
+    def test_hit_unreachable_cell_fails(self):
+        s = GameState()
+        s.active_mine_field = _blank_mine_field(5)
+        result = engine.hit_mine_field(s, 2, 2)
         self.assertFalse(result.ok)
 
-    def test_search_any_succeeds_even_when_the_only_surveyed_ore_is_already_active(self):
-        # на тире 1 единственный разведанный ресурс - mineral; раньше уже
-        # найденная руда исключалась из кандидатов и поиск бы отказал - теперь
-        # активная жила НЕ мешает искать заново
-        s = GameState(veins={"mineral": 10})
-        result = engine.search_vein_any(s)
+    def test_orthogonal_neighbor_of_broken_cell_is_breakable(self):
+        s = GameState()  # тир 1: area=1, power=3
+        s.active_mine_field = _blank_mine_field(5, {(2, 2): {"broken": True, "revealed": True}})
+        result = engine.hit_mine_field(s, 2, 3)
         self.assertTrue(result.ok)
+        cell = s.active_mine_field["cells"][engine._mine_field_idx(5, 2, 3)]
+        self.assertTrue(cell["broken"])
+        self.assertEqual(s.resources.get("raw_a"), 2)  # порода -> MINE_FIELD.rock_resource/rock_yield
 
-    def test_search_replaces_previous_vein_even_if_not_exhausted(self):
-        # активная жила всегда только одна: новый поиск заменяет предыдущую,
-        # даже если в ней ещё оставалась руда
-        s = GameState(tool_tiers={"pickaxe": 3}, veins={"mineral": 25})
-        with mock.patch.object(engine.random, "choices", return_value=["rare_mineral"]), \
-                mock.patch.object(engine.random, "randint", return_value=2):
-            found = engine.search_vein_any(s)
-        self.assertTrue(found.ok)
-        self.assertEqual(s.veins, {"rare_mineral": 2})
-
-    def test_search_can_rediscover_the_same_ore_that_is_already_active(self):
-        # поиск не обязан переключаться на новую руду - при невезении можно
-        # повторно найти ту же самую, что уже была активна
-        s = GameState(tool_tiers={"pickaxe": 1}, veins={"mineral": 15})
-        with mock.patch.object(engine.random, "choices", return_value=["mineral"]), \
-                mock.patch.object(engine.random, "randint", return_value=20):
-            found = engine.search_vein_any(s)
-        self.assertTrue(found.ok)
-        self.assertEqual(s.veins, {"mineral": 20})
-
-    def test_search_candidate_pool_is_not_reduced_by_already_found_ore(self):
-        # ключевая проверка новой механики: шанс на редкую руду считается из ВСЕХ
-        # разведанных руд при каждом поиске, а не только из ещё не найденных -
-        # иначе редкая руда гарантированно находилась бы, как только частая уже
-        # была найдена хотя бы раз
-        s = GameState(tool_tiers={"pickaxe": 3}, veins={"mineral": 5})
-        with mock.patch.object(engine.random, "choices", return_value=["rare_mineral"]) as choices_mock:
-            engine.search_vein_any(s)
-        candidates_arg = choices_mock.call_args[0][0]
-        self.assertEqual(set(candidates_arg), {"mineral", "rare_mineral"})
-
-    def test_small_rare_vein_can_be_cleared_in_one_hit_at_max_tier(self):
-        s = GameState(tool_tiers={"pickaxe": 3})  # максимальный тир в фикстуре
-        with mock.patch.object(engine.random, "choices", return_value=["rare_mineral"]), \
-                mock.patch.object(engine.random, "randint", return_value=1):
-            found = engine.search_vein_any(s)
-        self.assertTrue(found.ok)
-        self.assertIn("rare_mineral", s.veins)
-        engine.mine_vein(s, "rare_mineral")
-        self.assertNotIn("rare_mineral", s.veins)  # выкопано полностью за один ход
-
-
-class MiningQualityTests(FixtureTestCase):
-    """quality_tiers НЕ добавлены в фикстурный MINING_INFO целиком (это сломало бы
-    exact-set тесты MiningTests про кандидатов поиска - см. fixtures.py) - каждый
-    тест здесь временно подсовывает "mineral" версию С quality_tiers через
-    mock.patch.dict, тем же приёмом, что уже применяется для RESOURCE_STORAGE
-    в ResourceStorageTests."""
-
-    def _with_quality_tiers(self, quality_tiers):
-        patched = {**engine.MINING_INFO["mineral"], "quality_tiers": quality_tiers}
-        return mock.patch.dict(engine.MINING_INFO, {"mineral": patched})
-
-    def test_pool_excludes_tiers_above_current_tool_tier(self):
-        quality_tiers = [
-            {"name": "Бедная", "weight": 5, "size_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 1, "size_multiplier": 2, "min_tool_tier": 2},
-        ]
-        s = GameState()  # тир кирки 1, единственный кандидат руды - mineral
-        with self._with_quality_tiers(quality_tiers), \
-                mock.patch.object(engine.random, "choices", wraps=engine.random.choices) as choices_mock:
-            engine.search_vein_any(s)
-        eligible = choices_mock.call_args_list[1][0][0]  # второй вызов choices - розыгрыш качества
-        self.assertEqual([q["name"] for _, q in eligible], ["Бедная"])
-
-    def test_pool_grows_once_tool_tier_reaches_min_tool_tier(self):
-        # На тире 2 разведаны И mineral, И rare_mineral - реальный random.choices мог
-        # бы выбрать любую из них первым вызовом; форсируем именно mineral на первом
-        # вызове (резолвится в резолюцию руды), а второй (розыгрыш качества) отдаём
-        # реальной random.choices, чтобы честно проверить пул кандидатов.
-        quality_tiers = [
-            {"name": "Бедная", "weight": 5, "size_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 1, "size_multiplier": 2, "min_tool_tier": 2},
-        ]
-        real_choices = engine.random.choices
-        call_count = {"n": 0}
-
-        def fake_choices(*args, **kwargs):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return ["mineral"]
-            return real_choices(*args, **kwargs)
-
-        s = GameState(tool_tiers={"pickaxe": 2})
-        with self._with_quality_tiers(quality_tiers), \
-                mock.patch.object(engine.random, "choices", side_effect=fake_choices) as choices_mock:
-            engine.search_vein_any(s)
-        eligible = choices_mock.call_args_list[1][0][0]
-        self.assertEqual({q["name"] for _, q in eligible}, {"Бедная", "Богатая"})
-
-    def test_search_stores_chosen_quality_index_and_size_uses_its_multiplier(self):
-        quality_tiers = [
-            {"name": "Бедная", "weight": 1, "size_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 0, "size_multiplier": 2, "min_tool_tier": 1},
-        ]
+    def test_diagonal_neighbor_of_broken_cell_is_not_breakable(self):
         s = GameState()
-        with self._with_quality_tiers(quality_tiers), \
-                mock.patch.object(engine.random, "choices", side_effect=[["mineral"], [(0, quality_tiers[0])]]), \
-                mock.patch.object(engine.random, "randint", return_value=20):
-            found = engine.search_vein_any(s)
-            self.assertTrue(found.ok)
-            self.assertEqual(s.vein_quality, {"mineral": 0})
-            # базовый случайный запас 20 * 0.5 (Бедная) = 10 - качество влияет
-            # на итоговый запас жилы, а не на скорость добычи за ход.
-            self.assertEqual(s.veins, {"mineral": 10})
-            # base_yield=4 на тире 1 (tier_bonus=1), качество на скорость не влияет.
-            self.assertEqual(engine.mining_yield_per_turn("mineral", s), 4)
+        s.active_mine_field = _blank_mine_field(5, {(2, 2): {"broken": True, "revealed": True}})
+        result = engine.hit_mine_field(s, 3, 3)
+        self.assertFalse(result.ok)
+        cell = s.active_mine_field["cells"][engine._mine_field_idx(5, 3, 3)]
+        self.assertFalse(cell["broken"])
 
-    def test_size_multiplier_rounds_up_for_non_integer_result(self):
-        quality_tiers = [{"name": "Своеобразная", "weight": 1, "size_multiplier": 0.6, "min_tool_tier": 1}]
-        s = GameState()
-        with self._with_quality_tiers(quality_tiers), \
-                mock.patch.object(engine.random, "choices", side_effect=[["mineral"], [(0, quality_tiers[0])]]), \
-                mock.patch.object(engine.random, "randint", return_value=20):
-            found = engine.search_vein_any(s)
-            self.assertTrue(found.ok)
-            # 20 * 0.6 = 12.0 -> целое; проверим отдельно нецелый случай ниже.
-            self.assertEqual(s.veins, {"mineral": 12})
-
-    def test_size_multiplier_rounds_up_on_fractional_result(self):
-        quality_tiers = [{"name": "Своеобразная", "weight": 1, "size_multiplier": 0.6, "min_tool_tier": 1}]
-        s = GameState()
-        with self._with_quality_tiers(quality_tiers), \
-                mock.patch.object(engine.random, "choices", side_effect=[["mineral"], [(0, quality_tiers[0])]]), \
-                mock.patch.object(engine.random, "randint", return_value=21):
-            found = engine.search_vein_any(s)
-            self.assertTrue(found.ok)
-            # 21 * 0.6 = 12.6 -> ceil = 13
-            self.assertEqual(s.veins, {"mineral": 13})
-
-    def test_vein_quality_is_cleared_when_new_search_has_no_quality_tiers(self):
-        s = GameState(vein_quality={"mineral": 0})
-        result = engine.search_vein_any(s)
+    def test_area_swing_can_reach_into_fog_if_block_edge_touches_broken(self):
+        # тир 3: area=2 - блок 2x2, кликнутый рядом с открытой клеткой, пробивает
+        # ЦЕЛИКОМ, включая дальний угол, который сам по себе не граничил бы с ней.
+        s = GameState(tool_tiers={"pickaxe": 3})
+        s.active_mine_field = _blank_mine_field(6, {(2, 2): {"broken": True, "revealed": True}})
+        result = engine.hit_mine_field(s, 3, 2)
         self.assertTrue(result.ok)
-        self.assertEqual(s.vein_quality, {})
+        far_corner = s.active_mine_field["cells"][engine._mine_field_idx(6, 4, 3)]
+        self.assertTrue(far_corner["broken"])
+        self.assertTrue(far_corner["revealed"])
+
+    def test_locked_ore_in_swing_is_revealed_not_broken_but_does_not_block_the_rest(self):
+        patched = {**engine.MINING_INFO["rare_mineral"], "required_tier": 4}
+        s = GameState(tool_tiers={"pickaxe": 3})  # area=2, power=7, ниже патченного required_tier
+        s.active_mine_field = _blank_mine_field(4, {
+            (1, 1): {"broken": True, "revealed": True},
+            (1, 2): {"resource": "rare_mineral", "hp": 6, "hp_max": 6},
+        })
+        with mock.patch.dict(engine.MINING_INFO, {"rare_mineral": patched}):
+            result = engine.hit_mine_field(s, 1, 1)
+        self.assertTrue(result.ok)
+        locked_cell = s.active_mine_field["cells"][engine._mine_field_idx(4, 1, 2)]
+        self.assertFalse(locked_cell["broken"])
+        self.assertTrue(locked_cell["revealed"])
+        rock_cell = s.active_mine_field["cells"][engine._mine_field_idx(4, 2, 1)]
+        self.assertTrue(rock_cell["broken"])
+
+    def test_toughness_requires_multiple_hits(self):
+        s = GameState(tool_tiers={"pickaxe": 2})  # area=1, power=5; тир 2 открывает rare_mineral (required_tier=2)
+        s.active_mine_field = _blank_mine_field(3, {
+            (1, 0): {"broken": True, "revealed": True},
+            (1, 1): {"resource": "rare_mineral", "hp": 6, "hp_max": 6},
+        })
+        engine.hit_mine_field(s, 1, 1)
+        cell = s.active_mine_field["cells"][engine._mine_field_idx(3, 1, 1)]
+        self.assertFalse(cell["broken"])
+        self.assertEqual(cell["hp"], 1)
+        engine.hit_mine_field(s, 1, 1)
+        self.assertTrue(cell["broken"])
+
+    def test_yield_is_flat_base_yield_regardless_of_tool_tier(self):
+        # По прямому пожеланию, 2026-09-16: "1 клетка = 1 порция руды", тир
+        # кирки решает ТОЛЬКО площадь/урон удара и порог доступности клетки
+        # (required_tier), выход с клетки больше НЕ домножается на тир.
+        for tier in (1, 3):
+            with self.subTest(tier=tier):
+                s = GameState(tool_tiers={"pickaxe": tier})
+                s.active_mine_field = _blank_mine_field(3, {
+                    (1, 0): {"broken": True, "revealed": True},
+                    (1, 1): {"resource": "mineral", "hp": 2, "hp_max": 2},
+                })
+                result = engine.hit_mine_field(s, 1, 1)
+                self.assertTrue(result.ok)
+                self.assertEqual(s.resources.get("mineral"), 4)
+
+    def test_field_fully_cleared_triggers_automatic_regeneration(self):
+        # Всё поле, кроме одной клетки породы, уже выбито - добиваем её.
+        s = GameState()
+        s.active_mine_field = _blank_mine_field(3, {
+            (0, 0): {"broken": True, "revealed": True}, (0, 1): {"broken": True, "revealed": True},
+            (0, 2): {"broken": True, "revealed": True}, (1, 0): {"broken": True, "revealed": True},
+            (1, 1): {"broken": True, "revealed": True}, (1, 2): {"broken": True, "revealed": True},
+            (2, 0): {"broken": True, "revealed": True}, (2, 1): {"broken": True, "revealed": True},
+        })
+        result = engine.hit_mine_field(s, 2, 2)
+        self.assertTrue(result.ok)
+        self.assertIn("заложен новый", result.message)
+        # Фикстурное MINE_FIELD.size = 6 (см. tests/fixtures.py), а ручное
+        # тестовое поле - 3: смена размера доказывает, что поле реально
+        # перегенерировано, а не просто дописано сообщение.
+        self.assertEqual(s.active_mine_field["size"], engine.mine_field_size())
+        self.assertNotEqual(s.active_mine_field["size"], 3)
+
+    def test_locked_ore_cell_prevents_automatic_regeneration(self):
+        # Последняя небитая клетка поля - руда не по тиру кирки: она не может
+        # сломаться сама по себе (см. hit_mine_field), значит поле НЕ считается
+        # полностью выкопанным и автообновление не срабатывает.
+        patched = {**engine.MINING_INFO["rare_mineral"], "required_tier": 4}
+        s = GameState()  # тир 1 кирки - ниже патченного required_tier
+        s.active_mine_field = _blank_mine_field(3, {
+            (0, 0): {"broken": True, "revealed": True}, (0, 1): {"broken": True, "revealed": True},
+            (0, 2): {"broken": True, "revealed": True}, (1, 0): {"broken": True, "revealed": True},
+            (1, 1): {"broken": True, "revealed": True}, (1, 2): {"broken": True, "revealed": True},
+            (2, 0): {"broken": True, "revealed": True},
+            (2, 2): {"resource": "rare_mineral", "hp": 6, "hp_max": 6},
+        })
+        old_field = s.active_mine_field
+        with mock.patch.dict(engine.MINING_INFO, {"rare_mineral": patched}):
+            result = engine.hit_mine_field(s, 2, 1)
+        self.assertTrue(result.ok)
+        self.assertIs(s.active_mine_field, old_field)
+        self.assertNotIn("заложен", result.message)
 
 
 class ToolsAndPinTests(FixtureTestCase):
@@ -2530,14 +2842,17 @@ class ToolsAndPinTests(FixtureTestCase):
         self.assertEqual(engine.tool_tier(s, "drill"), 1)
 
     def test_upgradable_tools_excludes_tech_locked_and_maxed_tools(self):
-        # sword тир 2 не требует технологии - он всегда в списке (не завязан на
-        # tech1), в отличие от pickaxe/drill, ради которых написан этот тест.
-        # wrench тир 2 тоже не требует технологии - он всегда в списке, как sword,
-        # по той же причине (см. TOOLS в fixtures.py).
-        s = GameState(tool_tiers={"pickaxe": 2, "drill": 2})  # pickaxe тир3 нужен tech1, drill уже макс
-        self.assertEqual(engine.upgradable_tools(s), ["wrench", "sword"])
+        # sword/armor тир 2 не требуют технологии - они всегда в списке (не
+        # завязаны на tech1), в отличие от pickaxe/drill, ради которых написан
+        # этот тест. wrench тир 2 тоже не требует технологии - он всегда в
+        # списке, по той же причине (см. TOOLS в fixtures.py).
+        # ore_scanner тоже сразу на максимум - иначе он тоже маячил бы в списке
+        # (в фикстуре все его тиры без requires_tech, см. TOOLS в fixtures.py),
+        # а тест не про него.
+        s = GameState(tool_tiers={"pickaxe": 2, "drill": 2, "ore_scanner": 6})  # pickaxe тир3 нужен tech1, drill уже макс
+        self.assertEqual(engine.upgradable_tools(s), ["wrench", "sword", "armor"])
         s.techs = {"tech1"}
-        self.assertEqual(engine.upgradable_tools(s), ["pickaxe", "wrench", "sword"])
+        self.assertEqual(engine.upgradable_tools(s), ["pickaxe", "wrench", "sword", "armor"])
 
     def test_requires_tool_tiers_gates_by_exact_membership_not_threshold(self):
         # ключевая проверка новой механики: два действия, одинаковые по смыслу, но
@@ -2684,6 +2999,40 @@ class QuestTests(FixtureTestCase):
         s = GameState()
         result = engine.claim_quest_reward(s, "no_such_quest")
         self.assertFalse(result.ok)
+
+    def test_manual_action_performed_at_least_quest(self):
+        # fixtures.MANUAL_ACTIONS["gather_a"] - мгновенное детерминированное действие
+        # (cost {}, gain {raw_a: 3}) - каждый успешный клик должен растить
+        # state.action_performed_count["gather_a"], даже если игрок потом потратит
+        # весь raw_a (в отличие от resource_at_least, условие не может "отмотаться назад").
+        s = GameState()
+        quest = {
+            "name": "Собиратель", "description": "Добудь A трижды.",
+            "tier": 1, "conditions": [{"type": "manual_action_performed_at_least", "action": "gather_a", "amount": 2}],
+            "reward_case": "test_case",
+        }
+        with mock.patch.dict(engine.QUESTS, {"gatherer": quest}):
+            self.assertNotIn("gatherer", engine.check_quests(s))
+            engine.do_manual_action(s, "gather_a")
+            self.assertNotIn("gatherer", engine.check_quests(s))
+            engine.do_manual_action(s, "gather_a")
+            s.resources["raw_a"] = 0  # потрачен - condition всё равно должно сработать
+            self.assertIn("gatherer", engine.check_quests(s))
+
+    def test_building_upgrade_purchased_quest(self):
+        # fixtures.BUILDINGS["flaky_typed"]["upgrades"][0] == "flaky_typed_immune"
+        # (cost {raw_a: 5}, requires_tech None) - см. building_upgrade_purchased.
+        s = GameState(buildings={"flaky_typed": 1}, resources={"raw_a": 5})
+        quest = {
+            "name": "Модернизатор", "description": "Купи улучшение постройки.",
+            "tier": 1,
+            "conditions": [{"type": "building_upgrade_purchased", "building": "flaky_typed", "upgrade": "flaky_typed_immune"}],
+            "reward_case": "test_case",
+        }
+        with mock.patch.dict(engine.QUESTS, {"upgrader": quest}):
+            self.assertNotIn("upgrader", engine.check_quests(s))
+            engine.purchase_building_upgrade(s, "flaky_typed", "flaky_typed_immune")
+            self.assertIn("upgrader", engine.check_quests(s))
 
 
 class HistoryAndStatsTests(FixtureTestCase):
@@ -3011,6 +3360,22 @@ class GeneticsTests(FixtureTestCase):
         self.assertFalse(engine.breed_creatures(s, a, a).ok)
         self.assertFalse(engine.breed_creatures(s, a, "nope").ok)
 
+    def test_breed_creatures_rejects_parents_of_different_families(self):
+        # family (species.*.family, напр. "пчела"/"цветок") - разные семейства
+        # скрещивать нельзя (см. game/engine.py:breed_creatures) - ни одна
+        # мутация в реальном контенте не пересекает семейства, смешение
+        # никогда не имело смысла.
+        engine.SPECIES["critter_a"]["family"] = "alpha"
+        engine.SPECIES["critter_b"]["family"] = "beta"
+        self.addCleanup(lambda: engine.SPECIES["critter_a"].pop("family", None))
+        self.addCleanup(lambda: engine.SPECIES["critter_b"].pop("family", None))
+        s = GameState(buildings={"crossing_station": 1})
+        a, b = self._spawn(s, "critter_a"), self._spawn(s, "critter_b")
+        result = engine.breed_creatures(s, a, b)
+        self.assertFalse(result.ok, result.message)
+        self.assertIn(a, s.creatures)
+        self.assertIn(b, s.creatures)
+
     def test_breed_creatures_fails_without_a_working_crossing_station(self):
         s = GameState()  # механизм скрещивания не построен
         a, b = self._spawn(s, "critter_a"), self._spawn(s, "critter_a")
@@ -3271,7 +3636,7 @@ class GeneticsTests(FixtureTestCase):
         engine.house_creature(s, cid, instance_id)
         with mock.patch.object(engine.random, "random", return_value=0.0):
             engine.advance_turn(s)
-        # forest -> bonus_resource "species_output" в фикстуре, тот же ресурс, что и у
+        # critter_a.bonus_resource "species_output" в фикстуре, тот же ресурс, что и у
         # обычной продукции critter_a - оба начисления складываются: 2 (вид) + 1 (бонус).
         self.assertEqual(s.resources.get("species_output"), 3)
 
@@ -3284,7 +3649,6 @@ class GeneticsTests(FixtureTestCase):
         with mock.patch.object(engine.random, "random", return_value=0.0):
             engine.advance_turn(s)
         self.assertEqual(s.resources.get("species_output"), 2)  # только обычная продукция, без бонуса
-        self.assertNotIn("energy", s.resources)  # bonus_resource среды "water" не начислен
 
     def test_bonus_production_does_not_fire_without_any_environment_emulation_upgrade(self):
         s = GameState(buildings={"industrial_apiary": 1})
@@ -3294,6 +3658,28 @@ class GeneticsTests(FixtureTestCase):
         with mock.patch.object(engine.random, "random", return_value=0.0):
             engine.advance_turn(s)
         self.assertEqual(s.resources.get("species_output"), 2)
+
+    def test_bonus_production_resource_depends_on_species_not_environment(self):
+        # Два РАЗНЫХ вида в ОДНОЙ и той же благоприятной среде ("forest") должны
+        # получить бонус каждый в СВОЙ ресурс (critter_a -> species_output,
+        # critter_b -> raw_a, см. SPECIES в tests/fixtures.py) - бонус завязан на
+        # вид, а не на среду (среда лишь решает, сработает ли бонус вообще).
+        s = GameState(buildings={"industrial_apiary": 2}, resources={"raw_a": 100, "critter_food": 100})
+        instance_a = self._farm_instance(s, "industrial_apiary", 0)
+        instance_b = self._farm_instance(s, "industrial_apiary", 1)
+        engine.purchase_farm_instance_upgrade(s, instance_a, "ia_env_forest")
+        engine.purchase_farm_instance_upgrade(s, instance_b, "ia_env_forest")
+        cid_a = self._spawn(s, "critter_a", active_period="always", environment="forest")
+        cid_b = self._spawn(s, "critter_b", active_period="always", environment="forest")
+        engine.house_creature(s, cid_a, instance_a)
+        engine.house_creature(s, cid_b, instance_b)
+        raw_a_before_turn = s.resources.get("raw_a", 0)  # после оплаты построек/апгрейдов выше
+        with mock.patch.object(engine.random, "random", return_value=0.0):
+            engine.advance_turn(s)
+        # critter_a: 2 (вид) + 1 (бонус в species_output); critter_b: 5 (вид, тоже в
+        # species_output - оба вида производят один и тот же ресурс) + СВОЙ бонус в raw_a.
+        self.assertEqual(s.resources.get("species_output"), 8)
+        self.assertEqual(s.resources.get("raw_a"), raw_a_before_turn + 1)  # critter_b: бонус +1 raw_a
 
     def test_old_save_migrates_buildings_and_relocates_a_creature_by_its_old_type_id(self):
         # Имитация сохранения СТАРШЕ переименования farm_building_id -> farm_instance_id
@@ -3329,6 +3715,21 @@ class GeneticsTests(FixtureTestCase):
         with mock.patch.dict(engine.QUESTS, {"collector": quest}):
             completed = engine.check_quests(s)
         self.assertIn("collector", completed)
+
+    def test_species_discovered_quest_targets_one_specific_species(self):
+        # В отличие от species_discovered_at_least (просто счётчик), этот тип
+        # завязан на КОНКРЕТНЫЙ species_id - открытие ДРУГОГО вида не считается.
+        s = GameState()
+        s.species_discovered.add("critter_a")
+        quest = {
+            "name": "Пчеловод", "description": "Выведи critter_b.",
+            "tier": 1, "conditions": [{"type": "species_discovered", "species": "critter_b"}],
+            "reward_case": "test_case",
+        }
+        with mock.patch.dict(engine.QUESTS, {"breeder": quest}):
+            self.assertNotIn("breeder", engine.check_quests(s))
+            s.species_discovered.add("critter_b")
+            self.assertIn("breeder", engine.check_quests(s))
 
 
 if __name__ == "__main__":
