@@ -10,9 +10,9 @@
 Запуск:
     python tools/web_ui.py
 
-Откроет игру в отдельном окне. Прогресс сохраняется в save.json в корне
-проекта - тот же файл, что использует консольная версия (main.py), так что
-партию можно продолжать в любом из двух интерфейсов.
+Откроет игру в отдельном окне. Прогресс сохраняется в saves/autosave.json -
+тот же файл, что использует консольная версия (main.py), так что партию
+можно продолжать в любом из двух интерфейсов.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ from game.content import (  # noqa: E402
     BREAKDOWN_TYPES, BUILDINGS, COMBAT_SETTINGS, DEFAULT_ACTION_DELAY_MS,
     ENCHANTMENTS, ENERGY_RECIPES, ERAS, GENETIC_TRAITS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
     MINE_FIELD, MINING_INFO, MOBS, QUESTS, RESOURCE_ICONS, RESOURCE_NAMES, RESOURCE_ORDER,
-    RESOURCE_STORAGE, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TOOLS, UI_SOUNDS,
+    RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TOOLS, UI_SOUNDS,
 )
 from game.state import GameState  # noqa: E402
 
@@ -56,11 +56,17 @@ if getattr(sys, "frozen", False):
 else:
     _SAVE_ROOT = ROOT
 
-SAVE_PATH = _SAVE_ROOT / "save.json"
-# Именованные сохранения (папка saves/, рядом с проектом) - отдельная от постоянного
-# автосохранения SAVE_PATH возможность: "Сохранить как"/"Открыть" по явному выбору
-# игрока, а не то, что подхватывается при простом запуске интерфейса.
+# Именованные сохранения (папка saves/, рядом с проектом) - "Сохранить как"/
+# "Открыть" по явному выбору игрока, а не то, что подхватывается при простом
+# запуске интерфейса. Автосохранение (SAVE_PATH) лежит в той же папке, файлом
+# autosave.json - раньше лежало отдельно, прямо в корне репозитория, что было
+# неочевидно и путало игрока при поиске файлов сохранений.
 SAVES_DIR = _SAVE_ROOT / "saves"
+SAVE_PATH = SAVES_DIR / "autosave.json"
+# Старое место автосохранения (до переноса в saves/) - если оно ещё лежит в
+# корне у игрока, при первом запуске переносим его на новое место, а не
+# тихо теряем прогресс, подсовывая вместо него новую пустую игру.
+_LEGACY_SAVE_PATH = _SAVE_ROOT / "save.json"
 HTML_PATH = Path(__file__).with_name("web_ui.html")
 # Кастомные звуки ручных действий, загруженные через content_editor.py
 # (см. manual_actions.*.sound в content.json) - живёт рядом с web_ui.py/
@@ -115,13 +121,30 @@ _UNSAFE_SAVE_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _LAST_ENERGY_SHORTFALL: dict[str, int | float] = {}
 
 
+def _migrate_legacy_save() -> None:
+    # __name__-гейт важен: STATE = load_state() ниже выполняется на самом
+    # ИМПОРТЕ модуля (в т.ч. `import web_ui` из тестов, до того как тест
+    # успевает подменить SAVE_PATH/SAVES_DIR своими tmp-путями) - без этой
+    # проверки тесты переносили бы НАСТОЯЩИЙ save.json игрока из корня
+    # репозитория. При запуске как скрипта (`python tools/web_ui.py`, в т.ч.
+    # с --server-only) __name__ уже "__main__", перенос отрабатывает как надо.
+    if __name__ != "__main__":
+        return
+    if SAVE_PATH.exists() or not _LEGACY_SAVE_PATH.exists():
+        return
+    SAVES_DIR.mkdir(exist_ok=True)
+    _LEGACY_SAVE_PATH.replace(SAVE_PATH)
+
+
 def load_state() -> GameState:
+    _migrate_legacy_save()
     if SAVE_PATH.exists():
         return GameState.load(str(SAVE_PATH))
     return GameState()
 
 
 def save_state(state: GameState) -> None:
+    SAVES_DIR.mkdir(exist_ok=True)
     state.save(str(SAVE_PATH))
 
 
@@ -129,7 +152,10 @@ def safe_save_name(raw) -> str | None:
     if not isinstance(raw, str):
         return None
     name = raw.strip()
-    if not name or name in (".", "..") or _UNSAFE_SAVE_NAME_CHARS.search(name):
+    # "autosave" зарезервировано под SAVE_PATH (файл autosave.json в той же
+    # SAVES_DIR) - именованное сохранение с этим именем перезаписало бы
+    # автосейв (регистр не важен - Windows не различает регистр в путях).
+    if not name or name in (".", "..") or _UNSAFE_SAVE_NAME_CHARS.search(name) or name.lower() == "autosave":
         return None
     return name
 
@@ -137,11 +163,14 @@ def safe_save_name(raw) -> str | None:
 def list_saves() -> list[dict]:
     """Именованные сохранения в SAVES_DIR - имя (без .json), номер хода и время
     изменения файла (для сортировки "недавние сверху"). Битые/нечитаемые файлы
-    просто пропускаются, а не роняют список."""
+    просто пропускаются, а не роняют список. autosave.json - не именованное
+    сохранение (это SAVE_PATH), в список не входит."""
     if not SAVES_DIR.is_dir():
         return []
     items = []
     for path in SAVES_DIR.glob("*.json"):
+        if path.stem.lower() == "autosave":
+            continue
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -312,6 +341,29 @@ def _building_upgrade_snapshot(building_id: str, state: GameState, building_upgr
     }
 
 
+def _superseded_upgrade_ids(defs: list[dict], purchased_ids: list[str]) -> set[str]:
+    """id улучшений, которые нужно СКРЫТЬ из списка отображения - более слабые
+    уже купленные версии ТОГО ЖЕ типа, когда куплена более сильная версия
+    того же типа (repeatable-апгрейды сюда не попадают - у них нет "версий",
+    см. вызывающих). Раньше "самый сильный" искался через max(u["value"]) -
+    ломалось на неупорядочиваемых value (например dict {width,height} у
+    reactor_grid_size, TypeError на сравнении dict с dict). Вместо сравнения
+    value полагаемся на инвариант purchase_building_upgrade/
+    building_upgrade_prerequisite: апгрейды одного типа обязаны покупаться
+    строго по порядку их перечисления в content.json (следующий уровень
+    прогрессии нельзя купить, пока не куплен предыдущий) - поэтому "самый
+    сильный купленный" однозначно определяется как ПОСЛЕДНИЙ по порядку в
+    defs, а не как обладатель наибольшего value."""
+    strongest_purchased_id: dict[str, str] = {}
+    for u in defs:
+        if u["id"] in purchased_ids and not u.get("repeatable"):
+            strongest_purchased_id[u["type"]] = u["id"]
+    return {
+        u["id"] for u in defs
+        if u["id"] in purchased_ids and not u.get("repeatable") and u["id"] != strongest_purchased_id.get(u["type"])
+    }
+
+
 def building_upgrades_view(building_id: str, state: GameState) -> dict | None:
     """Улучшения ЭТОГО типа постройки (BUILDINGS[id]["upgrades"], см. game/engine.py:
     purchase_building_upgrade/effective_building_stats/effective_manual_action_stats) -
@@ -350,17 +402,14 @@ def building_upgrades_view(building_id: str, state: GameState) -> dict | None:
     # НЕ участвуют в "сильнейшее скрывает более слабое той же линейки" - у них
     # нет более слабых "версий", каждая покупка ТОГО ЖЕ id просто добавляет ещё
     # value, поэтому их не за что тут скрывать.
-    strongest_purchased_value: dict[str, float] = {}
-    for u in defs:
-        if u["id"] in purchased_ids and not u.get("repeatable"):
-            strongest_purchased_value[u["type"]] = max(strongest_purchased_value.get(u["type"], u["value"]), u["value"])
+    superseded_ids = _superseded_upgrade_ids(defs, purchased_ids)
 
     upgrades = []
     for u in defs:
         times = purchased_ids.count(u["id"])
         purchased = times > 0
         repeatable = u.get("repeatable", False)
-        if purchased and not repeatable and u["value"] < strongest_purchased_value.get(u["type"], u["value"]):
+        if u["id"] in superseded_ids:
             continue
         # Следующий уровень прогрессии вообще НЕ показываем в списке, пока не
         # куплен предыдущий того же типа (game/engine.py:
@@ -507,17 +556,14 @@ def farm_instance_upgrades_view(instance_id: str, state: GameState) -> dict:
     dependent_action_names = [MANUAL_ACTIONS[aid]["name"] for aid in _dependent_action_ids(building_id)]
 
     regular_defs = [u for u in defs if u["type"] != "environment_emulation"]
-    strongest_purchased_value: dict[str, float] = {}
-    for u in regular_defs:
-        if u["id"] in purchased_ids and not u.get("repeatable"):
-            strongest_purchased_value[u["type"]] = max(strongest_purchased_value.get(u["type"], u["value"]), u["value"])
+    superseded_ids = _superseded_upgrade_ids(regular_defs, purchased_ids)
 
     upgrades = []
     for u in regular_defs:
         times = purchased_ids.count(u["id"])
         purchased = times > 0
         repeatable = u.get("repeatable", False)
-        if purchased and not repeatable and u["value"] < strongest_purchased_value.get(u["type"], u["value"]):
+        if u["id"] in superseded_ids:
             continue
         prerequisite = engine.building_upgrade_prerequisite(building_id, u["id"])
         if prerequisite is not None and prerequisite["id"] not in purchased_ids:
@@ -613,6 +659,9 @@ def species_catalog_view(state: GameState) -> list[dict]:
             "id": species_id,
             "name": RESOURCE_NAMES.get(species_id, species_id),
             "description": entry["description"],
+            "family": entry["family"],
+            "produces": cost_list(entry["produces"]),
+            "consumes": cost_list(entry["consumes"]),
             "breedable": entry["breedable"],
             "recipes": recipes,
         })
@@ -704,6 +753,10 @@ def enchanting_view(state: GameState) -> dict:
         "available": engine.enchanting_table_available(state),
         "cost": cost_list(engine.enchanting_table_cost(state), state),
         "tools": tools,
+        # Настройка контента (buildings.*.enchanting_table.strip_on_fail, правит
+        # автор в редакторе), НЕ игрок - в модалке это просто информационная
+        # пометка, без переключателя.
+        "strip_on_fail": engine.enchanting_table_strip_on_fail(state),
     }
 
 
@@ -764,27 +817,70 @@ def hunting_view(state: GameState) -> dict:
     }
 
 
-def soul_collector_entries_view(state: GameState) -> list[dict]:
-    """Все построенные синтезаторы душ (по типу постройки - soul_collector, в
-    отличие от ферм, не заводит физических экземпляров) для отдельной модалки
-    "Души" (открывается кнопкой на карточке конкретной built-постройки, см.
-    web_ui.html: openSoulSynthesizerModal) - по прямому пожеланию, 2026-09-13:
-    вставка/выемка душ больше не происходит прямо в панели "Производственные
-    мощности", тот же приём разделения, что у ферм/банка особей."""
-    result = []
-    for bid, b in BUILDINGS.items():
-        config = b.get("soul_collector")
-        if not config or state.buildings.get(bid, 0) <= 0:
+def soul_collector_instance_upgrades_view(instance_id: str, state: GameState) -> dict:
+    """Как farm_instance_upgrades_view, но апгрейды читаются с ОДНОГО экземпляра
+    синтезатора душ (state.soul_collector_instances[instance_id]["upgrades"]) -
+    см. CLAUDE.md/state.py:soul_collector_instances. Упрощённая версия без ветки
+    environment_emulation (её не бывает у soul_collector построек - см.
+    engine.purchase_soul_collector_instance_upgrade)."""
+    instance = state.soul_collector_instances[instance_id]
+    building_id = instance["building_id"]
+    defs = BUILDINGS[building_id].get("upgrades", [])
+    purchased_ids = instance["upgrades"]
+    hypothetical_current = {building_id: purchased_ids}
+    current = _building_upgrade_snapshot(building_id, state, hypothetical_current)
+    dependent_action_names = [MANUAL_ACTIONS[aid]["name"] for aid in _dependent_action_ids(building_id)]
+
+    superseded_ids = _superseded_upgrade_ids(defs, purchased_ids)
+
+    upgrades = []
+    for u in defs:
+        times = purchased_ids.count(u["id"])
+        purchased = times > 0
+        repeatable = u.get("repeatable", False)
+        if u["id"] in superseded_ids:
             continue
+        prerequisite = engine.building_upgrade_prerequisite(building_id, u["id"])
+        if prerequisite is not None and prerequisite["id"] not in purchased_ids:
+            continue
+        req_tech = u.get("requires_tech")
+        tech_locked = bool(req_tech) and req_tech not in state.techs
+        max_purchases = u.get("max_purchases")
+        at_max = repeatable and max_purchases is not None and times >= max_purchases
+        current_cost = engine.repeatable_upgrade_cost(u, times) if repeatable else u["cost"]
+        can_buy_more = (not at_max) if repeatable else not purchased
+        preview = None
+        if can_buy_more:
+            hypothetical = {building_id: [*purchased_ids, u["id"]]}
+            preview = _building_upgrade_snapshot(building_id, state, hypothetical)
+        upgrades.append({
+            "id": u["id"], "name": u["name"], "description": u.get("description", ""),
+            "type": u["type"], "value": u["value"],
+            "cost": cost_list(current_cost, state),
+            "purchased": purchased,
+            "repeatable": repeatable,
+            "times_purchased": times,
+            "max_purchases": max_purchases,
+            "at_max": at_max,
+            "tech_locked": tech_locked,
+            "requires_tech_name": TECHS[req_tech]["name"] if tech_locked else None,
+            "preview": preview,
+        })
+    return {"current": current, "dependent_action_names": dependent_action_names, "upgrades": upgrades}
+
+
+def soul_collector_entries_view(state: GameState) -> list[dict]:
+    """Один элемент на КАЖДЫЙ физический экземпляр синтезатора душ (не на тип,
+    как было до 2026-09-18 - см. game/engine.py:soul_collector_instances_view/
+    state.soul_collector_instances) для отдельной модалки "Души" (открывается
+    кнопкой на карточке конкретной built-постройки, см. web_ui.html:
+    openSoulSynthesizerModal) - зеркало farms_view/farm_instance_upgrades_view."""
+    result = []
+    for entry in engine.soul_collector_instances_view(state):
         result.append({
-            "building_id": bid,
-            "name": b["name"],
-            "capacity": engine.soul_collector_capacity(state, bid),
-            "accepts_kind": engine.soul_collector_accepts_kind(bid),
-            "installed": [
-                {"id": rid, "name": RESOURCE_NAMES[rid], "index": i}
-                for i, rid in enumerate(state.soul_slots.get(bid, []))
-            ],
+            **entry,
+            "installed": [{**s, "name": RESOURCE_NAMES[s["id"]]} for s in entry["installed"]],
+            "upgrades": soul_collector_instance_upgrades_view(entry["id"], state),
         })
     return result
 
@@ -799,6 +895,166 @@ def souls_bank_view(state: GameState) -> list[dict]:
         {"id": e["id"], "name": RESOURCE_NAMES[e["id"]], "kind": e["kind"], "amount": e["amount"]}
         for e in engine.souls_bank_view(state)
     ]
+
+
+def reactor_instance_upgrades_view(instance_id: str, state: GameState) -> dict:
+    """Как soul_collector_instance_upgrades_view, но БЕЗ _building_upgrade_snapshot/
+    preview - апгрейды реактора не трогают produces/consumes рецепта постройки
+    (у него их и нет, см. buildings.*.reactor), они меняют размер решётки/число
+    зон/телеметрию (см. game/engine.py:reactor_grid_dims/reactor_zone_count).
+    "reactor_zoning" - как environment_emulation у ферм: взаимоисключающий
+    выбор, показывается ВСЕМИ вариантами сразу, без прогрессии/prerequisite."""
+    instance = state.reactor_instances[instance_id]
+    building_id = instance["building_id"]
+    defs = BUILDINGS[building_id].get("upgrades", [])
+    purchased_ids = instance["upgrades"]
+
+    regular_defs = [u for u in defs if u["type"] != "reactor_zoning"]
+    superseded_ids = _superseded_upgrade_ids(regular_defs, purchased_ids)
+
+    upgrades = []
+    for u in regular_defs:
+        times = purchased_ids.count(u["id"])
+        purchased = times > 0
+        repeatable = u.get("repeatable", False)
+        if u["id"] in superseded_ids:
+            continue
+        prerequisite = engine.building_upgrade_prerequisite(building_id, u["id"])
+        if prerequisite is not None and prerequisite["id"] not in purchased_ids:
+            continue
+        req_tech = u.get("requires_tech")
+        tech_locked = bool(req_tech) and req_tech not in state.techs
+        max_purchases = u.get("max_purchases")
+        at_max = repeatable and max_purchases is not None and times >= max_purchases
+        current_cost = engine.repeatable_upgrade_cost(u, times) if repeatable else u["cost"]
+        upgrades.append({
+            "id": u["id"], "name": u["name"], "description": u.get("description", ""),
+            "type": u["type"], "value": u["value"],
+            "cost": cost_list(current_cost, state),
+            "purchased": purchased,
+            "repeatable": repeatable,
+            "times_purchased": times,
+            "max_purchases": max_purchases,
+            "at_max": at_max,
+            "tech_locked": tech_locked,
+            "requires_tech_name": TECHS[req_tech]["name"] if tech_locked else None,
+        })
+
+    zoning_defs = [u for u in defs if u["type"] == "reactor_zoning"]
+    zoning_ids = {d["id"] for d in zoning_defs}
+    for u in zoning_defs:
+        purchased = u["id"] in purchased_ids
+        req_tech = u.get("requires_tech")
+        tech_locked = bool(req_tech) and req_tech not in state.techs
+        upgrades.append({
+            "id": u["id"], "name": u["name"], "description": u.get("description", ""),
+            "type": u["type"], "value": u["value"],
+            "cost": cost_list(u["cost"], state),
+            "purchased": purchased,
+            "tech_locked": tech_locked,
+            "requires_tech_name": TECHS[req_tech]["name"] if tech_locked else None,
+            "replaces_current_zoning": not purchased and any(uid in zoning_ids for uid in purchased_ids),
+        })
+    return {"upgrades": upgrades}
+
+
+def reactor_instances_view(state: GameState) -> list[dict]:
+    """Один элемент на КАЖДЫЙ физический экземпляр реактора (см. game/engine.py:
+    reactor_instances_view/state.reactor_instances) для отдельной модалки
+    "Реактор" (кнопка на карточке конкретной built-постройки, см. web_ui.html:
+    openReactorModal) - зеркало soul_collector_entries_view."""
+    result = []
+    for entry in engine.reactor_instances_view(state):
+        result.append({**entry, "upgrades": reactor_instance_upgrades_view(entry["id"], state)})
+    return result
+
+
+def reactor_component_bank_view(state: GameState) -> list[dict]:
+    """Банк компонентов реактора в инвентаре - тот же приём, что
+    souls_bank_view/creature_bank_view. role - тег resources.*.
+    reactor_component.role (см. game/engine.py:reactor_component_role) -
+    модалка конкретного реактора фильтрует банк по своему accepts_roles."""
+    return [
+        {"id": e["id"], "name": RESOURCE_NAMES[e["id"]], "role": e["role"], "amount": e["amount"]}
+        for e in engine.reactor_component_bank_view(state)
+    ]
+
+
+def _ritual_recipe_view(recipe_id: str, state: GameState) -> dict:
+    """Один рецепт ритуала для модалки "Ритуалы" - lock_reason различает ТРИ
+    независимые причины недоступности (тех/постройка/не хватает пьедesталов),
+    чтобы UI мог показать игроку конкретную, а не общую "недоступно".
+    ring_cost/center_cost/extra_cost - ОТДЕЛЬНЫЕ списки (не слиты в один, как
+    раньше), потому что фронтенд рисует их по-разному: ring_cost разворачивается
+    в N физических пьедesталов (по одному на каждую единицу, см. openRitualCircleModal),
+    center_cost - единственный особый пьедestal, extra_cost - фоновая цена без
+    своего пьедestala вовсе. Всё это списывается ОДНИМ платежом при старте (см.
+    engine._ritual_full_cost/start_ritual) - разделение чисто визуальное."""
+    recipe = RITUAL_RECIPES[recipe_id]
+    available = engine.is_ritual_recipe_available(recipe_id, state)
+    lock_reason = None
+    if not available:
+        req_tech = recipe.get("requires_tech")
+        building_id = recipe["requires_building"]
+        if req_tech and req_tech not in state.techs:
+            lock_reason = "tech"
+        elif engine.working_count(state, building_id) <= 0:
+            lock_reason = "building"
+        else:
+            lock_reason = "pedestals"
+    ring_cost = recipe.get("ring_cost", {})
+    center = recipe["center_cost"]
+    return {
+        "id": recipe_id,
+        "name": recipe["name"],
+        "description": recipe.get("description", ""),
+        "available": available,
+        "lock_reason": lock_reason,
+        "ring_total": sum(ring_cost.values()),
+        "ring_cost": cost_list(ring_cost, state),
+        "center_cost": cost_list({center: 1}, state)[0],
+        "extra_cost": cost_list(recipe.get("extra_cost", {}), state),
+        "duration_turns": recipe.get("duration_turns", 1),
+        "extra_consumes_per_turn": manual_action_cost_list(
+            recipe.get("extra_consumes_per_turn", {}), recipe.get("extra_consumes_chance") or {}, state,
+        ),
+        "produces": manual_action_gain_list(recipe.get("produces", {}), recipe.get("produces_chance") or {}),
+        "sound_url": sound_url(recipe.get("sound")),
+    }
+
+
+def ritual_altars_view(state: GameState) -> list[dict]:
+    """Все построенные ритуальные алтари (постройки с полем ritual_circle) для
+    отдельной модалки "Ритуалы" (см. web_ui.html: openRitualCircleModal) - тот
+    же приём разделения, что у soul_collector_entries_view: список ТИПОВ
+    построек, не физических копий (capacity уже агрегирует working_count
+    внутри engine.ritual_pedestal_capacity)."""
+    result = []
+    for bid, b in BUILDINGS.items():
+        config = b.get("ritual_circle")
+        if not config or state.buildings.get(bid, 0) <= 0:
+            continue
+        active_job = state.ritual_jobs.get(bid)
+        result.append({
+            "building_id": bid,
+            "name": b["name"],
+            "capacity": engine.ritual_pedestal_capacity(state, bid),
+            "active_job": (
+                {
+                    "recipe_id": active_job["recipe_id"],
+                    "recipe_name": RITUAL_RECIPES.get(active_job["recipe_id"], {}).get("name", active_job["recipe_id"]),
+                    "turns_done": active_job["turns_done"],
+                    "turns_total": active_job["turns_total"],
+                }
+                if active_job else None
+            ),
+            "recipes": [
+                _ritual_recipe_view(rid, state)
+                for rid, recipe in RITUAL_RECIPES.items()
+                if recipe.get("requires_building") == bid
+            ],
+        })
+    return result
 
 
 def _automation_target_name(kind: str, target_id: str) -> str:
@@ -1073,8 +1329,12 @@ def build_view(state: GameState) -> dict:
             # кнопка "⚙ Улучшения" тут для них больше не показывается - вместо неё
             # (по прямому пожеланию, 2026-09-10) на карточке этой же постройки
             # показывается кнопка "Особи" (is_farm ниже), открывающая расселение +
-            # апгрейды КАЖДОГО экземпляра фермы этого типа.
-            "upgrades": None if b.get("breeding_slots") else building_upgrades_view(bid, state),
+            # апгрейды КАЖДОГО экземпляра фермы этого типа. То же самое (2026-09-18)
+            # теперь и у синтезаторов душ (soul_collector) - их апгрейды переехали
+            # на per-instance (см. soul_collector_instance_upgrades_view), кнопка
+            # "⚙ Улучшения" тут для них тоже больше не показывается - апгрейды
+            # покупаются в самой модалке "Души" (is_soul_collector ниже).
+            "upgrades": None if b.get("breeding_slots") or b.get("soul_collector") or b.get("reactor") else building_upgrades_view(bid, state),
             # Эти три флага НЕ хардкод id (см. CLAUDE.md) - определяются generic-
             # полями контента, как и сам upgrades=None выше. Дают фронтенду знать,
             # какую доп. кнопку показать на карточке ИМЕННО ЭТОЙ built-постройки
@@ -1093,6 +1353,16 @@ def build_view(state: GameState) -> dict:
             # открывает общую модалку "Стол зачарований" (enchanting - см.
             # enchanting_view выше), тот же приём, что is_soul_collector.
             "is_enchanting_table": bool(b.get("enchanting_table")),
+            # Кнопка "Ритуалы" на карточке - открывает openRitualCircleModal ЭТОЙ
+            # built-постройки (VIEW.ritual_altars ниже), тот же приём, что
+            # is_soul_collector.
+            "is_ritual_circle": bool(b.get("ritual_circle")),
+            # Кнопка "Реактор" на карточке - открывает openReactorModal ЭТОЙ
+            # built-постройки (VIEW.reactors ниже), тот же приём, что
+            # is_soul_collector - апгрейды реактора тоже per-instance (см.
+            # upgrades=None выше), покупаются в самой модалке, не через общую
+            # "⚙ Улучшения".
+            "is_reactor": bool(b.get("reactor")),
         })
 
     manual = []
@@ -1184,7 +1454,7 @@ def build_view(state: GameState) -> dict:
             "unlocks_autocraft": [RESOURCE_NAMES[r] for r in BUILDINGS[bid].get("unlocks_autocraft", [])],
             "energy_converter": energy_converter_view(bid),
             "click_delay_ms": BUILDINGS[bid].get("click_delay_ms"),
-            "upgrades": None if BUILDINGS[bid].get("breeding_slots") else building_upgrades_view(bid, state),
+            "upgrades": None if BUILDINGS[bid].get("breeding_slots") or BUILDINGS[bid].get("soul_collector") or BUILDINGS[bid].get("reactor") else building_upgrades_view(bid, state),
         })
     tech = [
         {
@@ -1205,10 +1475,12 @@ def build_view(state: GameState) -> dict:
         unlocks = engine.tech_unlocks(tid)
         if tid in state.techs:
             status = "researched"
-        elif engine.is_tech_available(tid, state):
-            status = "available"
-        else:
+        elif not engine.is_tech_available(tid, state):
             status = "locked"
+        elif tid not in state.solved_hypotheses:
+            status = "hypothesis_needed"
+        else:
+            status = "available"
         tech_tree.append({
             "id": tid,
             "name": t["name"],
@@ -1255,6 +1527,7 @@ def build_view(state: GameState) -> dict:
             "background_music": sound_url(UI_SOUNDS.get("background_music")),
             "lootbox_open": sound_url(UI_SOUNDS.get("lootbox_open")),
             "button_click": sound_url(UI_SOUNDS.get("button_click")),
+            "mine_hit": sound_url(UI_SOUNDS.get("mine_hit")),
         },
         "rates": rates,
         "energy": {"stock": stock, "capacity": capacity, "generation": gen, "consumption": cons},
@@ -1271,6 +1544,9 @@ def build_view(state: GameState) -> dict:
         "creature_bank": creature_bank_view(state),
         "soul_collectors": soul_collector_entries_view(state),
         "soul_bank": souls_bank_view(state),
+        "reactors": reactor_instances_view(state),
+        "reactor_bank": reactor_component_bank_view(state),
+        "ritual_altars": ritual_altars_view(state),
         "known_alleles": engine.known_alleles_view(state),
         "genetics_lab_available": engine.genetics_lab_available(state),
         "breeding_station_available": engine.breeding_station_available(state),
@@ -1384,6 +1660,8 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
         return engine.upgrade_storage(state, action_id)
     if action_type == "start_energy_recipe":
         return engine.start_energy_recipe(state, action_id)
+    if action_type == "start_ritual":
+        return engine.start_ritual(state, action_id)
     if action_type == "breed":
         # action_id - составной "parent_a_id:parent_b_id" (тот же приём, что
         # "building_id:upgrade_id" у building_upgrade ниже) - никакой фермы тут
@@ -1413,7 +1691,8 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
         "idle": [], "broken": [], "quests_completed": [], "autocraft_completed": [],
         "pending_finished": [], "energy_crafted": [], "sound_url": None,
         "manual_completed": [], "combat": None, "boss_fled": None,
-        "automation_fired": [],
+        "automation_fired": [], "ritual_completed": [], "breed": None,
+        "reactor_accidents": [],
     }
 
     if action_type != "skip":
@@ -1425,10 +1704,21 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
             # Резолвится сервером (а не клиентом по своей копии VIEW), чтобы
             # источником истины оставался content.json - см. manual_actions.*.sound.
             log["sound_url"] = sound_url(MANUAL_ACTIONS.get(action_id, {}).get("sound"))
+        if action_type == "start_ritual":
+            # Тот же принцип, что у manual_actions.*.sound выше - звук проигрывается
+            # СРАЗУ при клике (через общий doAction в web_ui.html), даже если сам
+            # ритуал многоходовой и produces начислится только позже, в
+            # _process_ritual_jobs - именно так уже ведут себя многоходовые
+            # manual_actions (см. ritual_recipes.*.sound в CLAUDE.md).
+            log["sound_url"] = sound_url(RITUAL_RECIPES.get(action_id, {}).get("sound"))
         if action_type == "hunt_attack":
             # Данные удара (урон/killed/instant_kill) для анимации на клиенте -
             # см. game/engine.py:ActionResult.combat/attack_encounter.
             log["combat"] = result.combat
+        if action_type == "breed":
+            # Данные для центрального визуального эффекта скрещивания (иконки
+            # родителей/потомка, мутация ли) - см. game/engine.py:ActionResult.breed.
+            log["breed"] = result.breed
         if not result.ok:
             return log
         log["action_deltas"] = resource_deltas(before, state.resources)
@@ -1444,9 +1734,26 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
     log["manual_completed"] = [MANUAL_ACTIONS[a]["name"] for a in report.manual_completed]
     log["pending_finished"] = list(report.pending_finished)
     log["energy_crafted"] = [ENERGY_RECIPES[rid]["name"] for rid, count in report.crafted.items() for _ in range(count)]
+    # {id, name, building_id} и не просто имя - клиент (openRitualCircleModal) должен
+    # надёжно сопоставить завершившийся ритуал с открытой модалкой конкретного алтаря,
+    # чтобы проиграть финальную анимацию, даже если игрок довёл ход каким-то ДРУГИМ
+    # кликом, а не самой кнопкой "Начать ритуал" (см. CLAUDE.md про многоходовые задачи).
+    log["ritual_completed"] = [
+        {"id": rid, "name": RITUAL_RECIPES[rid]["name"], "building_id": RITUAL_RECIPES[rid]["requires_building"]}
+        for rid in report.ritual_completed if rid in RITUAL_RECIPES
+    ]
     log["automation_fired"] = [
         {"building_name": BUILDINGS[e["building_id"]]["name"], "message": e["message"]}
         for e in report.automation_fired
+    ]
+    # Аварии реакторных зон, сработавшие именно в этот ход - см. game/engine.py:
+    # _process_reactors/ProductionReport.reactor_accidents. instance_id даёт клиенту
+    # проиграть эффект аварии ИМЕННО в открытой модалке этого экземпляра (тот же
+    # принцип, что ritual_completed выше передаёт building_id для сопоставления).
+    log["reactor_accidents"] = [
+        {"instance_id": e["instance_id"], "building_name": BUILDINGS[e["building_id"]]["name"],
+         "zone_index": e["zone_index"], "message": e["message"]}
+        for e in report.reactor_accidents
     ]
 
     newly_completed_quests = engine.check_quests(state)
@@ -1533,6 +1840,8 @@ def _action_label(state: GameState, action_type: str, action_id: str) -> str | N
         return f"расширение склада «{RESOURCE_NAMES[action_id]}»"
     if action_type == "start_energy_recipe":
         return ENERGY_RECIPES[action_id]["name"] if action_id in ENERGY_RECIPES else None
+    if action_type == "start_ritual":
+        return RITUAL_RECIPES[action_id]["name"] if action_id in RITUAL_RECIPES else None
     if action_type == "building_upgrade":
         building_id, _, upgrade_id = action_id.partition(":")
         upgrade = next((u for u in BUILDINGS[building_id].get("upgrades", []) if u["id"] == upgrade_id), None)
@@ -1540,6 +1849,13 @@ def _action_label(state: GameState, action_type: str, action_id: str) -> str | N
     if action_type == "farm_instance_upgrade":
         instance_id, _, upgrade_id = action_id.partition(":")
         instance = state.farm_instances.get(instance_id)
+        if instance is None:
+            return None
+        upgrade = next((u for u in BUILDINGS[instance["building_id"]].get("upgrades", []) if u["id"] == upgrade_id), None)
+        return upgrade["name"] if upgrade else None
+    if action_type == "soul_instance_upgrade":
+        instance_id, _, upgrade_id = action_id.partition(":")
+        instance = state.soul_collector_instances.get(instance_id)
         if instance is None:
             return None
         upgrade = next((u for u in BUILDINGS[instance["building_id"]].get("upgrades", []) if u["id"] == upgrade_id), None)
@@ -1728,6 +2044,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = engine.cancel_manual_job(STATE, payload.get("action_id"))
             elif kind == "research":
                 result = engine.cancel_research(STATE)
+            elif kind == "ritual":
+                result = engine.cancel_ritual(STATE, payload.get("building_id"))
             else:
                 self._json(400, {"error": "неизвестный тип задачи"})
                 return
@@ -1768,10 +2086,31 @@ class Handler(BaseHTTPRequestHandler):
             result = engine.hit_mine_field(STATE, r, c)
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/hypothesis_puzzle":
+            # Read-only генерация параметров головоломки этапа 1 - POST с JSON-
+            # телом (как /api/autocraft_preview), не GET+query - в этом файле
+            # все параметризованные вызовы идут через POST. Не трогает
+            # STATE/save.json (см. engine.generate_hypothesis_puzzle - чистая
+            # функция).
+            tech_id = payload.get("tech_id")
+            if tech_id not in TECHS:
+                self._json(400, {"error": "unknown tech"})
+                return
+            self._json(200, engine.generate_hypothesis_puzzle(tech_id))
+        elif self.path == "/api/solve_hypothesis":
+            # Не тратит ход (см. engine.solve_hypothesis) - тот же принцип, что
+            # insert_soul/remove_soul ниже. Сервер НЕ проверяет решение самой
+            # головоломки - клиент уже прогнал BFS локально (см. CLAUDE.md про
+            # отсутствие анти-чита в однопользовательской игре).
+            result = engine.solve_hypothesis(STATE, payload.get("tech_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/insert_soul":
             # Вставка/выемка души - управление имуществом, как house_creature/
             # release_creature, НЕ тратит ход (см. engine.insert_soul/remove_soul).
-            result = engine.insert_soul(STATE, payload.get("building_id"), payload.get("soul_id"))
+            # instance_id - id ФИЗИЧЕСКОГО экземпляра синтезатора (как farm_instance_id
+            # у house_creature), не id типа постройки - см. state.py:soul_collector_instances.
+            result = engine.insert_soul(STATE, payload.get("instance_id"), payload.get("soul_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/remove_soul":
@@ -1780,7 +2119,58 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 self._json(400, {"error": "index должен быть целым числом"})
                 return
-            result = engine.remove_soul(STATE, payload.get("building_id"), index)
+            result = engine.remove_soul(STATE, payload.get("instance_id"), index)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/insert_reactor_component":
+            # Установка компонента в ячейку решётки реактора - управление
+            # имуществом, как insert_soul, НЕ тратит ход (см. engine.
+            # insert_reactor_component). instance_id - id ФИЗИЧЕСКОГО экземпляра
+            # реактора (как instance_id у insert_soul), cell_index - позиция в
+            # решётке (row-major, см. state.py:reactor_instances).
+            try:
+                cell_index = int(payload.get("cell_index"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "cell_index должен быть целым числом"})
+                return
+            result = engine.insert_reactor_component(STATE, payload.get("instance_id"), cell_index, payload.get("resource_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/remove_reactor_component":
+            try:
+                cell_index = int(payload.get("cell_index"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "cell_index должен быть целым числом"})
+                return
+            result = engine.remove_reactor_component(STATE, payload.get("instance_id"), cell_index)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/set_reactor_zone_control":
+            # Глубина стержней управления зоны - постоянная настройка игрока,
+            # НЕ тратит ход (см. engine.set_reactor_zone_control).
+            try:
+                zone_index = int(payload.get("zone_index"))
+                depth_pct = int(payload.get("depth_pct"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "zone_index и depth_pct должны быть целыми числами"})
+                return
+            result = engine.set_reactor_zone_control(STATE, payload.get("instance_id"), zone_index, depth_pct)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/set_reactor_zone_coolant":
+            try:
+                zone_index = int(payload.get("zone_index"))
+                flow_pct = int(payload.get("flow_pct"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "zone_index и flow_pct должны быть целыми числами"})
+                return
+            result = engine.set_reactor_zone_coolant(STATE, payload.get("instance_id"), zone_index, flow_pct)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/purchase_reactor_upgrade":
+            # Покупка апгрейда ОДНОГО экземпляра реактора - зеркало
+            # /api/purchase_farm_upgrade (см. engine.purchase_reactor_instance_upgrade).
+            result = engine.purchase_reactor_instance_upgrade(STATE, payload.get("instance_id"), payload.get("upgrade_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/enchant_tool":
@@ -1837,6 +2227,12 @@ class Handler(BaseHTTPRequestHandler):
             # тратит ход (управление имуществом, а не игровое действие с рандомом/
             # шансом, см. engine.purchase_farm_instance_upgrade).
             result = engine.purchase_farm_instance_upgrade(STATE, payload.get("instance_id"), payload.get("upgrade_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/purchase_soul_upgrade":
+            # Покупка апгрейда ОДНОГО экземпляра синтезатора душ - зеркало
+            # /api/purchase_farm_upgrade (см. engine.purchase_soul_collector_instance_upgrade).
+            result = engine.purchase_soul_collector_instance_upgrade(STATE, payload.get("instance_id"), payload.get("upgrade_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/analyze_creature":
@@ -1958,7 +2354,7 @@ def main() -> None:
         print("Остановлено.")
         return
 
-    print("Закрой окно игры, когда закончишь - прогресс уже сохранён в save.json.")
+    print("Закрой окно игры, когда закончишь - прогресс уже сохранён в saves/autosave.json.")
     # serve_forever() уходит в фоновый поток - webview.start() ниже занимает
     # главный поток сам (нативный GUI-цикл окна обязан работать в главном
     # потоке, иначе пустой экран/падение на некоторых бэкендах Windows).
