@@ -9853,18 +9853,15 @@ function hypEndpointIcon(isStart, color) {
   return svg;
 }
 
-function hypEndpointColumn(isStart, solved, confirmed) {
+function hypEndpointColumn(isStart, solved, confirmed, rowIndex, totalRows) {
   const col = el("div", { class: "hyp-endpoint-col" });
-  // Импульс всегда входит в СРЕДНЮЮ строку сетки (start_idx = row 1, col 0 -
-  // см. game/engine.py:generate_hypothesis_puzzle), а Инсайт - в ВЕРХНЮЮ
-  // (end_idx = row 0, cols-1) - две РАЗНЫЕ строки, поэтому пустые распорки
-  // вокруг слота с бейджем не симметричны: у старта распорка идёт и до, и
-  // после (слот в середине), у финиша распорки только ПОСЛЕ (слот сразу
-  // первым). Раньше тут была одна и та же раскладка для обоих - бейдж
-  // "Инсайт" рисовался в средней строке вместо верхней, и путь визуально
-  // как будто обрывался, не доходя до значка, хотя логика решения уже
-  // засчитывала связь верно.
-  if (isStart) col.appendChild(el("div"));
+  // Строка старта/финиша теперь СЛУЧАЙНАЯ на каждую технологию (см.
+  // game/engine.py:generate_hypothesis_puzzle - rng.randrange(rows)), не
+  // всегда 1/0 - бейдж должен встать РОВНО в ту же строку сетки, что и
+  // реальная стартовая/финишная клетка (rowIndex), иначе путь будет визуально
+  // обрываться, не доходя до значка (был такой баг со статичными строками).
+  // Пустые распорки до/после слота считаются от rowIndex, а не жёстко.
+  for (let r = 0; r < rowIndex; r++) col.appendChild(el("div"));
   const color = isStart ? "#5fd0e8" : (solved ? "#4ac9a0" : "#4a5560");
   const bg = isStart ? "rgba(95,208,232,.1)" : (solved ? "rgba(74,201,160,.12)" : "rgba(255,255,255,.04)");
   const anim = (!isStart && confirmed) ? "hypPulse 1.6s ease-in-out infinite" : "none";
@@ -9880,8 +9877,7 @@ function hypEndpointColumn(isStart, solved, confirmed) {
   if (isStart) slot.append(label, badge, stub);
   else slot.append(stub, badge, label);
   col.appendChild(slot);
-  col.appendChild(el("div"));
-  if (!isStart) col.appendChild(el("div"));
+  for (let r = rowIndex + 1; r < totalRows; r++) col.appendChild(el("div"));
   return col;
 }
 
@@ -9925,8 +9921,10 @@ function renderHypothesisModal() {
     text: "Соедините «Импульс» с «Инсайтом»: клик по узлу поворачивает его связи на 90°. Лишние повороты сверх лимита обойдутся в материалы.",
   }));
 
+  const startRow = Math.floor(puzzle.start_idx / puzzle.cols);
+  const endRow = Math.floor(puzzle.end_idx / puzzle.cols);
   const puzzleRow = el("div", { class: "hyp-puzzle-row" });
-  puzzleRow.appendChild(hypEndpointColumn(true, solved, confirmed));
+  puzzleRow.appendChild(hypEndpointColumn(true, solved, confirmed, startRow, puzzle.rows));
   const grid = el("div", {
     class: "hyp-grid",
     style: `grid-template-columns: repeat(${puzzle.cols}, 92px); grid-template-rows: repeat(${puzzle.rows}, 92px);`,
@@ -9935,7 +9933,7 @@ function renderHypothesisModal() {
     grid.appendChild(hypTile(i, masks, powered, confirmed || movesLeft <= 0));
   }
   puzzleRow.appendChild(grid);
-  puzzleRow.appendChild(hypEndpointColumn(false, solved, confirmed));
+  puzzleRow.appendChild(hypEndpointColumn(false, solved, confirmed, endRow, puzzle.rows));
   content.appendChild(puzzleRow);
 
   const footer = el("div", { class: "hyp-footer" });

@@ -5008,6 +5008,8 @@ def reactor_instances_view(state: GameState) -> list[dict]:
                     "role": reactor_component_role(cell["resource_id"]),
                     "charge": cell.get("charge"),
                     "zone_index": layout[i] if i < len(layout) else None,
+                    "catalyst_id": cell.get("catalyst_id"),
+                    "catalyst_name": RESOURCE_NAMES.get(cell["catalyst_id"]) if cell.get("catalyst_id") else None,
                 }
                 for i, cell in enumerate(instance["grid"])
             ],
@@ -5337,9 +5339,16 @@ def generate_hypothesis_puzzle(tech_id: str) -> dict:
     web_ui.html), сервер не валидирует решение вообще (см. docstring
     solve_hypothesis - однопользовательская игра без анти-чита).
 
-    Алгоритм: 1) прокладывается ПРОСТОЙ путь (без ветвлений/повторов) от
-    стартовой клетки (1,0) к финишной (0,cols-1) рандомизированным DFS с
-    бэктрекингом ("recursive backtracker") - гарантированно завершается, т.к. в
+    Алгоритм: 0) строка старта и строка финиша выбираются СЛУЧАЙНО (0..rows-1
+    каждая, независимо друг от друга - могут и совпасть) - только строка,
+    НЕ столбец: столбец старта всегда 0 (левый край, там же в UI сидит
+    "Импульс"), столбец финиша всегда cols-1 (правый край, "Инсайт") - это
+    сохраняет расклад "значок слева/справа от сетки со штырьком внутрь", а
+    ВАРИАТИВНОСТЬ даёт разная строка входа/выхода на каждую технологию,
+    вместо одной и той же пары (1,0)/(0,cols-1) всегда. 1) прокладывается
+    ПРОСТОЙ путь (без ветвлений/повторов) от стартовой клетки к финишной
+    рандомизированным DFS с бэктрекингом ("recursive backtracker") -
+    гарантированно завершается, т.к. в
     конечном связном графе сетки простой путь между любыми двумя клетками
     существует всегда, а DFS с бэктрекингом полон. 2) Клетки НЕ на пути - чисто
     декоративный мусор со случайной маской. 3) Каждая клетка ПУТИ скремблится
@@ -5355,8 +5364,8 @@ def generate_hypothesis_puzzle(tech_id: str) -> dict:
     def idx(r, c):
         return r * cols + c
 
-    start_r, start_c = 1, 0
-    end_r, end_c = 0, cols - 1
+    start_r, start_c = rng.randrange(rows), 0
+    end_r, end_c = rng.randrange(rows), cols - 1
 
     def grid_neighbors(r, c):
         result = []
