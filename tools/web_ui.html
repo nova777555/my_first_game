@@ -10297,7 +10297,7 @@ function renderTechDetail(tech) {
   if (VIEW.active_research && VIEW.active_research.tech_id === tech.id) {
     box.appendChild(researchProgressRow(VIEW.active_research));
   } else if (tech.status === "hypothesis_needed") {
-    const btn = el("button", { class: "hyp-solve-btn", text: "Решить головоломку →" });
+    const btn = el("button", { class: "hyp-solve-btn", text: "Сформировать гипотезу →" });
     btn.addEventListener("click", () => openHypothesisModal(tech.id));
     box.appendChild(btn);
   } else if (tech.status === "available") {
