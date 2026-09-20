@@ -179,6 +179,36 @@ class GameState:
     # Счётчик для генерации id новых экземпляров ферм ("farm_{n}") - см.
     # game/engine.py:_ensure_farm_instances.
     next_farm_instance_id: int = 1
+    # ФИЗИЧЕСКИЕ экземпляры построек-синтезаторов душ (BUILDINGS[bid]["soul_collector"] -
+    # soul_synthesizer/guardian_altar) - instance_id -> {"building_id", "broken",
+    # "broken_type", "upgrades", "installed"}. Зеркало farm_instances (см. комментарий
+    # выше и game/engine.py:_ensure_soul_collector_instances) - ДО этого поля (2026-09-18)
+    # слоты душ были агрегированы ПО ТИПУ постройки (см. soul_slots ниже), что делало
+    # физически невозможным показать в UI "экземпляр 2 из 3" со своими слотами - по
+    # прямому пожеланию синтезаторы переведены на ту же per-instance модель, что и
+    # фермы. "installed" - список id вставленных душ ИМЕННО этого экземпляра (порядок =
+    # порядок вставки, не индексы фиксированных слотов, тот же принцип, что у старого
+    # soul_slots[building_id]).
+    soul_collector_instances: dict[str, dict] = field(default_factory=dict)
+    # Счётчик для генерации id новых экземпляров синтезаторов ("soul_inst_{n}") - см.
+    # game/engine.py:_ensure_soul_collector_instances.
+    next_soul_instance_id: int = 1
+    # ФИЗИЧЕСКИЕ экземпляры построек-реакторов (BUILDINGS[bid]["reactor"]) -
+    # instance_id -> {"building_id", "broken", "broken_type", "upgrades", "grid",
+    # "zones"}. Зеркало soul_collector_instances/farm_instances (см. комментарии
+    # выше и game/engine.py:_ensure_reactor_instances) - без миграционной ветки
+    # (поле новое, мигрировать нечего). "grid" - row-major список ДЛИНОЙ
+    # width*height (см. reactor_grid_dims): элемент None - пустая ячейка, иначе
+    # {"resource_id", "charge"} ("charge" - остаток заряда fuel-ячейки, None у
+    # moderator/coolant/absorber - они не расходуются). "zones" - список ДЛИНОЙ
+    # reactor_zone_count: {"heat", "control_rod_depth", "coolant_flow",
+    # "prev_coolant_flow"} - топология "ячейка -> зона" НЕ хранится, это чистая
+    # функция от (width, height, zone_count), см. game/engine.py:
+    # _reactor_zone_layout.
+    reactor_instances: dict[str, dict] = field(default_factory=dict)
+    # Счётчик для генерации id новых экземпляров реакторов ("reactor_inst_{n}") -
+    # см. game/engine.py:_ensure_reactor_instances.
+    next_reactor_instance_id: int = 1
     # skill_id (content.json["skills"]) -> накопленный опыт - ОБЩАЯ, произвольно
     # расширяемая система прокачки (не привязана к бою специально), см.
     # game/engine.py:skill_level/add_skill_xp. Отсутствие ключа = 0 (уровень 1,
@@ -199,13 +229,15 @@ class GameState:
     # его игроку, накопленные turns_done - нет (тот же принцип, что
     # manual_jobs/cancel_manual_job).
     active_research: dict | None = None
-    # building_id (постройка с полем soul_collector) -> список id вставленных душ
-    # (порядок = порядок вставки, НЕ индексы фиксированных слотов - см.
-    # game/engine.py:insert_soul/remove_soul/soul_collector_capacity). Душа
-    # "вечная" - не расходуется и не портится сама по себе, стоит в слоте, пока
-    # игрок сам её не вынет. Если сломанная копия/непроданный апгрейд снизили
-    # capacity ниже len(list), лишние (по порядку вставки) просто не участвуют в
-    # производстве этот ход - не выселяются принудительно.
+    # УСТАРЕВШЕЕ поле (до перехода на per-instance soul_collector_instances выше,
+    # 2026-09-18) - building_id -> список id вставленных душ, агрегированный ПО
+    # ТИПУ постройки. Больше не пишется НИКУДА в новых сохранениях (сразу же
+    # опустошается миграцией - см. game/engine.py:_ensure_soul_collector_instances,
+    # которая при первом обращении раскладывает эти души round-robin по
+    # soul_collector_instances и оставляет список тут пустым) - поле оставлено
+    # только чтобы старые save.json (созданные ДО перехода) продолжали грузиться
+    # без потери уже вставленных душ, тот же приём, что farm_building_id у
+    # creatures.
     soul_slots: dict[str, list[str]] = field(default_factory=dict)
     # quest_id -> ход, на котором ВПЕРВЫЕ выполнены все условия квеста (content.json
     # ["quests"]) - раз условия истинны, квест остаётся "выполнен" навсегда, даже
@@ -217,6 +249,14 @@ class GameState:
     # моменты: игрок кликает "Забрать награду" сам, ход не тратится (см.
     # game/engine.py:claim_quest_reward, тот же принцип, что insert_soul/remove_soul).
     claimed_quests: set[str] = field(default_factory=set)
+    # tech_id -> решена ли одноразовая головоломка-гипотеза этапа 1 (game/engine.py:
+    # solve_hypothesis) - ПОСТОЯННОЕ состояние, как claimed_quests, не турн-счётчик.
+    # Пустое множество у старых сохранений (from_dict ниже) - сознательное решение:
+    # ВСЕ технологии, включая уже открытые прежде технологии без головоломки,
+    # теперь тоже требуют её один раз для НОВЫХ исследований - см. research()
+    # в engine.py. state.techs (уже изученное) этим НЕ затрагивается - оба множества
+    # независимы, ничего не переизучивается заново.
+    solved_hypotheses: set[str] = field(default_factory=set)
     # move_id (content.json["combat_moves"]) -> сколько ходов осталось до
     # восстановления приёма - убывает на 1 в КАЖДОМ advance_turn (не только в
     # бою, как и остальные счётчики хода), ключ с 0 удаляется. Отсутствие ключа
@@ -265,6 +305,18 @@ class GameState:
     # факт "скрафтил хоть раз" ничем не отслеживался отдельно от текущего запаса
     # ресурса, который мог быть уже потрачен.
     action_performed_count: dict[str, int] = field(default_factory=dict)
+    # building_id (постройка с полем ritual_circle) -> активный ритуал "в процессе"
+    # (ritual_recipes.*.duration_turns > 1) - см. game/engine.py:_process_ritual_jobs/
+    # start_ritual. Один активный ритуал НА ПОСТРОЙКУ (агрегация по типу, как
+    # soul_slots/automation_rules, а НЕ по физическому экземпляру, как farm_instances) -
+    # повторный запуск, пока задача не закончилась, блокируется. cost (ring_cost +
+    # center_cost + extra_cost) уже списан целиком в момент старта - хранится только
+    # для возврата при досрочной отмене (cancel_ritual), тот же принцип, что
+    # manual_jobs. extra_consumes_per_turn/extra_consumes_chance тикают КАЖДЫЙ ход
+    # отдельно (не предоплачены) - нехватка не отменяет и не тормозит ритуал, просто
+    # в этот ход ничего не списывается. produces/produces_chance разворачиваются
+    # (шанс/диапазон) РОВНО ОДИН РАЗ при завершении - как gain у manual_jobs.
+    ritual_jobs: dict[str, dict] = field(default_factory=dict)  # building_id -> {"recipe_id", "turns_total", "turns_done", "extra_consumes_per_turn", "extra_consumes_chance", "produces", "produces_chance", "cost"}
 
     def to_dict(self) -> dict:
         return {
@@ -306,18 +358,35 @@ class GameState:
                 for fid, f in self.farm_instances.items()
             },
             "next_farm_instance_id": self.next_farm_instance_id,
+            "soul_collector_instances": {
+                sid: {**s, "upgrades": list(s.get("upgrades", [])), "installed": list(s.get("installed", []))}
+                for sid, s in self.soul_collector_instances.items()
+            },
+            "next_soul_instance_id": self.next_soul_instance_id,
+            "reactor_instances": {
+                rid: {
+                    **r,
+                    "upgrades": list(r.get("upgrades", [])),
+                    "grid": [dict(cell) if cell else None for cell in r.get("grid", [])],
+                    "zones": [dict(z) for z in r.get("zones", [])],
+                }
+                for rid, r in self.reactor_instances.items()
+            },
+            "next_reactor_instance_id": self.next_reactor_instance_id,
             "skill_xp": self.skill_xp,
             "active_encounter": self.active_encounter,
             "active_research": self.active_research,
             "soul_slots": self.soul_slots,
             "completed_quests": self.completed_quests,
             "claimed_quests": sorted(self.claimed_quests),
+            "solved_hypotheses": sorted(self.solved_hypotheses),
             "move_cooldowns": self.move_cooldowns,
             "player_hp": self.player_hp,
             "wounded_until_turn": self.wounded_until_turn,
             "automation_rules": {
                 bid: [dict(r) for r in rules] for bid, rules in self.automation_rules.items()
             },
+            "ritual_jobs": self.ritual_jobs,
         }
 
     @classmethod
@@ -371,12 +440,28 @@ class GameState:
                 for fid, f in data.get("farm_instances", {}).items()
             },
             next_farm_instance_id=data.get("next_farm_instance_id", 1),
+            soul_collector_instances={
+                sid: {**s, "upgrades": list(s.get("upgrades", [])), "installed": list(s.get("installed", []))}
+                for sid, s in data.get("soul_collector_instances", {}).items()
+            },
+            next_soul_instance_id=data.get("next_soul_instance_id", 1),
+            reactor_instances={
+                rid: {
+                    **r,
+                    "upgrades": list(r.get("upgrades", [])),
+                    "grid": [dict(cell) if cell else None for cell in r.get("grid", [])],
+                    "zones": [dict(z) for z in r.get("zones", [])],
+                }
+                for rid, r in data.get("reactor_instances", {}).items()
+            },
+            next_reactor_instance_id=data.get("next_reactor_instance_id", 1),
             skill_xp=dict(data.get("skill_xp", {})),
             active_encounter=dict(data["active_encounter"]) if data.get("active_encounter") else None,
             active_research=dict(data["active_research"]) if data.get("active_research") else None,
             soul_slots={k: list(v) for k, v in data.get("soul_slots", {}).items()},
             completed_quests=dict(data.get("completed_quests", {})),
             claimed_quests=set(data.get("claimed_quests", [])),
+            solved_hypotheses=set(data.get("solved_hypotheses", [])),
             move_cooldowns=dict(data.get("move_cooldowns", {})),
             player_hp=data.get("player_hp"),
             wounded_until_turn=data.get("wounded_until_turn"),
@@ -384,6 +469,7 @@ class GameState:
                 bid: [dict(r) for r in rules]
                 for bid, rules in data.get("automation_rules", {}).items()
             },
+            ritual_jobs={k: dict(v) for k, v in data.get("ritual_jobs", {}).items()},
         )
 
     def save(self, path: str) -> None:
