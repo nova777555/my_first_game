@@ -112,5 +112,39 @@ class MatchGridTests(FixtureTestCase):
         self.assertIsNone(engine.match_grid(s, "yard", ["raw_a"]))
 
 
+class TogglePinnedRecipeTests(FixtureTestCase):
+    def test_pinning_a_grid_recipe_adds_it(self):
+        s = GameState()
+        result = engine.toggle_pinned_recipe(s, "grid_line")
+        self.assertTrue(result.ok)
+        self.assertEqual(s.pinned_recipes, ["grid_line"])
+
+    def test_pinning_twice_unpins(self):
+        s = GameState(pinned_recipes=["grid_line"])
+        result = engine.toggle_pinned_recipe(s, "grid_line")
+        self.assertTrue(result.ok)
+        self.assertEqual(s.pinned_recipes, [])
+
+    def test_cannot_pin_a_plain_action(self):
+        s = GameState()
+        result = engine.toggle_pinned_recipe(s, "grid_plain_card")
+        self.assertFalse(result.ok)
+        self.assertEqual(s.pinned_recipes, [])
+
+    def test_cannot_pin_unknown_action(self):
+        s = GameState()
+        result = engine.toggle_pinned_recipe(s, "not_a_real_action")
+        self.assertFalse(result.ok)
+
+    def test_unpinning_removed_content_still_works(self):
+        # См. CLAUDE.md "Удаление контента ломает сохранения" - открепить уже
+        # закреплённый, но с тех пор удалённый из content.json id должно быть
+        # можно, чтобы игрок мог вычистить сохранение.
+        s = GameState(pinned_recipes=["deleted_action"])
+        result = engine.toggle_pinned_recipe(s, "deleted_action")
+        self.assertTrue(result.ok)
+        self.assertEqual(s.pinned_recipes, [])
+
+
 if __name__ == "__main__":
     unittest.main()

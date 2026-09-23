@@ -19,7 +19,7 @@ class StateRoundTripTests(unittest.TestCase):
             building_disabled={"lumber_camp": 1},
             pinned=["wood", "ore"],
             tool_tiers={"pickaxe": 3},
-            veins={"ore": 15},
+            active_mine_field={"size": 2, "cells": [{"resource": "ore", "hp": 1, "hp_max": 2, "broken": False, "revealed": True}]},
             energy_jobs=[{"recipe_id": "metal_from_energy", "progress": 40}],
             save_name="максимум",
             autocraft_enabled=False,
@@ -27,7 +27,6 @@ class StateRoundTripTests(unittest.TestCase):
             building_upgrades={"sawmill": ["sawmill_scale_2"]},
             action_priority={"craft_mid": 7},
             storage_tier={"wood": 1},
-            vein_quality={"ore": 2},
             creatures={
                 "creature_1": {
                     "species_id": "bee", "genotype": {"species": ["bee", "bee"], "lifespan": ["normal", "short"]},
@@ -39,6 +38,12 @@ class StateRoundTripTests(unittest.TestCase):
             species_discovered={"bee", "royal_bee"},
             farm_instances={"farm_1": {"building_id": "apiary", "broken": False, "upgrades": ["apiary_scale"]}},
             next_farm_instance_id=2,
+            soul_collector_instances={
+                "soul_inst_1": {"building_id": "soul_synth", "broken": False, "broken_type": None,
+                                 "upgrades": ["soul_synth_slot"], "installed": ["wolf_soul"]},
+            },
+            next_soul_instance_id=2,
+            pinned_recipes=["craft_planks"],
         )
         restored = GameState.from_dict(s.to_dict())
         self.assertEqual(restored.turn, 7)
@@ -51,7 +56,10 @@ class StateRoundTripTests(unittest.TestCase):
         self.assertEqual(restored.building_disabled, {"lumber_camp": 1})
         self.assertEqual(restored.pinned, ["wood", "ore"])
         self.assertEqual(restored.tool_tiers, {"pickaxe": 3})
-        self.assertEqual(restored.veins, {"ore": 15})
+        self.assertEqual(
+            restored.active_mine_field,
+            {"size": 2, "cells": [{"resource": "ore", "hp": 1, "hp_max": 2, "broken": False, "revealed": True}]},
+        )
         self.assertEqual(restored.energy_jobs, [{"recipe_id": "metal_from_energy", "progress": 40}])
         self.assertEqual(restored.save_name, "максимум")
         self.assertFalse(restored.autocraft_enabled)
@@ -59,7 +67,6 @@ class StateRoundTripTests(unittest.TestCase):
         self.assertEqual(restored.building_upgrades, {"sawmill": ["sawmill_scale_2"]})
         self.assertEqual(restored.action_priority, {"craft_mid": 7})
         self.assertEqual(restored.storage_tier, {"wood": 1})
-        self.assertEqual(restored.vein_quality, {"ore": 2})
         self.assertEqual(restored.creatures, {
             "creature_1": {
                 "species_id": "bee", "genotype": {"species": ["bee", "bee"], "lifespan": ["normal", "short"]},
@@ -71,6 +78,12 @@ class StateRoundTripTests(unittest.TestCase):
         self.assertEqual(restored.species_discovered, {"bee", "royal_bee"})
         self.assertEqual(restored.farm_instances, {"farm_1": {"building_id": "apiary", "broken": False, "upgrades": ["apiary_scale"]}})
         self.assertEqual(restored.next_farm_instance_id, 2)
+        self.assertEqual(restored.soul_collector_instances, {
+            "soul_inst_1": {"building_id": "soul_synth", "broken": False, "broken_type": None,
+                             "upgrades": ["soul_synth_slot"], "installed": ["wolf_soul"]},
+        })
+        self.assertEqual(restored.next_soul_instance_id, 2)
+        self.assertEqual(restored.pinned_recipes, ["craft_planks"])
 
     def test_old_save_creature_key_farm_building_id_is_read_as_farm_instance_id(self):
         # Сохранение старше переименования поля (см. CLAUDE.md, "Пасеки:
@@ -111,13 +124,19 @@ class StateRoundTripTests(unittest.TestCase):
         self.assertEqual(restored.building_upgrades, {})
         self.assertEqual(restored.action_priority, {})
         self.assertEqual(restored.storage_tier, {})
-        self.assertEqual(restored.vein_quality, {})
+        self.assertIsNone(restored.active_mine_field)
         self.assertEqual(restored.creatures, {})
         self.assertEqual(restored.next_creature_id, 1)
         self.assertEqual(restored.known_alleles, {})
         self.assertEqual(restored.species_discovered, set())
         self.assertEqual(restored.farm_instances, {})
         self.assertEqual(restored.next_farm_instance_id, 1)
+        self.assertEqual(restored.soul_collector_instances, {})
+        self.assertEqual(restored.next_soul_instance_id, 1)
+        self.assertEqual(restored.soul_slots, {})
+        # Старое сохранение старше сеточного крафта (см. PLAN_grid_crafting.md) -
+        # пустой список, а не KeyError.
+        self.assertEqual(restored.pinned_recipes, [])
 
     def test_save_and_load_file(self):
         s = GameState(turn=3, resources={"wood": 5}, tool_tiers={"pickaxe": 2})

@@ -317,6 +317,11 @@ class GameState:
     # в этот ход ничего не списывается. produces/produces_chance разворачиваются
     # (шанс/диапазон) РОВНО ОДИН РАЗ при завершении - как gain у manual_jobs.
     ritual_jobs: dict[str, dict] = field(default_factory=dict)  # building_id -> {"recipe_id", "turns_total", "turns_done", "extra_consumes_per_turn", "extra_consumes_chance", "produces", "produces_chance", "cost"}
+    # Закреплённые сеточные рецепты (action_id из manual_actions с pattern) - см.
+    # CLAUDE.md/PLAN_grid_crafting.md, engine.toggle_pinned_recipe. Отдельное поле
+    # от "pinned" (это уже занято ресурсами на главной панели, см. выше) - тот же
+    # принцип "закреплённое переживает закрытие модалки", что автоматизация/души.
+    pinned_recipes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -387,6 +392,7 @@ class GameState:
                 bid: [dict(r) for r in rules] for bid, rules in self.automation_rules.items()
             },
             "ritual_jobs": self.ritual_jobs,
+            "pinned_recipes": self.pinned_recipes,
         }
 
     @classmethod
@@ -470,6 +476,7 @@ class GameState:
                 for bid, rules in data.get("automation_rules", {}).items()
             },
             ritual_jobs={k: dict(v) for k, v in data.get("ritual_jobs", {}).items()},
+            pinned_recipes=list(data.get("pinned_recipes", [])),
         )
 
     def save(self, path: str) -> None:

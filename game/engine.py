@@ -5256,6 +5256,22 @@ def toggle_pin(state: GameState, resource_id: str) -> ActionResult:
     return ActionResult(True, f"Закреплено: {RESOURCE_NAMES[resource_id]}.")
 
 
+def toggle_pinned_recipe(state: GameState, action_id: str) -> ActionResult:
+    """Звезда на плитке сеточного рецепта в верстаке (state.pinned_recipes) - как
+    toggle_pin, не тратит ход. action_id приходит из тела HTTP-запроса (см.
+    /api/pin_recipe в tools/web_ui.py), поэтому проверяется явно, а не
+    предполагается валидным. Открепление возможно для ЛЮБОГО закреплённого id,
+    даже если контент с тех пор удалил само действие (см. CLAUDE.md "Удаление
+    контента ломает сохранения") - иначе игрок не смог бы вычистить сохранение."""
+    if action_id in state.pinned_recipes:
+        state.pinned_recipes.remove(action_id)
+        return ActionResult(True, "Рецепт откреплён.")
+    if action_id not in MANUAL_ACTIONS or not is_grid_action(action_id):
+        return ActionResult(False, "Это не сеточный рецепт.")
+    state.pinned_recipes.append(action_id)
+    return ActionResult(True, f"Закреплено: {MANUAL_ACTIONS[action_id]['name']}.")
+
+
 def toggle_autocraft(state: GameState) -> ActionResult:
     """Галочка "Автокрафт" в UI (видна игроку, только пока compute_capacity(state) > 0 -
     см. tools/web_ui.py:build_view). Не расходует ход - как и toggle_pin, это чистая
