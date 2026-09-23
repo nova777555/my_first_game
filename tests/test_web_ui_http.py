@@ -1427,6 +1427,111 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotIn("autosave", [s["name"] for s in resp["saves"]])
 
+    # -- Сеточный крафт (см. PLAN_grid_crafting.md, этап 3) --------------------
+
+    def test_grid_actions_are_hidden_from_the_plain_manual_list(self):
+        status, resp = self._get("/api/state")
+        self.assertEqual(status, 200)
+        manual_ids = {m["id"] for m in resp["categories"]["manual"]}
+        self.assertNotIn("grid_line", manual_ids)
+        self.assertNotIn("grid_mirror", manual_ids)
+        # Действие БЕЗ узора в той же локации-механизме остаётся обычной карточкой.
+        self.assertIn("grid_plain_card", manual_ids)
+
+    def test_crafting_section_lists_the_grid_location(self):
+        status, resp = self._get("/api/state")
+        self.assertEqual(status, 200)
+        entries = {c["location_id"]: c for c in resp["crafting"]}
+        self.assertIn("grid_loc", entries)
+        entry = entries["grid_loc"]
+        self.assertEqual(entry["width"], 2)
+        self.assertEqual(entry["height"], 2)
+        recipe_ids = {r["action_id"] for r in entry["recipes"]}
+        # grid_locked требует tech1, ещё не открыт - не в списке рецептов верстака.
+        self.assertEqual(recipe_ids, {"grid_line", "grid_mirror"})
+
+    def test_crafting_recipe_reports_enough_flag(self):
+        web_ui.STATE.resources["raw_a"] = 100
+        status, resp = self._get("/api/state")
+        entry = next(c for c in resp["crafting"] if c["location_id"] == "grid_loc")
+        grid_line = next(r for r in entry["recipes"] if r["action_id"] == "grid_line")
+        self.assertTrue(grid_line["enough"])
+        grid_mirror = next(r for r in entry["recipes"] if r["action_id"] == "grid_mirror")
+        self.assertFalse(grid_mirror["enough"])  # нужен ещё raw_b, которого нет
+
+    def test_craft_grid_matches_and_spends_a_turn(self):
+        web_ui.STATE.resources["raw_a"] = 100
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 1,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"])
+        self.assertEqual(resp["action_id"], "grid_line")
+        self.assertEqual(resp["times_done"], 1)
+        self.assertEqual(resp["state"]["turn"], 2)
+        self.assertEqual(resp["state"]["resources"]["raw_a"], 98)
+        self.assertEqual(resp["state"]["resources"]["grid_output"], 1)
+
+    def test_craft_grid_rejects_unmatched_layout_without_spending_a_turn(self):
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": [None, None, None, None], "times": 1,
+        })
+        self.assertEqual(status, 200)
+        self.assertFalse(resp["ok"])
+        self.assertIsNone(resp["action_id"])
+        self.assertEqual(resp["state"]["turn"], 1)
+
+    def test_craft_grid_ignores_locked_recipe_layout(self):
+        web_ui.STATE.resources["raw_b"] = 100
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_b", None, None, None], "times": 1,
+        })
+        self.assertEqual(status, 200)
+        self.assertFalse(resp["ok"])  # grid_locked требует tech1, ещё не открыт
+
+    def test_craft_grid_times_n_runs_n_turns(self):
+        web_ui.STATE.resources["raw_a"] = 100
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 3,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"])
+        self.assertEqual(resp["times_done"], 3)
+        self.assertEqual(resp["state"]["turn"], 4)
+        self.assertEqual(len(resp["logs"]), 3)
+
+    def test_craft_grid_times_n_stops_on_first_shortfall(self):
+        # Хватает ровно на 2 крафта (raw_a: 2 на каждый) - третий должен уйти в
+        # докрафт/отложенный платёж и не пройти сразу (craft_final-подобный сырой
+        # ресурс без рецепта - см. фикстуру raw_a: голое сырьё, докрафтить нечем).
+        web_ui.STATE.resources["raw_a"] = 4
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 5,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"])  # хотя бы одна итерация прошла
+        self.assertEqual(resp["times_done"], 2)
+        self.assertEqual(resp["state"]["turn"], 3)
+
+    def test_pin_recipe_toggle(self):
+        status, resp = self._post("/api/pin_recipe", {"action_id": "grid_line"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"])
+        entry = next(c for c in resp["state"]["crafting"] if c["location_id"] == "grid_loc")
+        grid_line = next(r for r in entry["recipes"] if r["action_id"] == "grid_line")
+        self.assertTrue(grid_line["pinned"])
+
+        status, resp = self._post("/api/pin_recipe", {"action_id": "grid_line"})
+        self.assertTrue(resp["ok"])
+        entry = next(c for c in resp["state"]["crafting"] if c["location_id"] == "grid_loc")
+        grid_line = next(r for r in entry["recipes"] if r["action_id"] == "grid_line")
+        self.assertFalse(grid_line["pinned"])
+
+    def test_pin_recipe_rejects_plain_action(self):
+        status, resp = self._post("/api/pin_recipe", {"action_id": "grid_plain_card"})
+        self.assertEqual(status, 200)
+        self.assertFalse(resp["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

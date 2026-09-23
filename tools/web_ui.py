@@ -980,6 +980,29 @@ def reactor_component_bank_view(state: GameState) -> list[dict]:
     ]
 
 
+def reactor_catalyst_bank_view(state: GameState) -> list[dict]:
+    """Банк катализаторов реактора в инвентаре - зеркало
+    reactor_component_bank_view. applies_to - тег ролей, которым подходит
+    катализатор (см. game/engine.py:reactor_catalyst_bank_view) - модалка
+    ячейки фильтрует по роли уже стоящего в ней компонента."""
+    return [
+        {"id": e["id"], "name": RESOURCE_NAMES[e["id"]], "applies_to": e["applies_to"], "amount": e["amount"]}
+        for e in engine.reactor_catalyst_bank_view(state)
+    ]
+
+
+def reactor_coolant_fluid_bank_view(state: GameState) -> list[dict]:
+    """Охлаждающие жидкости реактора с запасом игрока - зеркало
+    reactor_catalyst_bank_view. cooling_mult/units_per_power отдаются наружу,
+    чтобы UI показывал игроку компромисс "снимает больше / тратится быстрее"
+    прямо в момент выбора, а не прятал его в справочнике."""
+    return [
+        {"id": e["id"], "name": RESOURCE_NAMES[e["id"]], "cooling_mult": e["cooling_mult"],
+         "units_per_power": e["units_per_power"], "amount": e["amount"]}
+        for e in engine.reactor_coolant_fluid_bank_view(state)
+    ]
+
+
 def _ritual_recipe_view(recipe_id: str, state: GameState) -> dict:
     """Один рецепт ритуала для модалки "Ритуалы" - lock_reason различает ТРИ
     независимые причины недоступности (тех/постройка/не хватает пьедesталов),
@@ -1270,6 +1293,62 @@ def _condition_progress_text(condition: dict, state: GameState) -> str:
     return kind
 
 
+def crafting_view(state: GameState) -> list[dict]:
+    """Раздел на КАЖДУЮ открытую локацию-верстак (locations.*.crafting) - размер
+    сетки, банк доступных ресурсов игрока и сами сеточные рецепты этой локации
+    (узор + результат + РЕАЛЬНАЯ цена + признак "хватает сырья"). Считается на
+    ВСЕ такие локации разом (тот же приём, что ritual_altars_view/
+    reactor_instances_view), а не только на "открытую в модалке прямо сейчас" -
+    сервер ничего не знает про состояние клиентской модалки.
+
+    cost в ответе - РЕАЛЬНАЯ (effective_manual_action_stats, chosen_scale=1), а
+    не буквальный узор из content.json - см. PLAN_grid_crafting.md, раздел
+    "Факты о коде": апгрейды механизма (requires_building) домножают именно
+    его, узор при этом определяет, КАКОЙ рецепт собран, а не сколько спишется.
+    "enough" - чисто информационная подсветка (сырья хватает прямо сейчас без
+    докрафта); сам крафт (см. craft_grid_view) всё равно уходит в обычный
+    _pay_or_defer/автокрафт, если сырья не хватает - см. CLAUDE.md "Не ломай
+    докрафт" в плане."""
+    bank = []
+    for rid in RESOURCE_ORDER:
+        if rid == engine.ENERGY_RESOURCE_ID or rid in SPECIES:
+            continue
+        amount = state.resources.get(rid, 0)
+        if amount <= 0:
+            continue
+        bank.append({"id": rid, "name": RESOURCE_NAMES[rid], "amount": amount})
+
+    result = []
+    for lid in engine.available_locations(state):
+        crafting = engine.location_crafting(lid)
+        if crafting is None:
+            continue
+        recipes = []
+        for aid in engine.grid_actions_at(lid, state):
+            action = MANUAL_ACTIONS[aid]
+            cost, gain = engine.effective_manual_action_stats(aid, state, chosen_scale=1)
+            recipes.append({
+                "action_id": aid,
+                "name": action["name"],
+                "pattern": action["pattern"],
+                "pattern_mirror": bool(action.get("pattern_mirror")),
+                "cost": manual_action_cost_list(cost, action.get("cost_chance", {}), state),
+                "gain": manual_action_gain_list(gain, action.get("gain_chance", {})),
+                "enough": all(state.resources.get(rid, 0) >= amt for rid, amt in cost.items()),
+                "pinned": aid in state.pinned_recipes,
+                "sound_url": sound_url(action.get("sound")),
+            })
+        result.append({
+            "location_id": lid,
+            "name": LOCATIONS[lid]["name"],
+            "width": crafting["width"],
+            "height": crafting["height"],
+            "bank": bank,
+            "recipes": recipes,
+        })
+    return result
+
+
 def build_view(state: GameState) -> dict:
     stock, gen, cons = engine.energy_breakdown(state)
     capacity = engine.energy_capacity(state)
@@ -1367,6 +1446,13 @@ def build_view(state: GameState) -> dict:
 
     manual = []
     for aid in engine.available_manual_actions(state):
+        # Сеточное действие (manual_actions.*.pattern) больше не карточка -
+        # собирается ТОЛЬКО раскладыванием на сетке верстака (см. VIEW.crafting/
+        # crafting_view, CLAUDE.md "Крафт только через раскладывание"). Сам
+        # engine.do_manual_action его по-прежнему выполняет как обычно - границу
+        # проводит именно это представление, автоматизация и докрафт не задеты.
+        if engine.is_grid_action(aid):
+            continue
         action = MANUAL_ACTIONS[aid]
         # chosen_scale=1 - cost/gain РОВНО за одну "партию" ("Ползунок масштаба
         # ручного действия", см. CLAUDE.md), а не за купленный максимум, как было
@@ -1420,6 +1506,7 @@ def build_view(state: GameState) -> dict:
             "is_mine": lid == engine.MINE_LOCATION_ID,
             "is_converter": lid == engine.CONVERTER_LOCATION_ID,
             "is_hunting": lid in hunting_location_ids,
+            "crafting": engine.location_crafting(lid),
         }
         for lid in engine.available_locations(state)
     ]
@@ -1546,6 +1633,8 @@ def build_view(state: GameState) -> dict:
         "soul_bank": souls_bank_view(state),
         "reactors": reactor_instances_view(state),
         "reactor_bank": reactor_component_bank_view(state),
+        "reactor_catalyst_bank": reactor_catalyst_bank_view(state),
+        "reactor_fluid_bank": reactor_coolant_fluid_bank_view(state),
         "ritual_altars": ritual_altars_view(state),
         "known_alleles": engine.known_alleles_view(state),
         "genetics_lab_available": engine.genetics_lab_available(state),
@@ -1557,6 +1646,7 @@ def build_view(state: GameState) -> dict:
         },
         "buildings": buildings,
         "locations": locations,
+        "crafting": crafting_view(state),
         "tools": tools,
         "enchanting": enchanting_view(state),
         "hunting": hunting,
@@ -1773,6 +1863,50 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
 
     save_state(state)
     return log
+
+
+def craft_grid_view(state: GameState, location_id, placed, times) -> dict:
+    """POST /api/craft_grid - матчит раскладку игрока (engine.match_grid) и
+    выполняет собранное действие "times" раз подряд (каждый раз - отдельный
+    ход, см. CLAUDE.md/PLAN_grid_crafting.md "Один клик равен одному ходу"):
+    крутим цикл «действие плюс advance_turn» ЗДЕСЬ, одним HTTP-запросом, а не
+    отдаём это клиенту - иначе "×N" превратилось бы в N запросов и N полных
+    перерисовок интерфейса. Прерывается на первой же неудаче (например,
+    нехватка сырья без возможности докрафта) - "times_done" в ответе честно
+    говорит, сколько итераций реально прошло.
+
+    Раскладка перепроверяется здесь же, на сервере (см. match_grid) - клиентский
+    подсчёт совпадения узора в модалке верстака только для мгновенной реакции,
+    доверять ему нельзя (см. план, этап 4)."""
+    times_requested = max(1, int(times)) if times is not None else 1
+    action_id = engine.match_grid(state, location_id, placed)
+    if action_id is None:
+        return {
+            "ok": False,
+            "message": "Раскладка не совпадает ни с одним открытым рецептом.",
+            "action_id": None, "times_requested": times_requested, "times_done": 0,
+            "logs": [],
+        }
+    logs = []
+    for _ in range(times_requested):
+        log = run_turn(state, "manual", action_id)
+        logs.append(log)
+        if not log["ok"]:
+            break
+    times_done = sum(1 for entry in logs if entry["ok"])
+    if times_done == times_requested:
+        message = logs[-1]["message"]
+    elif times_done == 0:
+        message = logs[0]["message"]
+    else:
+        message = f"Скрафчено {times_done} из {times_requested}: {logs[-1]['message']}"
+    return {
+        "ok": times_done > 0,
+        "message": message,
+        "action_id": action_id,
+        "times_requested": times_requested, "times_done": times_done,
+        "logs": logs,
+    }
 
 
 def build_stats_view(state: GameState, start_turn: int, end_turn: int) -> dict | None:
@@ -1995,6 +2129,22 @@ class Handler(BaseHTTPRequestHandler):
             result = engine.toggle_pin(STATE, payload.get("resource_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/pin_recipe":
+            result = engine.toggle_pinned_recipe(STATE, payload.get("action_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/craft_grid":
+            try:
+                times = int(payload.get("times", 1))
+            except (TypeError, ValueError) as e:
+                self._json(400, {"error": str(e)})
+                return
+            placed = payload.get("placed")
+            if not isinstance(placed, list):
+                self._json(400, {"error": "placed должен быть списком"})
+                return
+            result = craft_grid_view(STATE, payload.get("location_id"), placed, times)
+            self._json(200, {**result, "state": build_view(STATE)})
         elif self.path == "/api/autocraft_toggle":
             result = engine.toggle_autocraft(STATE)
             save_state(STATE)
@@ -2028,6 +2178,13 @@ class Handler(BaseHTTPRequestHandler):
             result = engine.set_building_active_count(
                 STATE, payload.get("building_id"), int(payload.get("active_count", 0)),
             )
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/demolish_building":
+            # Снос одной копии постройки (см. engine.demolish_building) - без
+            # возврата ресурсов, не тратит ход (тот же принцип, что и у
+            # set_building_active_count выше - административное действие).
+            result = engine.demolish_building(STATE, payload.get("building_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/cancel_job":
@@ -2143,6 +2300,35 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "cell_index должен быть целым числом"})
                 return
             result = engine.remove_reactor_component(STATE, payload.get("instance_id"), cell_index)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/insert_reactor_catalyst":
+            # Установка катализатора В УЖЕ занятую ячейку - не тратит ход
+            # (см. engine.insert_reactor_catalyst), отдельный слот поверх
+            # основного компонента.
+            try:
+                cell_index = int(payload.get("cell_index"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "cell_index должен быть целым числом"})
+                return
+            result = engine.insert_reactor_catalyst(STATE, payload.get("instance_id"), cell_index, payload.get("resource_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/remove_reactor_catalyst":
+            try:
+                cell_index = int(payload.get("cell_index"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "cell_index должен быть целым числом"})
+                return
+            result = engine.remove_reactor_catalyst(STATE, payload.get("instance_id"), cell_index)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/set_reactor_coolant_fluid":
+            # Какая жидкость залита в контур - настройка экземпляра, НЕ тратит
+            # ход (см. engine.set_reactor_coolant_fluid). resource_id = null
+            # означает "осушить контур".
+            result = engine.set_reactor_coolant_fluid(
+                STATE, payload.get("instance_id"), payload.get("resource_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/set_reactor_zone_control":
