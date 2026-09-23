@@ -95,7 +95,7 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(state["quests"][0]["era"], 1)
         self.assertEqual(
             {l["id"] for l in state["locations"]},
-            {"yard", "shaft", "workshop_loc", "mechanisms", "sub_workshop", "converter", "hunting_loc"},
+            {"yard", "shaft", "workshop_loc", "mechanisms", "sub_workshop", "converter", "hunting_loc", "grid_loc"},
         )
         self.assertIn("gather_a", [m["id"] for m in state["categories"]["manual"]])
         self.assertEqual(
@@ -1226,6 +1226,20 @@ class WebUiHttpTests(unittest.TestCase):
 
     def test_set_action_priority_rejects_unknown_action(self):
         status, resp = self._post("/api/set_action_priority", {"action_id": "does_not_exist", "priority": 1})
+        self.assertEqual(status, 200)
+        self.assertFalse(resp["ok"])
+
+    def test_demolish_building_removes_one_copy_without_advancing_turn(self):
+        web_ui.STATE.buildings["gen"] = 2
+        status, resp = self._post("/api/demolish_building", {"building_id": "gen"})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(resp["state"]["turn"], 1)  # настройка, не игровое действие - ход не тратится
+        row = next(b for b in resp["state"]["buildings"] if b["id"] == "gen")
+        self.assertEqual(row["count"], 1)
+
+    def test_demolish_building_rejects_a_building_that_is_not_built(self):
+        status, resp = self._post("/api/demolish_building", {"building_id": "gen"})
         self.assertEqual(status, 200)
         self.assertFalse(resp["ok"])
 

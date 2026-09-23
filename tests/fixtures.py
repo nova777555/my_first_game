@@ -156,6 +156,38 @@ RESOURCES = [
     # ТОТ ЖЕ soul_kind, что у test_soul - soul_synth (см. BUILDINGS ниже)
     # принимает обе одним тегом, как и раньше принимал обе явным списком.
     {"id": "variable_soul", "name": "Переменная душа", "soul_kind": "test"},
+    # Для тестов реактора (BUILDINGS["test_reactor"]/_process_reactors) - один
+    # компонент на каждую роль решётки, плюс отход выгоревшего топлива.
+    {"id": "test_fuel", "name": "Тестовое топливо", "reactor_component": {
+        "role": "fuel", "heat": 4, "output": 6, "burnup_per_turn": 1, "charge_max": 3,
+        "spent_result": "test_spent_fuel",
+    }},
+    {"id": "test_spent_fuel", "name": "Тестовое отработанное топливо"},
+    {"id": "test_moderator", "name": "Тестовый замедлитель", "reactor_component": {"role": "moderator", "power": 1}},
+    {"id": "test_coolant", "name": "Тестовый теплоноситель", "reactor_component": {"role": "coolant", "power": 5}},
+    {"id": "test_absorber", "name": "Тестовый поглотитель", "reactor_component": {"role": "absorber", "power": 1}},
+    {"id": "test_reflector", "name": "Тестовый отражатель", "reactor_component": {"role": "reflector", "power": 2}},
+    {"id": "test_shield", "name": "Тестовый радиатор", "reactor_component": {"role": "shield", "power": 0.5}},
+    # Катализаторы решётки (resources.*.reactor_catalyst) - один на каждый
+    # self_stat, круглые проценты ради простой ручной проверки в тестах.
+    {"id": "test_catalyst_boost", "name": "Катализатор форсажа", "reactor_catalyst": {
+        "applies_to": ["fuel"], "self_stat": "heat_output", "self_pct": 0.5, "neighbor_malus_pct": 0.2,
+    }},
+    {"id": "test_catalyst_stabilizer", "name": "Катализатор стабилизации", "reactor_catalyst": {
+        "applies_to": ["fuel"], "self_stat": "burnup", "self_pct": 0.5, "neighbor_malus_pct": 0.2,
+    }},
+    {"id": "test_catalyst_field", "name": "Катализатор поля", "reactor_catalyst": {
+        "applies_to": ["fuel"], "self_stat": "field", "self_pct": 0.5, "neighbor_malus_pct": 0.2,
+    }},
+    {"id": "test_catalyst_amplifier", "name": "Катализатор усиления", "reactor_catalyst": {
+        "applies_to": ["moderator", "coolant", "absorber", "reflector", "shield"],
+        "self_stat": "power", "self_pct": 0.5, "neighbor_malus_pct": 0.2,
+    }},
+    # Выходы сеточных действий локации "grid_loc" (см. MANUAL_ACTIONS["grid_*"] ниже).
+    {"id": "grid_output", "name": "Выход сеточного рецепта"},
+    {"id": "grid_locked_output", "name": "Выход заблокированного сеточного рецепта"},
+    {"id": "grid_mirror_output", "name": "Выход зеркального сеточного рецепта"},
+    {"id": "grid_plain_output", "name": "Выход обычного действия на верстаке"},
 ]
 RESOURCE_NAMES = {r["id"]: r["name"] for r in RESOURCES}
 RESOURCE_ORDER = [r["id"] for r in RESOURCES]
@@ -163,6 +195,14 @@ RESOURCE_ICONS: dict = {}
 RESOURCE_FRACTIONAL = {r["id"]: bool(r.get("fractional", False)) for r in RESOURCES}
 RESOURCE_STORAGE = {r["id"]: r["storage"] for r in RESOURCES if r.get("storage")}
 RESOURCE_SOUL_KIND = {r["id"]: r["soul_kind"] for r in RESOURCES if r.get("soul_kind")}
+RESOURCE_REACTOR_COMPONENT = {r["id"]: r["reactor_component"] for r in RESOURCES if r.get("reactor_component")}
+RESOURCE_REACTOR_CATALYST = {r["id"]: r["reactor_catalyst"] for r in RESOURCES if r.get("reactor_catalyst")}
+# Охлаждающие жидкости реактора. В фикстуре их НЕТ намеренно: пустой словарь
+# включает в движке путь "механика расходника не заведена" (теплоносители
+# работают без жидкости), и все старые тесты про охлаждение остаются в силе.
+# Тесты самой механики жидкостей подменяют эту константу точечно.
+RESOURCE_REACTOR_COOLANT_FLUID = {r["id"]: r["reactor_coolant_fluid"]
+                                  for r in RESOURCES if r.get("reactor_coolant_fluid")}
 
 LOCATIONS = {
     "yard": {"name": "Двор", "requires_tech": None},
@@ -185,6 +225,10 @@ LOCATIONS = {
     },
     # "Охота" (см. MOBS ниже) - для тестов search_mob_any/summon_boss/attack_encounter.
     "hunting_loc": {"name": "Охота", "requires_tech": None},
+    # Локация-верстак (см. MANUAL_ACTIONS["grid_*"] ниже) - для тестов
+    # engine.match_grid/location_crafting/grid_actions_at. Сетка 2x2 - минимальный
+    # размер, на котором ещё можно проверить и обрезку краёв, и зеркало.
+    "grid_loc": {"name": "Тестовый верстак", "requires_tech": None, "crafting": {"width": 2, "height": 2}},
 }
 
 MANUAL_ACTIONS = {
@@ -249,6 +293,13 @@ MANUAL_ACTIONS = {
     "gather_tool_scaled": {
         "name": "Добыть A киркой", "requires_tech": None, "location": "workshop_loc",
         "cost": {}, "gain": {"raw_a": 2}, "tool_scaling": {"tool": "pickaxe"},
+    },
+    # uses_tool_durability - для тестов do_manual_action: тратит 1 прочность
+    # TOOLS["wrench"] за каждое выполнение (тир 2 держит max_durability=2, см.
+    # TOOLS ниже) и блокируется, когда ключ уже сломан (tool_is_broken).
+    "gather_wears_wrench": {
+        "name": "Добыть A ключом", "requires_tech": None, "location": "workshop_loc",
+        "cost": {}, "gain": {"raw_a": 1}, "uses_tool_durability": {"tool": "wrench"},
     },
     # location отсутствует вовсе (не просто null) - действие лежит в КОРНЕ дерева
     # локаций, наравне с локациями верхнего уровня - см. manual_actions_at(None, ...).
@@ -340,6 +391,39 @@ MANUAL_ACTIONS = {
         "name": "Затяжной крафт в подлокации", "requires_tech": None, "location": "sub_workshop",
         "cost": {"raw_a": 1}, "gain": {"sub_delayed_output": 2},
         "duration_turns": 2,
+    },
+    # Сеточные действия локации "grid_loc" (2x2, см. LOCATIONS выше) - для тестов
+    # engine.match_grid. "grid_line" - узор 1x2, ловится и в верхнем, и в нижнем
+    # ряду сетки (проверка обрезки/сдвига, см. _normalize_grid/_pattern_shape).
+    # Узор ОБЯЗАН быть указан в полный размер сетки локации (2x2, см. LOCATIONS
+    # ["grid_loc"]) - валидатор (tools/content_validation.py:check_action_pattern)
+    # сверяет буквальный размер rows с width/height. Занятая часть узора (верхний
+    # ряд) при матчинге всё равно обрезается до 1x2 (см. _pattern_shape) - именно
+    # это и проверяет tests/test_grid_crafting.py::test_match_shifted_to_bottom_row.
+    "grid_line": {
+        "name": "Сеточный рецепт-линия", "requires_tech": None, "location": "grid_loc",
+        "cost": {"raw_a": 2}, "gain": {"grid_output": 1},
+        "pattern": {"rows": ["AA", ".."], "key": {"A": "raw_a"}},
+    },
+    # Требует нерешённую по умолчанию tech1 - для теста "неоткрытое действие не матчится".
+    "grid_locked": {
+        "name": "Сеточный рецепт (заблокирован)", "requires_tech": "tech1", "location": "grid_loc",
+        "cost": {"raw_b": 1}, "gain": {"grid_locked_output": 1},
+        "pattern": {"rows": ["A.", ".."], "key": {"A": "raw_b"}},
+    },
+    # Несимметричный узор с pattern_mirror - для теста "зеркальная раскладка
+    # тоже засчитывается, если и только если pattern_mirror включён".
+    "grid_mirror": {
+        "name": "Сеточный рецепт-зеркало", "requires_tech": None, "location": "grid_loc",
+        "cost": {"raw_a": 1, "raw_b": 1}, "gain": {"grid_mirror_output": 1},
+        "pattern": {"rows": ["AB", ".."], "key": {"A": "raw_a", "B": "raw_b"}}, "pattern_mirror": True,
+    },
+    # Действие БЕЗ узора в той же локации-механизме - остаётся обычной карточкой
+    # (см. CLAUDE.md, "два явных переключателя") - для теста, что оно не попадает
+    # в grid_actions_at, хотя manual_actions_at его видит как обычно.
+    "grid_plain_card": {
+        "name": "Обычное действие на верстаке", "requires_tech": None, "location": "grid_loc",
+        "cost": {"raw_a": 1}, "gain": {"grid_plain_output": 1},
     },
 }
 
@@ -642,6 +726,64 @@ BUILDINGS = {
                 "id": "automator_slot", "name": "Доп. слот", "description": "+1 слот, покупается многократно.",
                 "type": "automation_slots", "value": 1, "requires_tech": None,
                 "cost": {"raw_a": 2}, "repeatable": True, "cost_growth": 2,
+            },
+        ],
+    },
+    # Ритуальный круг (ritual_circle) - тестовый алтарь с прогрессией пьедesталов
+    # кольца 3 -> 6 -> 9 (ДВА НЕ-repeatable уровня одного типа, как scale "x2 ->
+    # x3" - среди купленных действует только самый сильный, а не сумма; второй
+    # уровень требует, чтобы первый уже был куплен - см.
+    # game/engine.py:building_upgrade_prerequisite). НЕ построена по умолчанию,
+    # тот же приём, что у apiary/genetics_lab_building - не засоряет exact-set
+    # тесты.
+    "ritual_altar": {
+        "name": "Ритуальный алтарь (тест)", "description": "Тестовый алтарь (ritual_circle) с прогрессией пьедесталов кольца 3 -> 6 -> 9.",
+        "requires_tech": None, "cost": {"raw_a": 3},
+        "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {"raw_a": 1},
+        "ritual_circle": {"ring_pedestals": 3},
+        "upgrades": [
+            {
+                "id": "ritual_altar_ring_6", "name": "Расширение круга (6)", "description": "Кольцо алтаря до 6 пьедесталов.",
+                "type": "ritual_pedestals", "value": 3, "requires_tech": None, "cost": {"raw_a": 2},
+            },
+            {
+                "id": "ritual_altar_ring_9", "name": "Расширение круга (9)", "description": "Кольцо алтаря до 9 пьедесталов.",
+                "type": "ritual_pedestals", "value": 6, "requires_tech": None, "cost": {"raw_a": 4},
+            },
+        ],
+    },
+    # Реактор (buildings.*.reactor) - решётка 2x2, принимает все 4 роли;
+    # апгрейды покрывают все три типа сразу (reactor_zoning/reactor_grid_size/
+    # reactor_telemetry) - см. game/engine.py:_process_reactors и
+    # tests/test_reactor.py. НЕ построен по умолчанию (как apiary и др.) - не
+    # засоряет exact-set тесты остальных модулей.
+    "test_reactor": {
+        "name": "Реактор (тест)", "description": "Тестовый реактор (reactor) - решётка ячеек с ролями fuel/moderator/coolant/absorber.",
+        "requires_tech": None, "cost": {"raw_a": 5},
+        "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {"raw_a": 1},
+        "reactor": {
+            "grid_width": 2, "grid_height": 2, "zones_default": 1,
+            "accepts_roles": ["fuel", "moderator", "coolant", "absorber", "reflector", "shield"],
+            "heat_cap_per_cell": 10, "soft_threshold_pct": 0.5,
+            "fuel_adjacency_heat_step": 0.5, "fuel_adjacency_output_step": 0.25,
+            "moderator_adjacency_output_bonus": 1.0, "absorber_adjacency_reduction": 1.0,
+            "shield_adjacency_reduction": 1.0,
+            "reflector_adjacency_output_mult_step": 0.5,
+            "thermal_shock_flow_delta_pct": 40, "thermal_shock_heat_bonus_pct": 0.2,
+            "accident_table": "test_meltdown",
+        },
+        "upgrades": [
+            {
+                "id": "test_reactor_zoning_2", "name": "2 зоны", "description": "Решётка делится на 2 зоны.",
+                "type": "reactor_zoning", "value": 2, "requires_tech": None, "cost": {"raw_a": 3},
+            },
+            {
+                "id": "test_reactor_grid_3x2", "name": "Решётка 3x2", "description": "Расширение решётки до 3x2.",
+                "type": "reactor_grid_size", "value": {"width": 3, "height": 2}, "requires_tech": None, "cost": {"raw_a": 4},
+            },
+            {
+                "id": "test_reactor_telemetry", "name": "Телеметрия", "description": "Точные показания зон.",
+                "type": "reactor_telemetry", "value": True, "requires_tech": None, "cost": {"raw_a": 2},
             },
         ],
     },
@@ -951,7 +1093,14 @@ MINE_FIELD = {
     "scanner_tool": "ore_scanner",
     "scanner_types_tier": 2,
     "scanner_counts_tier": 3,
-    "scanner_reveal_all_tier": 4,
+    # Два радиусных порога (тир 4/5) МЕЖДУ counts_tier и reveal_all_tier - см.
+    # engine.py: _scanner_sense_radius/mine_field_view. Радиусы намеренно
+    # маленькие (1/2), чтобы уместиться в тестовом поле 6x6.
+    "scanner_radius_tiers": [
+        {"tier": 4, "radius": 1},
+        {"tier": 5, "radius": 2},
+    ],
+    "scanner_reveal_all_tier": 6,
     "rock_resource": "raw_a",
     "rock_yield": 2,
     "rock_toughness": 1,
@@ -980,15 +1129,18 @@ TOOLS = {
     },
     # Щуп-детектор шахты (mine_field.scanner_tool) - чисто информационный,
     # никаких mining_area/mining_power. Тир 1 - дефолтный для всех, намеренно
-    # ничего не даёт (см. engine.py: scanner_tier/mine_field_view) - три порога
-    # детализации живут на MINE_FIELD, не на самих тирах.
+    # ничего не даёт (см. engine.py: scanner_tier/mine_field_view) - все
+    # пороги детализации (типы/счёт/радиус/полная подсветка) живут на
+    # MINE_FIELD, не на самих тирах - тут только 6 позиций-заглушек.
     "ore_scanner": {
         "name": "Рудный щуп",
         "tiers": [
             {"name": "Тир 1", "cost": None, "requires_tech": None},
             {"name": "Тир 2", "cost": {"raw_a": 3}, "requires_tech": None},
             {"name": "Тир 3", "cost": {"raw_a": 6}, "requires_tech": None},
-            {"name": "Тир 4", "cost": {"raw_a": 10}, "requires_tech": None},
+            {"name": "Тир 4", "cost": {"raw_a": 8}, "requires_tech": None},
+            {"name": "Тир 5", "cost": {"raw_a": 10}, "requires_tech": None},
+            {"name": "Тир 6", "cost": {"raw_a": 14}, "requires_tech": None},
         ],
     },
     # Инструмент ремонта с прочностью (см. BREAKDOWN_TYPES/BUILDINGS["flaky_typed"]
@@ -1168,6 +1320,61 @@ SOUL_RECIPES = {
     "variable_soul": {"produces": {"variable_output": {"min": 1, "max": 6}}},
 }
 
+# Рецепты ритуального круга (BUILDINGS["ritual_altar"], базовая ёмкость кольца - 2
+# без апгрейдов). "ritual_basic" - мгновенный, ровно на базовую ёмкость. "ritual_slow" -
+# многоходовой с ГАРАНТИРОВАННЫМ extra_consumes_per_turn. "ritual_chancy" - многоходовой
+# с extra_consumes_chance (мокается в тестах через random.random). "ritual_locked" -
+# требует tech1 (для lock_reason == "tech", ring_cost намеренно маленький, чтобы
+# ёмкость кольца точно была ни при чём). "ritual_grand" - ring_cost БОЛЬШЕ базовой
+# ёмкости кольца, без requires_tech (для lock_reason == "pedestals").
+RITUAL_RECIPES = {
+    "ritual_basic": {
+        "name": "Простой ритуал", "description": "Тестовый мгновенный ритуал.",
+        "requires_tech": None, "requires_building": "ritual_altar",
+        "ring_cost": {"raw_a": 2}, "center_cost": "raw_b", "extra_cost": {},
+        "duration_turns": 1, "extra_consumes_per_turn": {}, "extra_consumes_chance": {},
+        "produces": {"mid": 1}, "produces_chance": {},
+    },
+    "ritual_slow": {
+        "name": "Долгий ритуал", "description": "Тестовый многоходовой ритуал с гарантированным доп. расходом за ход.",
+        "requires_tech": None, "requires_building": "ritual_altar",
+        "ring_cost": {"raw_a": 1}, "center_cost": "raw_b", "extra_cost": {},
+        "duration_turns": 2, "extra_consumes_per_turn": {"raw_a": 1}, "extra_consumes_chance": {},
+        "produces": {"mid": 2}, "produces_chance": {},
+    },
+    "ritual_chancy": {
+        "name": "Шансовый ритуал", "description": "Тестовый многоходовой ритуал с шансовым доп. расходом за ход.",
+        "requires_tech": None, "requires_building": "ritual_altar",
+        "ring_cost": {"raw_a": 1}, "center_cost": "raw_b", "extra_cost": {},
+        "duration_turns": 2, "extra_consumes_per_turn": {"raw_b": 1}, "extra_consumes_chance": {"raw_b": 0.5},
+        "produces": {"final": 1}, "produces_chance": {},
+    },
+    "ritual_locked": {
+        "name": "Запертый ритуал", "description": "Тестовый ритуал за технологией tech1.",
+        "requires_tech": "tech1", "requires_building": "ritual_altar",
+        "ring_cost": {"raw_a": 1}, "center_cost": "raw_b", "extra_cost": {},
+        "duration_turns": 1, "extra_consumes_per_turn": {}, "extra_consumes_chance": {},
+        "produces": {"mid": 1}, "produces_chance": {},
+    },
+    "ritual_grand": {
+        "name": "Большой ритуал", "description": "Тестовый ритуал с ring_cost больше базовой ёмкости кольца.",
+        "requires_tech": None, "requires_building": "ritual_altar",
+        "ring_cost": {"raw_a": 4}, "center_cost": "raw_b", "extra_cost": {},
+        "duration_turns": 1, "extra_consumes_per_turn": {}, "extra_consumes_chance": {},
+        "produces": {"final": 1}, "produces_chance": {},
+    },
+    # Мгновенный ритуал с шансовым produces (см. game/engine.py:_roll_chance_amounts) -
+    # для тестов "produces_chance у мгновенного ритуала работает так же, как gain_chance
+    # у ручного действия".
+    "ritual_variable": {
+        "name": "Шансовый результат", "description": "Тестовый мгновенный ритуал с шансовым produces.",
+        "requires_tech": None, "requires_building": "ritual_altar",
+        "ring_cost": {"raw_a": 1}, "center_cost": "raw_b", "extra_cost": {},
+        "duration_turns": 1, "extra_consumes_per_turn": {}, "extra_consumes_chance": {},
+        "produces": {"mid": 2}, "produces_chance": {"mid": 0.5},
+    },
+}
+
 # Кейс с лутом (см. QUESTS ниже) - "prizes" - барабан лутбокса (веса, а не шансы) -
 # выпадает РОВНО один приз, см. game/engine.py:_roll_loot_case_prize.
 LOOT_CASES = {
@@ -1176,6 +1383,18 @@ LOOT_CASES = {
         "prizes": [
             {"resource": "raw_a", "amount": 5, "weight": 3},
             {"resource": "raw_b", "amount": 2, "weight": 1},
+        ],
+    },
+}
+
+# Таблица аварий реактора (BUILDINGS["test_reactor"]["reactor"]["accident_table"]) -
+# тот же барабанный алгоритм, что LOOT_CASES выше (см. game/engine.py:
+# _roll_reactor_accident), но result - хардкод-enum движка, не ресурс.
+REACTOR_ACCIDENTS = {
+    "test_meltdown": {
+        "entries": [
+            {"result": "destroy_one_fuel_cell", "weight": 3, "message": "Стержень оплавился."},
+            {"result": "destroy_zone_grid", "weight": 1, "message": "Решётка зоны разрушена."},
         ],
     },
 }
@@ -1250,11 +1469,13 @@ def as_content_dict() -> dict:
         "mobs": copy.deepcopy(MOBS),
         "skills": copy.deepcopy(SKILLS),
         "soul_recipes": copy.deepcopy(SOUL_RECIPES),
+        "ritual_recipes": copy.deepcopy(RITUAL_RECIPES),
         "loot_cases": copy.deepcopy(LOOT_CASES),
         "quests": copy.deepcopy(QUESTS),
         "combat_moves": copy.deepcopy(COMBAT_MOVES),
         "breakdown_types": copy.deepcopy(BREAKDOWN_TYPES),
         "enchantments": copy.deepcopy(ENCHANTMENTS),
+        "reactor_accidents": copy.deepcopy(REACTOR_ACCIDENTS),
     }
 
 
@@ -1281,11 +1502,13 @@ def build_mutations_by_pair(mutations: list) -> dict:
 _ENGINE_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "GENETICS_SETTINGS", "COMBAT_SETTINGS",
                  "LOCATIONS", "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "MUTATIONS", "SPECIES", "TOOLS",
                  "RESOURCE_NAMES", "TECHS", "TIME", "ENERGY_RECIPE_FOR_RESOURCE", "MUTATIONS_BY_PAIR",
-                 "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "RESOURCE_SOUL_KIND", "MOBS", "SKILLS", "SOUL_RECIPES",
-                 "LOOT_CASES", "QUESTS", "COMBAT_MOVES", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
+                 "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "RESOURCE_SOUL_KIND", "RESOURCE_REACTOR_COMPONENT",
+                 "RESOURCE_REACTOR_CATALYST", "RESOURCE_REACTOR_COOLANT_FLUID",
+                 "REACTOR_ACCIDENTS", "MOBS", "SKILLS", "SOUL_RECIPES",
+                 "RITUAL_RECIPES", "LOOT_CASES", "QUESTS", "COMBAT_MOVES", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
 _WEB_UI_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "LOCATIONS",
                  "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "TOOLS", "RESOURCE_ICONS", "RESOURCE_NAMES",
-                 "RESOURCE_ORDER", "TECHS", "RESOURCE_STORAGE", "MOBS", "SKILLS", "SOUL_RECIPES",
+                 "RESOURCE_ORDER", "TECHS", "RESOURCE_STORAGE", "MOBS", "SKILLS", "SOUL_RECIPES", "RITUAL_RECIPES",
                  "LOOT_CASES", "QUESTS", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
 
 
@@ -1313,9 +1536,14 @@ def _fixture_values() -> dict:
         "RESOURCE_FRACTIONAL": RESOURCE_FRACTIONAL,
         "RESOURCE_STORAGE": RESOURCE_STORAGE,
         "RESOURCE_SOUL_KIND": RESOURCE_SOUL_KIND,
+        "RESOURCE_REACTOR_COMPONENT": RESOURCE_REACTOR_COMPONENT,
+        "RESOURCE_REACTOR_CATALYST": RESOURCE_REACTOR_CATALYST,
+        "RESOURCE_REACTOR_COOLANT_FLUID": RESOURCE_REACTOR_COOLANT_FLUID,
+        "REACTOR_ACCIDENTS": REACTOR_ACCIDENTS,
         "MOBS": MOBS,
         "SKILLS": SKILLS,
         "SOUL_RECIPES": SOUL_RECIPES,
+        "RITUAL_RECIPES": RITUAL_RECIPES,
         "LOOT_CASES": LOOT_CASES,
         "QUESTS": QUESTS,
         "COMBAT_MOVES": COMBAT_MOVES,

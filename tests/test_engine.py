@@ -1394,6 +1394,57 @@ class BuildResearchRepairTests(FixtureTestCase):
         self.assertTrue(result.ok)
         self.assertEqual(s.broken["gen"], 0)
 
+    def test_demolish_unbuilt_building_fails(self):
+        s = GameState()
+        result = engine.demolish_building(s, "gen")
+        self.assertFalse(result.ok)
+
+    def test_demolish_unknown_building_fails(self):
+        s = GameState()
+        result = engine.demolish_building(s, "no_such_building")
+        self.assertFalse(result.ok)
+
+    def test_demolish_removes_one_copy_without_refunding_resources(self):
+        # gen.cost = {"raw_b": 5} - демонтаж не начисляет его обратно.
+        s = GameState(resources={"raw_b": 100}, buildings={"gen": 2})
+        result = engine.demolish_building(s, "gen")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.buildings["gen"], 1)
+        self.assertEqual(s.resources["raw_b"], 100)  # ни один ресурс не вернулся
+
+    def test_demolish_prefers_a_broken_copy_over_a_working_one(self):
+        s = GameState(buildings={"gen": 3}, broken={"gen": 1})
+        result = engine.demolish_building(s, "gen")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.buildings["gen"], 2)
+        self.assertEqual(s.broken.get("gen", 0), 0)  # снесена именно сломанная копия
+        self.assertEqual(engine.working_count(s, "gen"), 2)  # ни одна рабочая копия не пострадала
+
+    def test_demolish_a_working_copy_when_none_are_broken(self):
+        s = GameState(buildings={"gen": 2})
+        result = engine.demolish_building(s, "gen")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.buildings["gen"], 1)
+        self.assertEqual(engine.working_count(s, "gen"), 1)
+
+    def test_demolish_clamps_manually_disabled_count_to_new_working_count(self):
+        # factory - disableable (produces И consumes непустые в фикстуре) -
+        # выключено ползунком 2 из 2 копий; снос одной рабочей не должен оставить
+        # "призрачных" выключенных копий сверх реально существующих
+        # (building_disabled_count зажимает значение сверху working_count при чтении).
+        s = GameState(buildings={"factory": 2}, building_disabled={"factory": 2})
+        result = engine.demolish_building(s, "factory")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(engine.working_count(s, "factory"), 1)
+        self.assertEqual(engine.building_disabled_count(s, "factory"), 1)
+
+    def test_demolish_last_copy_leaves_building_unbuilt(self):
+        s = GameState(buildings={"gen": 1})
+        result = engine.demolish_building(s, "gen")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.buildings["gen"], 0)
+        self.assertEqual(engine.working_count(s, "gen"), 0)
+
 
 class TypedBreakdownAndToolDurabilityTests(FixtureTestCase):
     """flaky_typed (breakdown_types=["worn_gear"], breakdown_chance=1.0) + TOOLS["wrench"]
@@ -1813,7 +1864,7 @@ class LocationTests(FixtureTestCase):
         s = GameState()
         self.assertEqual(
             set(engine.available_locations(s)),
-            {"yard", "shaft", "workshop_loc", "mechanisms", "sub_workshop", "converter", "hunting_loc"},
+            {"yard", "shaft", "workshop_loc", "mechanisms", "sub_workshop", "converter", "hunting_loc", "grid_loc"},
         )
 
     def test_manual_actions_at_filters_by_location_and_tech(self):
@@ -1845,7 +1896,7 @@ class LocationTests(FixtureTestCase):
     def test_location_children_at_root_excludes_nested_locations(self):
         s = GameState()
         root = set(engine.location_children(None, s))
-        self.assertEqual(root, {"yard", "shaft", "workshop_loc", "mechanisms", "hunting_loc"})
+        self.assertEqual(root, {"yard", "shaft", "workshop_loc", "mechanisms", "hunting_loc", "grid_loc"})
         self.assertNotIn("sub_workshop", root)  # у неё есть родитель - она не в корне
 
     def test_manual_action_without_location_lives_at_root(self):
@@ -2221,6 +2272,36 @@ class ToolScalingManualActionTests(FixtureTestCase):
         result = engine.do_manual_action(s, "gather_tool_scaled")
         self.assertTrue(result.ok)
         self.assertEqual(s.resources.get("raw_a"), 4)
+
+
+class UsesToolDurabilityManualActionTests(FixtureTestCase):
+    """manual_actions.*.uses_tool_durability (см.
+    fixtures.MANUAL_ACTIONS["gather_wears_wrench"], TOOLS["wrench"] с
+    max_durability=2 на тире 2) - действие тратит 1 прочность выбранного
+    инструмента за каждое выполнение и блокируется, когда он сломан."""
+
+    def test_tool_without_durability_is_unaffected(self):
+        # тир 1 ("Без ключа") вовсе не имеет max_durability - не тратится, не ломается.
+        s = GameState()
+        result = engine.do_manual_action(s, "gather_wears_wrench")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.resources.get("raw_a"), 1)
+        self.assertIsNone(engine.tool_durability_remaining(s, "wrench"))
+
+    def test_action_consumes_one_durability_per_run(self):
+        s = GameState(tool_tiers={"wrench": 2})
+        self.assertEqual(engine.tool_durability_remaining(s, "wrench"), 2)
+        result = engine.do_manual_action(s, "gather_wears_wrench")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(engine.tool_durability_remaining(s, "wrench"), 1)
+
+    def test_broken_tool_blocks_the_action_without_spending_cost_or_durability(self):
+        s = GameState(tool_tiers={"wrench": 2}, tool_durability={"wrench": 0})
+        self.assertTrue(engine.tool_is_broken(s, "wrench"))
+        result = engine.do_manual_action(s, "gather_wears_wrench")
+        self.assertFalse(result.ok)
+        self.assertEqual(s.resources.get("raw_a", 0), 0)
+        self.assertEqual(engine.tool_durability_remaining(s, "wrench"), 0)
 
 
 class MechanismScaleSliderTests(FixtureTestCase):
@@ -3258,6 +3339,21 @@ class GeneticsTests(FixtureTestCase):
         self.assertTrue(result.ok, result.message)
         self.assertEqual(s.creatures[cid]["farm_instance_id"], instance_id)
         self.assertEqual(s.creatures[cid]["turns_alive"], 0)
+
+    def test_demolish_evicts_a_housed_creature_back_to_the_bank(self):
+        # Снос экземпляра фермы (engine.demolish_building) удаляет ЦЕЛИКОМ этот
+        # физический экземпляр (state.farm_instances), но заселённая в него особь
+        # не пропадает - расселяется в "банк" (farm_instance_id = None), тот же
+        # приём, что при миграции старых сохранений в _ensure_farm_instances.
+        s = GameState(buildings={"apiary": 1})
+        instance_id = self._farm_instance(s, "apiary")
+        cid = self._spawn(s, "critter_a")
+        engine.house_creature(s, cid, instance_id)
+        result = engine.demolish_building(s, "apiary")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.buildings["apiary"], 0)
+        self.assertNotIn(instance_id, s.farm_instances)
+        self.assertIsNone(s.creatures[cid]["farm_instance_id"])
 
     def test_house_creature_fails_without_a_free_slot_in_that_farm(self):
         s = GameState(buildings={"apiary": 1})  # 2 слота

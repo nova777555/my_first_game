@@ -12,7 +12,8 @@ from .content import (
     BREAKDOWN_TYPES, BUILDINGS, COMBAT_MOVES, COMBAT_SETTINGS, ENCHANTMENTS, ENERGY_RECIPES,
     GENETIC_TRAITS, GENETICS_SETTINGS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
     MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, REACTOR_ACCIDENTS, RESOURCE_FRACTIONAL,
-    RESOURCE_NAMES, RESOURCE_REACTOR_CATALYST, RESOURCE_REACTOR_COMPONENT, RESOURCE_SOUL_KIND,
+    RESOURCE_NAMES, RESOURCE_REACTOR_CATALYST, RESOURCE_REACTOR_COOLANT_FLUID,
+    RESOURCE_REACTOR_COMPONENT, RESOURCE_SOUL_KIND,
     RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TIME, TOOLS,
 )
 from .state import HISTORY_MAX_ENTRIES, GameState
@@ -642,6 +643,13 @@ def _ensure_reactor_instances(state: GameState) -> None:
         inst.setdefault("broken_type", None)
         inst.setdefault("grid", [])
         inst.setdefault("zones", [])
+        # Сохранения, сделанные до появления охлаждающих жидкостей, приходят без
+        # этого поля. Заливаем ПЕРВУЮ жидкость контента (самую дешёвую по
+        # замыслу автора), а не None: иначе у уже работающего реактора молча
+        # пропало бы охлаждение. Явно осушить контур игрок может сам
+        # (set_reactor_coolant_fluid с None).
+        if "coolant_fluid" not in inst:
+            inst["coolant_fluid"] = next(iter(RESOURCE_REACTOR_COOLANT_FLUID), None)
     for building_id in BUILDINGS:
         if not _is_reactor_building(building_id):
             continue
@@ -665,6 +673,7 @@ def _ensure_reactor_instances(state: GameState) -> None:
                 "upgrades": list(upgrades_copy),
                 "grid": [],
                 "zones": [],
+                "coolant_fluid": next(iter(RESOURCE_REACTOR_COOLANT_FLUID), None),
             }
             new_ids.append(instance_id)
         for instance_id in new_ids:
@@ -1960,6 +1969,93 @@ def manual_actions_at(location_id: str | None, state: GameState) -> list[str]:
         a for a in available_manual_actions(state)
         if MANUAL_ACTIONS[a].get("location") == location_id
     ]
+
+
+def location_crafting(location_id: str) -> dict | None:
+    """locations.*.crafting ({"width","height"}) - делает локацию механизмом-
+    верстаком (см. CLAUDE.md "Крафт на сетке"). None у обычной локации-списка."""
+    return LOCATIONS[location_id].get("crafting")
+
+
+def action_pattern(action_id: str) -> dict | None:
+    """manual_actions.*.pattern ({"rows","key"}) - узор рецепта на сетке. None у
+    действия, которое остаётся обычной карточкой даже внутри локации-механизма
+    (см. CLAUDE.md, пример - плавка, тратящая прочность молота)."""
+    return MANUAL_ACTIONS[action_id].get("pattern")
+
+
+def is_grid_action(action_id: str) -> bool:
+    return action_pattern(action_id) is not None
+
+
+def _pattern_shape(pattern: dict) -> tuple[tuple[str | None, ...], ...]:
+    """Нормализованная форма узора рецепта - копия tools/content_validation.py:
+    pattern_shape (держать в паре: game/* намеренно не импортирует tools/*, а
+    tools/content_validation.py намеренно не импортирует game/*, см. CLAUDE.md
+    "Хардкод id"). Обрезка пустых краёв - та же причина, что там: рецепт 2x2
+    должен ловиться в любом углу сетки 3x3, а не только у самого края."""
+    key = pattern.get("key") or {}
+    grid = [[(None if ch == "." else key.get(ch)) for ch in row] for row in pattern.get("rows") or []]
+    if not grid:
+        return ()
+    rows_used = [y for y, row in enumerate(grid) if any(c is not None for c in row)]
+    cols_used = [x for x in range(max(len(r) for r in grid)) if any(x < len(r) and r[x] is not None for r in grid)]
+    if not rows_used or not cols_used:
+        return ()
+    top, bottom = rows_used[0], rows_used[-1]
+    left, right = cols_used[0], cols_used[-1]
+    return tuple(
+        tuple(grid[y][x] if x < len(grid[y]) else None for x in range(left, right + 1))
+        for y in range(top, bottom + 1)
+    )
+
+
+def _normalize_grid(cells: list, width: int, height: int) -> tuple[tuple[str | None, ...], ...]:
+    """Раскладка игрока (плоский список длиной width*height: id ресурса или None)
+    в ту же нормализованную форму, что _pattern_shape/pattern_shape - обрезка
+    пустых краёв РОВНО той же логикой, иначе рецепт, разложенный не в углу (0,0),
+    никогда бы не совпал с узором из контента."""
+    grid = [[cells[y * width + x] for x in range(width)] for y in range(height)]
+    rows_used = [y for y in range(height) if any(c is not None for c in grid[y])]
+    cols_used = [x for x in range(width) if any(grid[y][x] is not None for y in range(height))]
+    if not rows_used or not cols_used:
+        return ()
+    top, bottom = rows_used[0], rows_used[-1]
+    left, right = cols_used[0], cols_used[-1]
+    return tuple(
+        tuple(grid[y][x] for x in range(left, right + 1))
+        for y in range(top, bottom + 1)
+    )
+
+
+def grid_actions_at(location_id: str, state: GameState) -> list[str]:
+    """Открытые игроку сеточные действия этой локации (та же гейт-логика, что
+    manual_actions_at, плюс фильтр "у действия вообще есть узор")."""
+    return [a for a in manual_actions_at(location_id, state) if is_grid_action(a)]
+
+
+def match_grid(state: GameState, location_id: str, placed: list) -> str | None:
+    """Принимает раскладку игрока на сетке локации-механизма (список длиной
+    width*height: id ресурса в ячейке или None) и возвращает id собранного
+    действия, либо None, если сетки у локации нет, раскладка пуста или не
+    совпала ни с одним узором ОТКРЫТОГО действия этой локации (is_manual_action_unlocked -
+    иначе игрок мог бы собрать рецепт технологии, которую ещё не исследовал).
+    Матчит только действия ЭТОЙ локации - сетка соседнего механизма своих
+    рецептов сюда не приносит (см. CLAUDE.md, план сеточного крафта, раздел 4).
+    Учитывает pattern_mirror - зеркальный по горизонтали узор тоже засчитывается."""
+    crafting = location_crafting(location_id)
+    if crafting is None:
+        return None
+    normalized = _normalize_grid(placed, crafting["width"], crafting["height"])
+    if not normalized:
+        return None
+    for action_id in grid_actions_at(location_id, state):
+        shape = _pattern_shape(action_pattern(action_id))
+        if shape == normalized:
+            return action_id
+        if MANUAL_ACTIONS[action_id].get("pattern_mirror") and tuple(tuple(reversed(row)) for row in shape) == normalized:
+            return action_id
+    return None
 
 
 def current_time(state: GameState) -> dict:
@@ -3391,6 +3487,39 @@ def remove_reactor_catalyst(state: GameState, instance_id: str, cell_index: int)
     cell["catalyst_id"] = None
     _add_resource(state.resources, catalyst_id, 1)
     return ActionResult(True, f"«{RESOURCE_NAMES.get(catalyst_id, catalyst_id)}» возвращён в инвентарь.")
+
+
+def reactor_coolant_fluid_bank_view(state: GameState) -> list[dict]:
+    """Все охлаждающие жидкости контента с текущим запасом игрока - зеркало
+    reactor_component_bank_view/reactor_catalyst_bank_view. Показываем и те,
+    которых пока нет в наличии: игрок должен видеть, что вообще бывает."""
+    out = []
+    for resource_id, cfg in RESOURCE_REACTOR_COOLANT_FLUID.items():
+        out.append({
+            "id": resource_id,
+            "cooling_mult": cfg.get("cooling_mult", 1.0),
+            "units_per_power": cfg.get("units_per_power", 0.0),
+            "amount": state.resources.get(resource_id, 0),
+        })
+    return out
+
+
+def set_reactor_coolant_fluid(state: GameState, instance_id: str, resource_id: str | None) -> ActionResult:
+    """Какую жидкость реактор заливает в свои теплоносители. ОДНА на экземпляр
+    (не на зону - бак общий, см. _process_reactors), НЕ тратит ход, как и
+    остальные настройки реактора. Сама жидкость не списывается в момент выбора -
+    её тратят теплоносители каждый ход, пропорционально прокачке."""
+    _ensure_reactor_instances(state)
+    instance = state.reactor_instances.get(instance_id)
+    if instance is None:
+        return ActionResult(False, "Такого реактора нет.")
+    if resource_id is None:
+        instance["coolant_fluid"] = None
+        return ActionResult(True, "Контур осушён - теплоносители больше ничего не снимают.")
+    if resource_id not in RESOURCE_REACTOR_COOLANT_FLUID:
+        return ActionResult(False, "Это не охлаждающая жидкость.")
+    instance["coolant_fluid"] = resource_id
+    return ActionResult(True, f"В контур залито: {RESOURCE_NAMES.get(resource_id, resource_id)}.")
 
 
 def set_reactor_zone_control(state: GameState, instance_id: str, zone_index: int, depth_pct: int) -> ActionResult:
@@ -5001,6 +5130,11 @@ def reactor_instances_view(state: GameState) -> list[dict]:
             "accepts_roles": config.get("accepts_roles", []),
             "telemetry": reactor_telemetry_available(state, instance_id),
             "projection": reactor_zone_projection(state, instance_id),
+            "coolant_fluid": instance.get("coolant_fluid"),
+            "coolant_fluid_name": RESOURCE_NAMES.get(instance.get("coolant_fluid"))
+                if instance.get("coolant_fluid") else None,
+            "coolant_fluid_stock": state.resources.get(instance.get("coolant_fluid"), 0)
+                if instance.get("coolant_fluid") else 0,
             "grid": [
                 None if cell is None else {
                     "resource_id": cell["resource_id"],
@@ -5161,6 +5295,21 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
     action = MANUAL_ACTIONS[action_id]
     if not is_manual_action_unlocked(action_id, state):
         return ActionResult(False, "Это действие ещё не открыто.")
+    # uses_tool_durability - необязательное generic-поле {"tool": id} (тот же
+    # приём, что tool_scaling): действие тратит 1 прочность выбранного
+    # инструмента РОВНО ОДИН РАЗ за выполнение, сразу после успешной оплаты cost
+    # (тот же момент, что и у добычи руды - см. do_dig/_consume_tool_durability),
+    # а НЕ по завершении многоходовой задачи (duration_turns) - износ идёт от
+    # самого запуска действия, а не от получения gain. Сломанный инструмент (см.
+    # tool_is_broken) блокирует запуск целиком ДО оплаты cost - тот же принцип,
+    # что у шахтёрской кирки. Инструмент без max_durability вовсе (см.
+    # tool_durability_remaining) этим полем не ограничивает ничего - тратить
+    # у него нечего, tool_is_broken для него всегда ЛОЖЬ.
+    uses_tool_durability = action.get("uses_tool_durability")
+    if uses_tool_durability:
+        use_tool_id = uses_tool_durability["tool"]
+        if tool_is_broken(state, use_tool_id):
+            return ActionResult(False, f"«{TOOLS[use_tool_id]['name']}» сломан(а) - нужно сначала его/её починить.")
     # manual_action_duration уже учитывает купленный апгрейд типа
     # action_duration_reduction (см. CLAUDE.md) - настолько сильное сокращение,
     # что итог <= 1, делает действие фактически мгновенным (ветка ниже).
@@ -5188,6 +5337,8 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
     )
     if deferred is not None:
         return deferred
+    if uses_tool_durability:
+        _consume_tool_durability(state, uses_tool_durability["tool"])
     if duration > 1:
         state.manual_jobs[action_id] = {
             "turns_total": duration, "turns_done": 0,
@@ -5602,6 +5753,63 @@ def repair(state: GameState, building_id: str) -> ActionResult:
     return ActionResult(True, f"Отремонтировано: {name} ({fixed} шт.).{suffix}")
 
 
+def demolish_building(state: GameState, building_id: str) -> ActionResult:
+    """Сносит РОВНО ОДНУ копию building_id - противоположность build(), без
+    возврата затраченных на неё ресурсов (прямое пожелание - снос не компенсация,
+    а способ избавиться от лишней/устаревшей копии). Не тратит ход - это
+    административное действие того же рода, что set_building_active_count/
+    toggle_autocraft, а не игровое действие вроде build/repair.
+
+    Приоритетно сносит СЛОМАННУЮ копию, если такая есть (снос работающей копии
+    первой при наличии уже бесполезной сломанной был бы странным выбором по
+    умолчанию), иначе - любую работающую. state.building_disabled нарочно не
+    трогается: building_disabled_count() сам зажимает значение сверху текущим
+    working_count при чтении, лишнее там не мешает.
+
+    У построек с физическими экземплярами (see _uses_physical_instances - фермы/
+    синтезаторы душ/реакторы) сносится ЦЕЛИКОМ один конкретный экземпляр вместе
+    со всем его содержимым (вставленные души, топливо в решётке реактора,
+    купленные ИМЕННО этим экземпляром апгрейды) - тоже без возврата. Особи
+    фермы, заселённые именно в этот экземпляр, не пропадают - расселяются
+    обратно в "банк" (farm_instance_id = None), тот же приём, что при миграции
+    старых сохранений в _ensure_farm_instances."""
+    if building_id not in BUILDINGS:
+        return ActionResult(False, "Неизвестная постройка.")
+    total = state.buildings.get(building_id, 0)
+    if total <= 0:
+        return ActionResult(False, "Эта постройка не построена.")
+    name = BUILDINGS[building_id]["name"]
+    broken_count = state.broken.get(building_id, 0)
+    demolish_broken = broken_count > 0
+
+    if _uses_physical_instances(building_id):
+        _ensure_physical_instances(state)
+        instances = _physical_instances(state, building_id)
+        candidates = [
+            iid for iid, inst in instances.items()
+            if inst["building_id"] == building_id and inst["broken"] == demolish_broken
+        ]
+        if not candidates:
+            # Рассинхрон агрегата с экземплярами не должен происходить, но на
+            # всякий случай берём любую копию нужного building_id, а не падаем.
+            candidates = [iid for iid, inst in instances.items() if inst["building_id"] == building_id]
+        instance_id = candidates[0]
+        del instances[instance_id]
+        if _is_farm_building(building_id):
+            for creature in state.creatures.values():
+                if creature.get("farm_instance_id") == instance_id:
+                    creature["farm_instance_id"] = None
+
+    if demolish_broken:
+        state.broken[building_id] = broken_count - 1
+        if not _uses_physical_instances(building_id):
+            remaining_types = _broken_type_entries(state, building_id)[:-1]
+            state.broken_types[building_id] = remaining_types
+
+    state.buildings[building_id] = total - 1
+    return ActionResult(True, f"Снесено: {name}.")
+
+
 def resolve_action_cost(state: GameState, action_type: str, action_id: str, scale: int | None = None) -> dict[str, int] | None:
     """Цена, которую ПРЯМО СЕЙЧАС заплатит действие этого типа/id, если его
     выполнить, - та же цена, что реально использует _pay_or_defer внутри
@@ -5871,16 +6079,42 @@ def _reactor_cell_catalyst(grid: list[dict | None], cell_index: int) -> dict | N
     return RESOURCE_REACTOR_CATALYST.get(catalyst_id)
 
 
-def _reactor_effective_component(grid: list[dict | None], width: int, height: int, cell_index: int) -> dict:
+def _reactor_malus_offsets(config: dict | None) -> tuple[tuple[int, int], ...]:
+    """Окно, в котором катализатор штрафует чужие ячейки.
+
+    reactor.catalyst_malus_radius (радиус Чебышёва) - если задан, штраф накрывает
+    ВЕСЬ квадрат (2r+1)x(2r+1) вокруг катализатора, включая диагонали. Отсутствие
+    поля = прежнее поведение, только 4 ортогональные клетки.
+
+    Почему это важно: при штрафе только по ортогонали шахматная раскладка делает
+    его бесплатным - у замедлителя в шахматке все ортогональные соседи это
+    топливо, а плоский бонус замедлителя прибавляется ПОСЛЕ множителей и потому
+    штрафом не задевается вовсе. Диагональное окно ломает этот трюк: соседние по
+    диагонали клетки в шахматке - той же роли, и "закатализировать всё" начинает
+    бить само по себе."""
+    radius = int((config or {}).get("catalyst_malus_radius", 0) or 0)
+    if radius <= 0:
+        return ((1, 0), (-1, 0), (0, 1), (0, -1))
+    return tuple((dr, dc)
+                 for dr in range(-radius, radius + 1)
+                 for dc in range(-radius, radius + 1)
+                 if dr or dc)
+
+
+def _reactor_effective_component(grid: list[dict | None], width: int, height: int, cell_index: int,
+                                 config: dict | None = None) -> dict:
     """heat/output/power/burnup_per_turn ОДНОЙ занятой ячейки решётки С УЧЁТОМ
     катализатора - собственного (self_stat/self_pct: "heat_output" растит heat
     И output топливу, "burnup" снижает расход заряда топливу, "power" растит
     power немодератору-роли; "field" собственные характеристики НЕ трогает -
     он усиливает то, как ячейка радиирует на соседей-топливо, см.
-    _reactor_fuel_adjacency_bonus) и ШТРАФА от катализаторов ОРТОГОНАЛЬНЫХ
-    СОСЕДЕЙ (neighbor_malus_pct - действует ОДИНАКОВО на heat/output/power,
-    какая бы роль у этой ячейки ни была, стакается МУЛЬТИПЛИКАТИВНО по всем
-    закатализированным соседям разом). ЧИСТАЯ функция - не мутирует grid, не
+    _reactor_fuel_adjacency_bonus) и ШТРАФА от катализаторов СОСЕДЕЙ
+    (neighbor_malus_pct - действует ОДИНАКОВО на heat/output/power, какая бы
+    роль у этой ячейки ни была, стакается МУЛЬТИПЛИКАТИВНО по всем
+    закатализированным соседям разом; окно соседства ДЛЯ ШТРАФА задаётся
+    reactor.catalyst_malus_radius, см. _reactor_malus_offsets - оно НЕ обязано
+    совпадать с окном ролевого соседства, которое всегда строго ортогональное).
+    ЧИСТАЯ функция - не мутирует grid, не
     путать с _reactor_fuel_adjacency_bonus (та считает бонус СОСЕДСТВА МЕЖДУ
     РОЛЯМИ - moderator/absorber/reflector/shield/fuel - эта же считает "личные"
     характеристики ячейки ДО того, как их читает бонус соседства)."""
@@ -5896,7 +6130,12 @@ def _reactor_effective_component(grid: list[dict | None], width: int, height: in
         self_stat = catalyst.get("self_stat")
         pct = catalyst.get("self_pct", 0.0)
         if self_stat == "heat_output":
-            heat *= 1 + pct
+            # Тепловая сторона может расти МЕДЛЕННЕЕ выходной: self_pct_heat.
+            # При равных (дефолт - отсутствие поля) катализатор ratio-нейтрален,
+            # то есть в сборке, упёртой в охлаждение, не даёт РОВНО НИЧЕГО - её
+            # всё равно приходится додушивать рычагом ровно на столько же.
+            # Именно поэтому форсаж был мёртв на всём первом тире.
+            heat *= 1 + catalyst.get("self_pct_heat", pct)
             output *= 1 + pct
         elif self_stat == "burnup":
             burnup *= max(0.0, 1 - pct)
@@ -5905,7 +6144,7 @@ def _reactor_effective_component(grid: list[dict | None], width: int, height: in
 
     malus_mult = 1.0
     row, col = divmod(cell_index, width)
-    for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+    for dr, dc in _reactor_malus_offsets(config):
         nr, nc = row + dr, col + dc
         if not (0 <= nr < height and 0 <= nc < width):
             continue
@@ -5929,17 +6168,22 @@ def _reactor_fuel_adjacency_bonus(
     цепная реакция всегда невыгодна по чистому отношению риск/выгода без
     компенсации замедлителями), каждый moderator даёт ПЛОСКИЙ бонус к output
     (пропорционально его resources.*.reactor_component.power, не растит heat),
-    каждый absorber снижает ОБА множителя (тоже пропорционально его power),
+    каждый absorber снижает ОБА множителя, но РАЗНЫМИ коэффициентами
+    (absorber_adjacency_reduction для тепла, absorber_adjacency_output_reduction
+    для выхода - при равных он был бы строго хуже щита, см. ниже),
     каждый shield снижает ТОЛЬКО heat_mult (тем же способом, что absorber, но
     output_mult не трогает вовсе - "щит без потери выработки", зеркало
     moderator: тот усиливает output не трогая heat, этот гасит heat не трогая
     output), каждый reflector УМНОЖАЕТ output_mult (а не складывает, как
-    moderator) на (1 + power * reflector_adjacency_output_mult_step) -
-    несколько отражателей вокруг одной ячейки перемножаются между собой, а не
-    складываются, и тоже не растит heat - возвращает (heat_mult, output_mult,
-    flat_output_bonus), heat_mult не уходит в минус (output_mult может
-    обнулиться поглотителями, но reflector его дальше только умножает,
-    никогда не компенсирует поглотитель обратно в плюс). Коэффициенты -
+    moderator) на (1 + power * reflector_adjacency_output_mult_step) И heat_mult
+    на (1 + power * reflector_adjacency_heat_mult_step) - несколько отражателей
+    вокруг одной ячейки перемножаются между собой, а не складываются; тепловая
+    цена отражателя принципиальна - без неё он бесплатный множитель, который
+    всегда выгодно ставить максимум - возвращает (heat_mult, output_mult,
+    flat_output_bonus). heat_mult не опускается ниже fuel_min_heat_mult -
+    ТЕПЛОВОГО ПОЛА стержня (output_mult может обнулиться поглотителями, но
+    reflector его дальше только умножает, никогда не компенсирует поглотитель
+    обратно в плюс). Коэффициенты -
     content-driven (buildings.*.reactor.*_adjacency_*), не хардкод.
     Теплоноситель (coolant) в соседстве не участвует вовсе - его эффект
     другой: суммарная мощность охлаждения ВСЕЙ зоны, см. _process_reactors."""
@@ -5961,24 +6205,57 @@ def _reactor_fuel_adjacency_bonus(
             output_step = config.get("fuel_adjacency_output_step", 0.0)
             field_catalyst = _reactor_cell_catalyst(grid, n_index)
             if field_catalyst is not None and field_catalyst.get("self_stat") == "field":
-                field_mult = 1 + field_catalyst.get("self_pct", 0.0)
-                heat_step *= field_mult
-                output_step *= field_mult
+                # Соседство топлива с топливом само по себе НЕВЫГОДНО: тепла оно
+                # добавляет больше, чем выхода (fuel_adjacency_heat_step >
+                # fuel_adjacency_output_step). Поэтому катализатор, множащий обе
+                # стороны одинаково, лишь усиливает заведомо плохую сделку и не
+                # окупается НИКОГДА. self_pct_heat позволяет усилить выходную
+                # сторону сильнее тепловой - тогда поле получает собственный
+                # смысл: оно локально ЛЕГАЛИЗУЕТ плотную набивку топлива там, где
+                # без него она была бы убыточна. Отсутствие поля = обе стороны
+                # множатся одинаково, ровно как раньше.
+                pct = field_catalyst.get("self_pct", 0.0)
+                heat_step *= 1 + field_catalyst.get("self_pct_heat", pct)
+                output_step *= 1 + pct
             heat_mult += heat_step
             output_mult += output_step
             continue
-        power = _reactor_effective_component(grid, width, height, n_index)["power"]
+        power = _reactor_effective_component(grid, width, height, n_index, config)["power"]
         if role == "moderator":
             flat_output_bonus += config.get("moderator_adjacency_output_bonus", 0.0) * power
         elif role == "absorber":
-            reduction = config.get("absorber_adjacency_reduction", 0.0) * power
-            heat_mult -= reduction
-            output_mult -= reduction
+            # Тепло и выход режутся РАЗНЫМИ коэффициентами: при одинаковых
+            # (старое поведение) поглотитель математически всегда строго хуже
+            # щита - тот гасит тепло НЕ трогая выход, - и потому был мёртвым
+            # контентом. absorber_adjacency_output_reduction по умолчанию равен
+            # absorber_adjacency_reduction, т.е. старый контент без нового поля
+            # работает ровно как раньше.
+            heat_reduction = config.get("absorber_adjacency_reduction", 0.0)
+            output_reduction = config.get("absorber_adjacency_output_reduction", heat_reduction)
+            heat_mult -= heat_reduction * power
+            output_mult -= output_reduction * power
         elif role == "shield":
             heat_mult -= config.get("shield_adjacency_reduction", 0.0) * power
         elif role == "reflector":
+            # Отражатель множит и выход, и ТЕПЛО: без платы теплом он был бы
+            # бесплатным множителем, который всегда выгодно ставить максимум, -
+            # ровно это и схлопывало все схемы в одну "шахматку с отражателями".
+            # reflector_adjacency_heat_mult_step по умолчанию 0.0, т.е. старый
+            # контент без нового поля работает ровно как раньше.
             output_mult *= 1 + config.get("reflector_adjacency_output_mult_step", 0.0) * power
-    return (max(0.0, heat_mult), max(0.0, output_mult), flat_output_bonus)
+            heat_mult *= 1 + config.get("reflector_adjacency_heat_mult_step", 0.0) * power
+    # ТЕПЛОВОЙ ПОЛ: соседи могут ПРИГЛУШИТЬ нагрев стержня, но не отменить его.
+    # Без пола щиты/поглотители складывались линейно и спокойно уводили heat_mult
+    # в РОВНЫЙ НОЛЬ (4 улучшенных радиатора или 2 улучшенных поглотителя), причём
+    # щит при этом не трогает выработку вовсе - то есть с открытием продвинутых
+    # компонентов стержень становился абсолютно холодным при 100% выхода, и вся
+    # система охлаждения (теплоносители + расход жидкости) обесценивалась разом.
+    # С полом тепло всегда остаётся положительным, а раз оно нигде не убывает
+    # само (см. _reactor_zone_next_state), снимать его теплоносителем приходится
+    # на ЛЮБОМ тире компонентов - продвинутые дают не отказ от охлаждения, а
+    # больший потолок числа стержней. 0.0 по умолчанию = ровно старое поведение.
+    min_heat_mult = max(0.0, config.get("fuel_min_heat_mult", 0.0))
+    return (max(min_heat_mult, heat_mult), max(0.0, output_mult), flat_output_bonus)
 
 
 def _roll_reactor_accident(entries: list[dict]) -> dict | None:
@@ -6046,23 +6323,70 @@ def _reactor_zone_raw_totals(
             continue
         role = reactor_component_role(cell["resource_id"])
         if role == "coolant":
-            coolant_power[zone_idx] += _reactor_effective_component(grid, width, height, cell_index)["power"]
+            coolant_power[zone_idx] += _reactor_effective_component(grid, width, height, cell_index, config)["power"]
             continue
         if role != "fuel":
             continue
         charge = cell.get("charge")
         if charge is not None and charge <= 0:
             continue  # выгорело - простаивает, ждёт замены
-        eff = _reactor_effective_component(grid, width, height, cell_index)
+        eff = _reactor_effective_component(grid, width, height, cell_index, config)
         heat_mult, output_mult, flat_bonus = _reactor_fuel_adjacency_bonus(grid, width, height, cell_index, config)
         raw_heat[zone_idx] += eff["heat"] * heat_mult
         raw_output[zone_idx] += eff["output"] * output_mult + flat_bonus
     return raw_heat, raw_output, zone_cell_count, coolant_power
 
 
+def reactor_coolant_fluid_config(resource_id: str | None) -> dict | None:
+    """Настройки охлаждающей ЖИДКОСТИ (resources.*.reactor_coolant_fluid) - тот
+    же generic-принцип тега, что soul_kind/reactor_component: новую жидкость
+    достаточно завести тегом в контенте, движок её подхватит сам."""
+    if resource_id is None:
+        return None
+    return RESOURCE_REACTOR_COOLANT_FLUID.get(resource_id)
+
+
+def _reactor_coolant_plan(
+    fluid_id: str | None, raw_coolant_power: float, flow_pct: float, available: float,
+) -> tuple[float, float, float]:
+    """Сколько жидкости ЗАПРОСИТ зона за ход и какая мощность охлаждения из
+    этого реально получится - ЧИСТАЯ функция (ничего не списывает), поэтому её
+    одинаково используют и реальный ход, и прогноз телеметрии.
+
+    Возвращает (effective_power, units_needed, units_used):
+    * units_needed = мощность теплоносителей x доля потока x units_per_power
+      жидкости - расход зависит от ПРОКАЧКИ, а не от того, сколько тепла реально
+      снялось (гонять пустой контур так же накладно);
+    * если жидкости в запасе меньше нужного, охлаждение срабатывает ЧАСТИЧНО,
+      пропорционально доступному - это мягче, чем обнулять его целиком, и даёт
+      игроку ход-другой заметить, что бак пуст;
+    * жидкость не выбрана или неизвестна -> охлаждения нет вовсе (теплоносители
+      в решётке без жидкости - просто занятые клетки).
+    """
+    if raw_coolant_power <= 0:
+        return 0.0, 0.0, 0.0
+    if not RESOURCE_REACTOR_COOLANT_FLUID:
+        # В контенте вообще нет охлаждающих жидкостей - значит механика расходника
+        # не заведена, и теплоносители работают как раньше, без топлива для себя.
+        # Это делает всю фичу ОПТ-ИН через контент и не ломает ни старые
+        # сохранения, ни чужой контент без неё.
+        return raw_coolant_power, 0.0, 0.0
+    cfg = reactor_coolant_fluid_config(fluid_id)
+    if cfg is None:
+        return 0.0, 0.0, 0.0
+    frac = max(0.0, min(float(flow_pct), 100.0)) / 100.0
+    needed = raw_coolant_power * frac * cfg.get("units_per_power", 0.0)
+    if needed <= 0:
+        return raw_coolant_power * cfg.get("cooling_mult", 1.0), 0.0, 0.0
+    used = min(needed, max(0.0, available))
+    ratio = used / needed
+    return raw_coolant_power * cfg.get("cooling_mult", 1.0) * ratio, needed, used
+
+
 def _reactor_zone_next_state(
     zone: dict, raw_heat: float, raw_output: float, coolant_power: float,
     cell_count: int, heat_cap_per_cell: float, soft_pct: float,
+    heat_damp_exponent: float = 1.0,
 ) -> tuple[float, float, float, bool]:
     """ОДИН шаг хода ОДНОЙ зоны - демпфирует raw_heat/raw_output рычагом
     control_rod_depth (`эффективное = сырое * (1 - depth/100*0.9)` - даже на
@@ -6074,9 +6398,18 @@ def _reactor_zone_next_state(
     реальной обработкой хода, и прогнозом телеметрии. Возвращает (new_heat,
     ratio, effective_output, would_trip) - would_trip = ratio достигла 100%
     (сам факт срабатывания детерминирован, в отличие от того, КАКАЯ авария
-    выпадет - см. _roll_reactor_accident)."""
+    выпадет - см. _roll_reactor_accident).
+
+    heat_damp_exponent (reactor.control_rod_heat_damp_exponent) - НАСКОЛЬКО
+    сильнее рычаг душит тепло, чем выработку: тепло множится на damp в этой
+    степени, выход - всегда на сам damp. При 1.0 (дефолт) оба падают ровно
+    одинаково, и тогда погружение - чистая потеря темпа без всякой отдачи.
+    При значении больше 1 глубина УЛУЧШАЕТ отношение тепла к выходу, то есть
+    освобождает тепловой запас, который можно обменять на клетки под топливо
+    или на экономию охлаждающей жидкости - только так рычаг становится
+    предметом выбора, а не аварийным тормозом."""
     damp = 1 - (zone.get("control_rod_depth", 0) / 100) * 0.9
-    effective_heat = raw_heat * damp
+    effective_heat = raw_heat * (damp ** heat_damp_exponent if heat_damp_exponent != 1.0 else damp)
     effective_output = raw_output * damp
     removed = coolant_power * (zone.get("coolant_flow", 100) / 100)
     new_heat = max(0.0, zone["heat"] + effective_heat - removed)
@@ -6121,11 +6454,20 @@ def reactor_zone_projection(state: GameState, instance_id: str) -> list[dict] | 
     heat_cap_per_cell = config.get("heat_cap_per_cell", 0.0)
     soft_pct = min(config.get("soft_threshold_pct", 1.0), 1.0)
 
+    fluid_id = instance.get("coolant_fluid")
+    stock = state.resources.get(fluid_id, 0) if fluid_id else 0
     result = []
     for zone_idx, zone in enumerate(zones):
+        # Тот же расчёт жидкости, что и в реальном ходу (включая порядок зон по
+        # общему пулу), иначе прогноз разошёлся бы с фактом при нехватке бака.
+        eff_power, needed, used = _reactor_coolant_plan(
+            fluid_id, coolant_power[zone_idx], zone.get("coolant_flow", 100), stock,
+        )
+        stock -= used
         new_heat, ratio, effective_output, would_trip = _reactor_zone_next_state(
-            zone, raw_heat[zone_idx], raw_output[zone_idx], coolant_power[zone_idx],
+            zone, raw_heat[zone_idx], raw_output[zone_idx], eff_power,
             zone_cell_count[zone_idx], heat_cap_per_cell, soft_pct,
+            config.get("control_rod_heat_damp_exponent", 1.0),
         )
         result.append({
             "zone_index": zone_idx,
@@ -6133,6 +6475,9 @@ def reactor_zone_projection(state: GameState, instance_id: str) -> list[dict] | 
             "next_ratio": 0.0 if would_trip else ratio,
             "next_output": effective_output,
             "will_trip": would_trip,
+            "fluid_needed": needed,
+            "fluid_used": used,
+            "fluid_short": needed - used > 1e-9,
         })
     return result
 
@@ -6182,6 +6527,7 @@ def _process_reactors(state: GameState, report: ProductionReport, daytime: bool)
         # что и в _reactor_zone_raw_totals, продублирована намеренно: список
         # активных ячеек там не сохраняется наружу, чтобы не плодить лишнее
         # состояние ради одного прохода.
+        burnup_factor = config.get("control_rod_burnup_factor", 0.0)
         for cell_index, cell in enumerate(grid):
             if cell is None:
                 continue
@@ -6190,14 +6536,35 @@ def _process_reactors(state: GameState, report: ProductionReport, daytime: bool)
             charge = cell.get("charge")
             if charge is None or charge <= 0:
                 continue
-            burnup = _reactor_effective_component(grid, width, height, cell_index)["burnup_per_turn"]
+            burnup = _reactor_effective_component(grid, width, height, cell_index, config)["burnup_per_turn"]
+            if burnup_factor:
+                # Стержни ПРИТОРМАЖИВАЮТ реакцию, а значит и расход топлива:
+                # при factor=1 заряд тает ровно в том же демпфированном темпе,
+                # в каком зона выдаёт энергию, поэтому глубина перестаёт быть
+                # чистой потерей и становится дросселем "медленнее, но дольше".
+                # factor=0 (или отсутствие поля) = прежнее поведение, когда
+                # заряд тратился независимо от рычага.
+                zone_idx = layout[cell_index] if cell_index < len(layout) else 0
+                damp = 1 - (zones[zone_idx].get("control_rod_depth", 0) / 100) * 0.9
+                burnup *= (1 - burnup_factor) + burnup_factor * damp
             cell["charge"] = max(0, charge - burnup)
 
+        fluid_id = instance.get("coolant_fluid")
         total_output = 0.0
         for zone_idx, zone in enumerate(zones):
+            # Жидкость - ОБЩИЙ пул на все зоны: зоны берут её по порядку, тот же
+            # осознанный компромисс "кто раньше встал, тот раньше взял", что и
+            # везде в advance_turn для разделяемых ресурсов.
+            eff_power, _needed, used = _reactor_coolant_plan(
+                fluid_id, coolant_power[zone_idx], zone.get("coolant_flow", 100),
+                state.resources.get(fluid_id, 0) if fluid_id else 0,
+            )
+            if used > 0:
+                _add_resource(state.resources, fluid_id, -used)
             new_heat, ratio, effective_output, would_trip = _reactor_zone_next_state(
-                zone, raw_heat[zone_idx], raw_output[zone_idx], coolant_power[zone_idx],
+                zone, raw_heat[zone_idx], raw_output[zone_idx], eff_power,
                 zone_cell_count[zone_idx], heat_cap_per_cell, soft_pct,
+                config.get("control_rod_heat_damp_exponent", 1.0),
             )
             zone["heat"] = new_heat
             if would_trip:
