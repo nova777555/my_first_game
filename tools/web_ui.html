@@ -2726,8 +2726,28 @@
   .cg-bank-tile .cg-icon-wrap { position: absolute; left: 12px; right: 12px; top: 7px; height: 30px; display: flex; align-items: center; justify-content: center; }
   .cg-bank-tile .cg-bank-amount { position: absolute; left: 0; right: 0; bottom: 5px; font-family: Consolas, monospace; font-size: 10px; color: var(--muted); text-align: center; }
 
-  .cg-sources-search input { width: 100%; font-family: Consolas, monospace; font-size: 11.5px; }
   .cg-sources-stub { flex-grow: 1; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; color: var(--muted); padding: 12px; }
+  .cg-col-sources input[type=text] { width: 100%; font-family: Consolas, monospace; font-size: 11.5px; }
+  .cg-sources-filters { display: flex; gap: 5px; flex-wrap: wrap; }
+  .cg-sources-list { flex-grow: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .cg-source-row {
+    display: flex; align-items: center; gap: 9px; padding: 7px 8px; text-align: left;
+    background: var(--panel); box-shadow: inset 0 0 0 1px rgba(255,255,255,.07);
+    border: 0; border-radius: 0; cursor: pointer; color: inherit; font: inherit;
+    /* Без этого браузер сжимает строку ниже высоты её контента: элемент flex
+       со свойством overflow != visible (см. глобальное button{overflow:hidden},
+       нужное для .cooldown-fill) по спецификации получает min-height:auto -> 0,
+       а строк тут обычно куда больше, чем влезает в .cg-sources-list без
+       скролла - без flex-shrink:0 это схлопывало каждую строку почти до нуля. */
+    flex-shrink: 0;
+  }
+  .cg-source-row:hover { box-shadow: inset 0 0 0 1px var(--blueprint); }
+  .cg-source-ingredient {
+    display: inline-flex; align-items: center; gap: 5px; font-family: Consolas, monospace; font-size: 10.5px;
+    padding: 4px 8px; background: transparent; color: var(--text); border: 1px solid rgba(255,255,255,.18);
+    border-radius: 0; cursor: pointer;
+  }
+  .cg-source-ingredient:hover { border-color: var(--blueprint); color: var(--blueprint); }
 </style>
 </head>
 <body>
@@ -9589,6 +9609,252 @@ function craftGridBankTile(item, entry) {
   return btn;
 }
 
+// ---------- Справочник источников ("Откуда берётся", см. PLAN_grid_crafting.md, этап 5) ----------
+// Живёт ВНУТРИ модалки верстака (правая колонка) - см. tools/web_ui.py:
+// resource_sources/sources_summary_view. Оба запроса read-only и завязаны
+// только на контент (не на state), поэтому сводка грузится ОДИН РАЗ на всю
+// сессию и держится в кэше вечно - переоткрытие модалки её не перезапрашивает.
+let sourcesSummaryCache = null; // null - ещё не загружен, [] - загружен и пуст
+let sourcesSummaryQuery = "";
+let sourcesSummaryFilter = "all";
+// Что сейчас показано в детальной карточке - null, если справочник на экране
+// списка. sourcesDetailList - результат /api/sources для ЭТОГО resource_id
+// (null, пока запрос не вернулся). sourcesTrail - история переходов по
+// ингредиентам (клик по чипу cost толкает ТЕКУЩИЙ id сюда, стрелка "назад"
+// снимает последний) - тот же приём, что locationPath у дерева локаций.
+let sourcesDetailResourceId = null;
+let sourcesDetailList = null;
+let sourcesDetailIndex = 0;
+let sourcesTrail = [];
+
+const SOURCE_KIND_INFO = {
+  grid_craft: { label: "Крафт на сетке", color: "var(--accent)" },
+  manual: { label: "Ручное действие", color: "#c0c7d0" },
+  spawn: { label: "Поймать в дикой природе", color: "#8fcf6a" },
+  breeding: { label: "Скрещивание", color: "#8fcf6a" },
+  building: { label: "Постройка", color: "var(--blueprint)" },
+  creature: { label: "Особь на ферме", color: "#8fcf6a" },
+  soul: { label: "Душа в синтезаторе", color: "#7cc4d8" },
+  energy: { label: "Крафт за энергию", color: "#f4c430" },
+  ritual: { label: "Ритуал", color: "#c58cff" },
+  mining: { label: "Шахта", color: "#9aa3ae" },
+  loot: { label: "Лут с существа", color: "#e0857a" },
+  lootbox: { label: "Лутбокс", color: "#f0c030" },
+};
+const SOURCES_FILTERS = [
+  ["all", "все"], ["grid_craft", "крафт"], ["creature", "существа"],
+  ["soul", "души"], ["building", "постройки"], ["loot", "лут"],
+];
+
+async function craftGridEnsureSourcesSummary() {
+  if (sourcesSummaryCache !== null) return;
+  sourcesSummaryCache = []; // сразу непусто-null, чтобы повторный рендер не запустил второй fetch
+  try {
+    const res = await fetch("/api/sources_summary");
+    const payload = await res.json();
+    sourcesSummaryCache = payload.items || [];
+  } catch (e) {
+    sourcesSummaryCache = [];
+  }
+  if (document.getElementById("craftGridOverlay")) openCraftGridModal(craftGridLocationId);
+}
+
+async function craftGridOpenSourceDetail(resourceId, pushCurrent) {
+  if (pushCurrent && sourcesDetailResourceId) sourcesTrail.push(sourcesDetailResourceId);
+  sourcesDetailResourceId = resourceId;
+  sourcesDetailList = null;
+  sourcesDetailIndex = 0;
+  openCraftGridModal(craftGridLocationId);
+  try {
+    const res = await fetch("/api/sources", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resource_id: resourceId }),
+    });
+    const payload = await res.json();
+    if (sourcesDetailResourceId !== resourceId) return; // игрок уже успел перейти дальше
+    sourcesDetailList = payload.sources || [];
+  } catch (e) {
+    if (sourcesDetailResourceId !== resourceId) return;
+    sourcesDetailList = [];
+  }
+  if (document.getElementById("craftGridOverlay")) openCraftGridModal(craftGridLocationId);
+}
+
+function craftGridSourcesGoBack() {
+  if (!sourcesTrail.length) {
+    sourcesDetailResourceId = null;
+    sourcesDetailList = null;
+    openCraftGridModal(craftGridLocationId);
+    return;
+  }
+  craftGridOpenSourceDetail(sourcesTrail.pop(), false);
+}
+
+function craftGridCloseSourceDetail() {
+  sourcesDetailResourceId = null;
+  sourcesDetailList = null;
+  sourcesTrail = [];
+  openCraftGridModal(craftGridLocationId);
+}
+
+// currentEntry - VIEW.crafting-запись ОТКРЫТОЙ ПРЯМО СЕЙЧАС локации-верстака -
+// нужна, чтобы решить, лежит ли сеточный источник в ЭТОМ ЖЕ механизме
+// (тогда кнопка "Разложить" работает сразу) или в другом (тогда кнопка
+// переключает верстак, см. план "Кнопка «Разложить» появляется ТОЛЬКО у
+// сеточного рецепта этого же механизма, у остальных - переход").
+function craftGridSourceDetailView(currentEntry) {
+  const wrap = el("div", { style: "display:flex;flex-direction:column;gap:8px;flex-grow:1;min-height:0;" });
+  const resourceId = sourcesDetailResourceId;
+  const iconDef = resourceIcon(resourceId);
+
+  const headRow = el("div", { style: "display:flex;align-items:center;gap:8px;" });
+  const backBtn = el("button", { class: "small", text: "←", title: "Назад" });
+  backBtn.addEventListener("click", craftGridSourcesGoBack);
+  headRow.appendChild(backBtn);
+  const iconWrap = el("div", { style: "width:20px;height:20px;flex-shrink:0;" });
+  if (iconDef) iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 20));
+  headRow.appendChild(iconWrap);
+  headRow.appendChild(el("div", {
+    style: "font-family:Consolas,monospace;font-size:12px;color:var(--blueprint);flex-grow:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
+    text: RESOURCE_NAME_LOOKUP(resourceId),
+  }));
+  const closeBtn = el("button", { class: "small", text: "✕", title: "Закрыть карточку" });
+  closeBtn.addEventListener("click", craftGridCloseSourceDetail);
+  headRow.appendChild(closeBtn);
+  wrap.appendChild(headRow);
+
+  if (sourcesDetailList === null) {
+    wrap.appendChild(el("div", { class: "cg-sources-stub", text: "Загрузка…" }));
+    return wrap;
+  }
+  if (!sourcesDetailList.length) {
+    wrap.appendChild(el("div", { class: "cg-sources-stub", text: "Источники этого предмета не описаны в контенте." }));
+    return wrap;
+  }
+
+  const idx = Math.min(sourcesDetailIndex, sourcesDetailList.length - 1);
+  const src = sourcesDetailList[idx];
+  const kindInfo = SOURCE_KIND_INFO[src.kind] || { label: src.kind, color: "var(--muted)" };
+
+  if (sourcesDetailList.length > 1) {
+    const navRow = el("div", { style: "display:flex;align-items:center;gap:8px;justify-content:center;" });
+    const prevBtn = el("button", { class: "small", text: "◀" });
+    prevBtn.addEventListener("click", () => { sourcesDetailIndex = (idx - 1 + sourcesDetailList.length) % sourcesDetailList.length; openCraftGridModal(craftGridLocationId); });
+    navRow.appendChild(prevBtn);
+    navRow.appendChild(el("div", { style: "font-size:10.5px;color:var(--muted);", text: `Способ ${idx + 1} из ${sourcesDetailList.length}` }));
+    const nextBtn = el("button", { class: "small", text: "▶" });
+    nextBtn.addEventListener("click", () => { sourcesDetailIndex = (idx + 1) % sourcesDetailList.length; openCraftGridModal(craftGridLocationId); });
+    navRow.appendChild(nextBtn);
+    wrap.appendChild(navRow);
+  }
+
+  wrap.appendChild(el("div", { style: `font-family:Consolas,monospace;font-size:11px;text-align:center;letter-spacing:.04em;color:${kindInfo.color};`, text: kindInfo.label.toUpperCase() }));
+  wrap.appendChild(el("div", { style: "font-size:12.5px;text-align:center;color:var(--text);", text: src.name }));
+  let amountLine = `×${src.amount}`;
+  if (src.chance != null) amountLine += ` · шанс ${Math.round(src.chance * 100)}%`;
+  wrap.appendChild(el("div", { style: "font-family:Consolas,monospace;font-size:11px;text-align:center;color:var(--accent);", text: amountLine }));
+
+  if (src.cost && src.cost.length) {
+    const costRow = el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;justify-content:center;" });
+    src.cost.forEach(c => {
+      const chip = el("button", { type: "button", class: "cg-source-ingredient", title: `Откуда берётся: ${c.name}` });
+      const ci = resourceIcon(c.id);
+      if (ci) chip.appendChild(pixelIcon(ci.grid, ci.palette, 16));
+      chip.appendChild(document.createTextNode(`×${c.amount} ${c.name}`));
+      chip.addEventListener("click", () => craftGridOpenSourceDetail(c.id, true));
+      costRow.appendChild(chip);
+    });
+    wrap.appendChild(costRow);
+  }
+
+  let actionBtn = null;
+  if (src.kind === "grid_craft") {
+    const localRecipe = currentEntry && currentEntry.location_id === src.location_id
+      ? currentEntry.recipes.find(r => r.action_id === src.action_id) : null;
+    if (localRecipe) {
+      actionBtn = el("button", { class: "primary small", text: "Разложить на верстаке" });
+      actionBtn.addEventListener("click", () => {
+        const patternFlat = craftGridFlattenPattern(localRecipe.pattern);
+        craftGridPlaced = craftGridPartialLay(patternFlat);
+        craftGridLastLaidPattern = patternFlat;
+        craftGridSelected = null;
+        craftGridStatus = `Разложено: ${localRecipe.name}.`;
+        openCraftGridModal(craftGridLocationId);
+      });
+    } else {
+      actionBtn = el("button", { class: "small", text: "Открыть верстак" });
+      actionBtn.addEventListener("click", () => openCraftGridModal(src.location_id));
+    }
+  } else if (src.kind === "manual" || src.kind === "spawn") {
+    actionBtn = el("button", { class: "small", text: "Перейти к действию" });
+    actionBtn.addEventListener("click", () => jumpToAction(src.action_id));
+  }
+  if (actionBtn) wrap.appendChild(el("div", { style: "text-align:center;" }, [actionBtn]));
+
+  return wrap;
+}
+
+function craftGridBuildSourcesPanel(entry) {
+  const col = el("div", { class: "cg-col cg-col-sources" });
+  col.appendChild(el("div", { class: "cg-heading cg-heading-blueprint", text: "СПРАВОЧНИК ИСТОЧНИКОВ" }));
+
+  if (sourcesSummaryCache === null) {
+    craftGridEnsureSourcesSummary();
+    col.appendChild(el("div", { class: "cg-sources-stub", text: "Загрузка…" }));
+    return col;
+  }
+
+  if (sourcesDetailResourceId) {
+    col.appendChild(craftGridSourceDetailView(entry));
+    return col;
+  }
+
+  col.appendChild(el("label", { style: "font-size:10px;color:var(--muted);", text: "Что хочу получить" }));
+  const searchInput = el("input", { type: "text", placeholder: "название предмета…" });
+  searchInput.value = sourcesSummaryQuery;
+  searchInput.addEventListener("input", (e) => { sourcesSummaryQuery = e.target.value; openCraftGridModal(craftGridLocationId); });
+  col.appendChild(searchInput);
+
+  const filtersRow = el("div", { class: "cg-sources-filters" });
+  SOURCES_FILTERS.forEach(([key, label]) => {
+    const btn = el("button", { class: "small", text: label });
+    if (sourcesSummaryFilter === key) btn.style.cssText = "background: rgba(95,208,232,.16); color: var(--blueprint); border-color: rgba(95,208,232,.55);";
+    btn.addEventListener("click", () => { sourcesSummaryFilter = key; openCraftGridModal(craftGridLocationId); });
+    filtersRow.appendChild(btn);
+  });
+  col.appendChild(filtersRow);
+
+  const list = el("div", { class: "cg-sources-list thin-scroll" });
+  const q = sourcesSummaryQuery.trim().toLowerCase();
+  const items = sourcesSummaryCache
+    .filter(item => sourcesSummaryFilter === "all" || item.kinds.includes(sourcesSummaryFilter))
+    .filter(item => !q || item.name.toLowerCase().includes(q));
+  if (!items.length) {
+    list.appendChild(el("div", { class: "empty-note", text: "Ничего не найдено." }));
+  }
+  const ellipsis = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+  items.forEach(item => {
+    const row = el("button", { type: "button", class: "cg-source-row" });
+    const iconDef = resourceIcon(item.id);
+    const iconWrap = el("div", { style: "width:24px;height:24px;flex-shrink:0;" });
+    if (iconDef) iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 24));
+    row.appendChild(iconWrap);
+    const text = el("div", { style: `flex-grow:1;min-width:0;${ellipsis}` });
+    text.appendChild(el("div", { style: `font-size:12px;color:var(--text);${ellipsis}`, text: item.name }));
+    const kindLabels = item.kinds.map(k => (SOURCE_KIND_INFO[k] || {}).label || k).join(" · ");
+    text.appendChild(el("div", { style: `font-family:Consolas,monospace;font-size:9.5px;margin-top:2px;color:var(--muted);${ellipsis}`, title: kindLabels, text: kindLabels }));
+    row.appendChild(text);
+    row.addEventListener("click", () => craftGridOpenSourceDetail(item.id, false));
+    list.appendChild(row);
+  });
+  col.appendChild(list);
+  col.appendChild(el("div", {
+    class: "cg-hint",
+    text: "Строка открывает карточку «Откуда берётся»: все способы получить предмет, включая пчёл, души и пассивные постройки.",
+  }));
+  return col;
+}
+
 function openCraftGridModal(locationId) {
   const entry = craftGridEntry(locationId);
   if (!entry) return;
@@ -9739,14 +10005,8 @@ function openCraftGridModal(locationId) {
   centerCol.appendChild(bankPanel);
   body.appendChild(centerCol);
 
-  // -- правая колонка: справочник источников (заглушка, см. отдельную задачу "Справочник") --
-  const sourcesCol = el("div", { class: "cg-col cg-col-sources" });
-  sourcesCol.appendChild(el("div", { class: "cg-heading cg-heading-blueprint", text: "СПРАВОЧНИК ИСТОЧНИКОВ" }));
-  sourcesCol.appendChild(el("div", {
-    class: "cg-sources-stub",
-    text: "Скоро здесь можно будет искать любой предмет игры и узнавать, как его получить - крафтом, постройкой, существом или душой.",
-  }));
-  body.appendChild(sourcesCol);
+  // -- правая колонка: справочник источников (см. craftGridBuildSourcesPanel) --
+  body.appendChild(craftGridBuildSourcesPanel(entry));
 
   overlay.appendChild(modal);
   overlay.id = "craftGridOverlay";
