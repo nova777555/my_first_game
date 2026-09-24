@@ -2165,7 +2165,27 @@
      теплоноситель/поглотитель), чтобы паттерн соседства читался с одного взгляда,
      без наведения. */
   .modal.reactor-modal { position: relative; background: linear-gradient(180deg, rgba(95,208,232,.05), transparent 40%), var(--panel); border-color: rgba(95,208,232,.3); }
+  /* Шире базовых 700px .tech-modal (тот же приём, что .graph-modal) - нужно
+     место под три колонки в ряд, см. .reactor-columns. Высота ТОЖЕ увеличена
+     (в отличие от .graph-modal, который трогает только width): центр держит
+     зоны НАД решёткой, а зон может быть до 4 (modular_reactor_zoning_4,
+     2 ряда зон-панелей) поверх решётки 7x7 (modular_reactor_grid_7x7) -
+     вместе это не помещается в базовые 820px без внутреннего скролла именно
+     центральной колонки, чего быть не должно (см. пожелание 2026-09-20: решётка
+     видна ВСЕГДА целиком). vh-клэмп - тот же приём, что у прочих крупных
+     canvas-модалок (mine-field-modal/ritual-modal), не только у tech-modal. */
+  .modal.tech-modal.reactor-modal { width: 1180px; height: min(960px, 94vh); }
   .modal.reactor-modal .modal-head strong { font-family: Consolas, monospace; letter-spacing: .5px; color: var(--blueprint); text-shadow: 0 0 10px rgba(95,208,232,.35); }
+  /* farms-modal-body тут больше НЕ .scroll-area сам (в отличие от прочих
+     модалок на этой разметке) - скроллятся только отдельные .reactor-col
+     внутри строки .reactor-columns, каждая независимо, чтобы длинный банк
+     компонентов не утаскивал решётку за собой вниз/вбок. */
+  .reactor-modal .farms-modal-body { flex: 1; min-height: 0; overflow: hidden; }
+  .reactor-modal .soul-stage-head { flex: none; }
+  .reactor-columns { display: flex; gap: 16px; flex: 1; min-height: 0; }
+  .reactor-col { min-width: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 12px; }
+  .reactor-col-left, .reactor-col-right { width: 280px; flex: none; }
+  .reactor-col-center { flex: 1; align-items: center; }
   /* Стрелки ◀/▶ и заголовок экземпляра переиспользуют РАЗМЕТКУ soul-stage-*
      (см. openReactorModal), но не должны унаследовать её лиловую атмосферу -
      перекрашиваем в свой blueprint-циан. */
@@ -2631,6 +2651,79 @@
     background: radial-gradient(circle, rgba(224,82,74,.8), rgba(224,82,74,0) 70%);
     animation: kill-flash-fade .7s ease-out forwards;
   }
+
+  /* Верстак (крафт на сетке, см. PLAN_grid_crafting.md) - фиксированный размер
+     1:1 из design-канваса "Сеточный крафт" (артборд Main), тот же принцип, что
+     .modal.storage-modal/.tools-modal выше. Три колонки: закреплённые рецепты
+     слева, сама сетка+банк по центру, справочник источников справа (заглушка
+     до отдельной задачи "Справочник"). */
+  .modal.craft-grid-modal { width: 1180px; height: 880px; max-width: none; max-height: none; overflow: hidden; }
+  .cg-body { flex-grow: 1; min-height: 0; display: flex; gap: 14px; padding: 14px 16px 16px; overflow: hidden; }
+  .cg-col { display: flex; flex-direction: column; gap: 8px; background: var(--bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); padding: 10px; }
+  .cg-col-pinned { width: 196px; flex-shrink: 0; }
+  .cg-col-center { flex-grow: 1; min-width: 0; align-items: center; background: transparent; box-shadow: none; padding: 0; }
+  .cg-col-sources { width: 308px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(95,208,232,.20); }
+  .cg-heading { font-family: Consolas, monospace; font-size: 10px; letter-spacing: .1em; color: var(--muted); }
+  .cg-heading-blueprint { color: var(--blueprint); }
+  .cg-hint { font-size: 10.5px; line-height: 1.45; color: #7d8794; border-top: 1px solid rgba(255,255,255,.07); padding-top: 8px; }
+
+  .cg-pinned-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .cg-pinned-tile { position: relative; width: 100%; height: 46px; }
+  .cg-pinned-tile button.cg-pinned-lay {
+    position: absolute; inset: 0; width: 100%; height: 100%; background: var(--panel2);
+    border: 0; border-radius: 0; padding: 0;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
+  }
+  .cg-pinned-tile button.cg-pinned-lay:hover { box-shadow: inset 0 0 0 2px var(--accent); }
+  .cg-pinned-tile .cg-icon-wrap { position: absolute; inset: 9px; display: flex; align-items: center; justify-content: center; }
+  .cg-pinned-dot { position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 50%; }
+  .cg-pinned-dot.ok { background: var(--ok); }
+  .cg-pinned-dot.missing { background: var(--danger); }
+  .cg-unpin-btn {
+    position: absolute; left: 1px; top: 0; width: 15px; height: 15px; background: transparent;
+    border: 0; border-radius: 0; padding: 0; font-size: 11px; line-height: 1; color: var(--accent);
+  }
+  .cg-mechanism-info { margin-top: auto; display: flex; flex-direction: column; gap: 7px; border-top: 1px solid rgba(255,255,255,.07); padding-top: 9px; font-size: 11px; color: var(--text); line-height: 1.5; }
+
+  .cg-stage { display: flex; align-items: center; gap: 22px; padding: 18px 26px; background: var(--bg); box-shadow: inset 0 0 0 1px rgba(240,160,48,.22); }
+  .cg-grid { display: grid; gap: 6px; }
+  .cg-cell {
+    position: relative; width: 78px; height: 78px; background: var(--panel); border: 0; border-radius: 0; padding: 0;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); background-color: rgba(0,0,0,.25);
+  }
+  .cg-cell .cg-icon-wrap { position: absolute; inset: 13px; display: flex; align-items: center; justify-content: center; }
+  .cg-cell.filled { box-shadow: inset 0 0 0 1px rgba(240,160,48,.45); background-color: rgba(240,160,48,.06); }
+  .cg-cell.ghost-ok { box-shadow: inset 0 0 0 2px var(--ok); background-color: rgba(74,201,160,.13); }
+  .cg-cell.ghost-missing { box-shadow: inset 0 0 0 2px var(--danger); background-color: rgba(224,82,74,.15); }
+  .cg-cell.ghost-missing .cg-icon-wrap { opacity: .4; filter: grayscale(1); }
+  .cg-cell.ghost-out { box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); background-color: rgba(0,0,0,.3); }
+  .cg-cell.ghost-ok .cg-icon-wrap { opacity: .75; }
+  .cg-arrow { color: var(--accent); display: flex; align-items: center; }
+  .cg-output {
+    position: relative; width: 92px; height: 92px; background: var(--bg);
+    box-shadow: inset 0 0 0 2px rgba(240,160,48,.55), 0 0 22px -6px rgba(240,160,48,.6);
+  }
+  .cg-output .cg-icon-wrap { position: absolute; left: 16px; right: 16px; top: 14px; bottom: 18px; display: flex; align-items: center; justify-content: center; }
+  .cg-output-count { position: absolute; right: 5px; bottom: 3px; font-family: Consolas, monospace; font-size: 13px; font-weight: 700; color: var(--accent); }
+
+  .cg-result-name { height: 20px; font-family: Consolas, monospace; font-size: 13px; color: var(--text); }
+  .cg-controls-row { display: flex; gap: 8px; align-items: center; }
+  .cg-controls-row label { font-family: Consolas, monospace; font-size: 10px; letter-spacing: .1em; color: var(--muted); }
+  .cg-batch-input { width: 62px; padding: 10px 8px; text-align: center; font-family: Consolas, monospace; }
+  .cg-batch-note { height: 14px; font-family: Consolas, monospace; font-size: 10.5px; color: var(--muted); }
+  .cg-status-line { height: 16px; font-size: 11.5px; font-style: italic; color: #9aa3ae; }
+
+  .cg-bank-panel { width: 100%; margin-top: auto; display: flex; flex-direction: column; gap: 9px; background: var(--bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); padding: 10px 12px 12px; }
+  .cg-bank-search-row { display: flex; align-items: center; gap: 10px; }
+  .cg-bank-search-row input { flex-grow: 1; font-family: Consolas, monospace; font-size: 11.5px; }
+  .cg-bank-tiles { display: flex; gap: 8px; flex-wrap: wrap; max-height: 130px; overflow-y: auto; }
+  .cg-bank-tile { position: relative; width: 58px; height: 58px; background: var(--panel2); border: 0; border-radius: 0; padding: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+  .cg-bank-tile.selected { box-shadow: inset 0 0 0 2px var(--accent); }
+  .cg-bank-tile .cg-icon-wrap { position: absolute; left: 12px; right: 12px; top: 7px; height: 30px; display: flex; align-items: center; justify-content: center; }
+  .cg-bank-tile .cg-bank-amount { position: absolute; left: 0; right: 0; bottom: 5px; font-family: Consolas, monospace; font-size: 10px; color: var(--muted); text-align: center; }
+
+  .cg-sources-search input { width: 100%; font-family: Consolas, monospace; font-size: 11.5px; }
+  .cg-sources-stub { flex-grow: 1; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 12px; color: var(--muted); padding: 12px; }
 </style>
 </head>
 <body>
@@ -3504,6 +3597,11 @@ function renderAll() {
   if (document.getElementById("huntingOverlay")) openHuntingModal();
   if (document.getElementById("enchantingOverlay")) openEnchantingModal();
   if (document.getElementById("reactorManualOverlay")) openReactorManualModal();
+  const craftGridOverlay = document.getElementById("craftGridOverlay");
+  if (craftGridOverlay) {
+    if (craftGridEntry(craftGridOverlay.dataset.locationId)) openCraftGridModal(craftGridOverlay.dataset.locationId);
+    else closeCraftGridModal();
+  }
   const farmUpgradesOverlay = document.getElementById("farmUpgradesOverlay");
   if (farmUpgradesOverlay) {
     const freshFarm = VIEW.farms.find(f => f.id === farmUpgradesOverlay.dataset.farmId);
@@ -5056,6 +5154,24 @@ async function insertReactorCatalyst(instanceId, cellIndex, resourceId) {
   }
 }
 
+async function setReactorCoolantFluid(instanceId, resourceId) {
+  // resourceId === null означает "осушить контур" (см. engine.set_reactor_coolant_fluid).
+  if (busy) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/set_reactor_coolant_fluid", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instance_id: instanceId, resource_id: resourceId }),
+    });
+    const payload = await res.json();
+    VIEW = payload.state;
+    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+    renderAll();
+  } finally {
+    busy = false;
+  }
+}
+
 async function removeReactorCatalyst(instanceId, cellIndex) {
   if (busy) return;
   busy = true;
@@ -5506,24 +5622,30 @@ function reactorZonePanel(entry, zone) {
     panel.appendChild(line);
   }
 
+  // ПОКАЗЫВАЕМ мощность, ХРАНИМ глубину погружения. Физически стержни -
+  // поглотитель: чем глубже они введены, тем меньше и выход, и тепло. Ползунок
+  // "погружение" из-за этого читается наоборот (0% = максимум мощности), поэтому
+  // игроку он показан перевёрнутым, как мощность, а движок по-прежнему получает
+  // control_rod_depth = 100 - мощность.
+  const rodPower = 100 - zone.control_rod_depth;
   const controlRow = el("div", { class: "reactor-slider-row" });
-  controlRow.appendChild(el("label", { text: "Стержни" }));
-  const controlValue = el("span", { class: "reactor-slider-value mono", text: `${zone.control_rod_depth}%` });
+  controlRow.appendChild(el("label", { text: "Мощность" }));
+  const controlValue = el("span", { class: "reactor-slider-value mono", text: `${rodPower}%` });
   const controlSlider = el("input", {
-    type: "range", min: "0", max: "100", step: "5", value: String(zone.control_rod_depth),
+    type: "range", min: "0", max: "100", step: "1", value: String(rodPower),
     class: "reactor-slider rod-slider",
   });
   controlSlider.addEventListener("input", () => { controlValue.textContent = `${controlSlider.value}%`; });
-  controlSlider.addEventListener("change", () => setReactorZoneControl(entry.id, zone.index, Number(controlSlider.value)));
+  controlSlider.addEventListener("change", () => setReactorZoneControl(entry.id, zone.index, 100 - Number(controlSlider.value)));
   controlRow.append(controlSlider, controlValue);
   panel.appendChild(controlRow);
-  panel.appendChild(el("div", { class: "hint reactor-slider-hint", text: "Глубже - меньше тепла и выхода, но никогда не до нуля." }));
+  panel.appendChild(el("div", { class: "hint reactor-slider-hint", text: "Управляющие стержни: 100% - они извлечены, реактор на полном ходу; ниже - вводятся в решётку и глушат его. Тепло они душат заметно сильнее выхода." }));
 
   const coolantRow = el("div", { class: "reactor-slider-row" });
   coolantRow.appendChild(el("label", { text: "Охлаждение" }));
   const coolantValue = el("span", { class: "reactor-slider-value mono", text: `${zone.coolant_flow}%` });
   const coolantSlider = el("input", {
-    type: "range", min: "0", max: "100", step: "5", value: String(zone.coolant_flow),
+    type: "range", min: "0", max: "100", step: "1", value: String(zone.coolant_flow),
     class: "reactor-slider coolant-slider",
   });
   coolantSlider.addEventListener("input", () => { coolantValue.textContent = `${coolantSlider.value}%`; });
@@ -5625,6 +5747,53 @@ function renderReactorCatalystBankSection(entry) {
   return section;
 }
 
+function renderReactorFluidSection(entry) {
+  // Охлаждающая ЖИДКОСТЬ - расходник теплоносителей, одна на весь экземпляр
+  // (бак общий на все зоны, см. engine._process_reactors). Не путать с
+  // компонентом-теплоносителем: тот занимает клетку, эта в него заливается.
+  const section = el("div", { class: "farm-section" });
+  section.appendChild(el("h3", { text: "Охлаждающая жидкость" }));
+
+  const bank = VIEW.reactor_fluid_bank || [];
+  if (!bank.length) {
+    section.appendChild(el("div", { class: "empty-note", text: "В этом мире охлаждающих жидкостей нет - теплоносители работают без расходника." }));
+    return section;
+  }
+
+  const coolantCells = entry.grid.filter(c => c && c.role === "coolant").length;
+  const current = bank.find(f => f.id === entry.coolant_fluid) || null;
+  const perTurn = current ? coolantCells * 0 : 0; // считается ниже по зонам
+  let totalPower = 0;
+  entry.grid.forEach(c => { if (c && c.role === "coolant") totalPower += 1; });
+
+  const note = el("div", { class: "empty-note" });
+  if (!coolantCells) {
+    note.textContent = "В решётке нет теплоносителей - жидкость никуда не тратится.";
+  } else if (!current) {
+    note.textContent = "Контур сухой: теплоносители стоят, но ничего не снимают. Выбери жидкость ниже.";
+  } else {
+    note.textContent = `Залито: ${current.name}. В запасе ${Math.floor(current.amount)}. `
+      + `Снимает ×${current.cooling_mult} тепла, тратит ${current.units_per_power} ед. на единицу мощности при потоке 100%.`;
+  }
+  section.appendChild(note);
+
+  const grid = el("div", { class: "soul-bank-grid" });
+  bank.forEach(f => {
+    const active = entry.coolant_fluid === f.id;
+    const empty = f.amount <= 0;
+    const card = el("div", { class: "breed-card soul-bank-card reactor-bank-card role-coolant" + (active ? " selected" : "") + (empty && !active ? " disabled" : "") });
+    card.title = `Снимает ×${f.cooling_mult} тепла · расход ${f.units_per_power} ед. на единицу мощности`
+      + (empty ? " · нет в запасе" : "");
+    card.appendChild(el("div", { class: "soul-bank-icon" }, [el("span", { class: "reactor-cell-glyph", text: "💧" })]));
+    card.appendChild(el("div", { class: "breed-card-name", text: f.name }));
+    card.appendChild(el("div", { class: "soul-bank-count", text: `× ${Math.floor(f.amount)}` }));
+    card.addEventListener("click", () => setReactorCoolantFluid(entry.id, active ? null : f.id));
+    grid.appendChild(card);
+  });
+  section.appendChild(grid);
+  return section;
+}
+
 function openReactorModal(buildingId) {
   const prevModal = document.querySelector("#reactorOverlay .modal");
   const savedScroll = prevModal ? prevModal.scrollTop : null;
@@ -5648,7 +5817,7 @@ function openReactorModal(buildingId) {
   head.appendChild(el("button", { text: "Закрыть", onclick: closeReactorModal }));
   modal.appendChild(head);
 
-  const body = el("div", { class: "farms-modal-body scroll-area" });
+  const body = el("div", { class: "farms-modal-body" });
   if (entry) {
     const stageHead = el("div", { class: "soul-stage-head" });
     const prevBtn = el("button", { class: "soul-arrow-btn", text: "◀", title: "Предыдущий экземпляр" });
@@ -5677,10 +5846,25 @@ function openReactorModal(buildingId) {
       stageHead.appendChild(upgradesBtn);
     }
     body.appendChild(stageHead);
-    body.appendChild(renderReactorZones(entry));
-    body.appendChild(renderReactorGrid(entry));
-    body.appendChild(renderReactorComponentBankSection(entry));
-    body.appendChild(renderReactorCatalystBankSection(entry));
+
+    // Три колонки в ряд вместо вертикального стека - по прямому пожеланию,
+    // 2026-09-20: решётка (и рычаги зон над ней) остаются по центру и видны
+    // целиком без скролла модалки, жидкость+катализаторы уезжают левее,
+    // банк компонентов - правее. Сама модалка шире (см. .modal.tech-modal.
+    // reactor-modal), а не растёт по высоте - каждая боковая колонка скроллится
+    // НЕЗАВИСИМО (.reactor-col), если банк длиннее доступной высоты, но сама
+    // решётка (центр) от этого не страдает.
+    const columns = el("div", { class: "reactor-columns" });
+    const colLeft = el("div", { class: "reactor-col reactor-col-left thin-scroll" });
+    colLeft.appendChild(renderReactorFluidSection(entry));
+    colLeft.appendChild(renderReactorCatalystBankSection(entry));
+    const colCenter = el("div", { class: "reactor-col reactor-col-center thin-scroll" });
+    colCenter.appendChild(renderReactorZones(entry));
+    colCenter.appendChild(renderReactorGrid(entry));
+    const colRight = el("div", { class: "reactor-col reactor-col-right thin-scroll" });
+    colRight.appendChild(renderReactorComponentBankSection(entry));
+    columns.append(colLeft, colCenter, colRight);
+    body.appendChild(columns);
   } else {
     body.appendChild(el("div", { class: "empty-note", text: "Реактор ещё не построен." }));
   }
@@ -5796,20 +5980,28 @@ function openReactorManualModal() {
     "Топливо каждый ход, пока установлено и не выгорело, даёт тепло своей зоне и выход энергии. У топлива есть конечный запас заряда - он убывает каждый ход независимо от прочих настроек решётки. Когда заряд заканчивается, ячейка перестаёт что-либо производить, но не освобождается сама - её нужно вынуть вручную; при этом возвращается не исходный стержень, а его отработанный остаток.",
     "Соседнее топливо ускоряет у топливной ячейки ОБА показателя разом - и тепло, и выход, - причём тепло растёт быстрее выхода.",
     "Замедлитель сам ничего не производит и не выгорает. Каждый замедлитель по соседству с топливной ячейкой добавляет ей фиксированную прибавку к выходу энергии, тепла не касаясь.",
-    "Поглотитель по соседству с топливом снижает у него и тепло, и выход одновременно.",
-    "Радиатор по соседству с топливом снижает у него только тепло - на выход энергии не влияет вовсе, в отличие от поглотителя.",
-    "Отражатель по соседству с топливом умножает его выход энергии, а не прибавляет фиксированную величину, как замедлитель. Если у одной топливной ячейки несколько соседних отражателей, их эффекты перемножаются между собой, а не складываются. На тепло отражатель не влияет.",
+    "Поглотитель по соседству с топливом снижает у него и тепло, и выход одновременно, но тепло - заметно сильнее, чем выход. За одну клетку он гасит примерно вдвое больше тепла, чем радиатор, и платит за это небольшой потерей выхода: это инструмент на случай, когда тепла слишком много, а свободных клеток уже не осталось.",
+    "Радиатор по соседству с топливом снижает у него только тепло - на выход энергии не влияет вовсе, в отличие от поглотителя. Зато и гасит он меньше: радиатор дешевле по выходу, поглотитель - по месту.",
+    "Но ни радиаторы, ни поглотители не остужают топливо ДОЧИСТА: сколько бы их ни стояло вокруг, топливная ячейка всегда отдаёт зоне некоторую долю собственного тепла. У этого два следствия. Первое: после второго-третьего гасителя вокруг одной и той же ячейки следующие почти ничего не добавляют - клетку выгоднее потратить иначе. Второе, и главное: охлаждение теплоносителями нужно на ЛЮБОЙ стадии игры. Продвинутые компоненты не позволяют отказаться от охлаждающей жидкости - они поднимают потолок того, сколько топлива вы сможете прокормить одним контуром.",
+    "Отражатель по соседству с топливом умножает его выход энергии, а не прибавляет фиксированную величину, как замедлитель. Если у одной топливной ячейки несколько соседних отражателей, их эффекты перемножаются между собой, а не складываются. Но отражатель умножает и ТЕПЛО этой ячейки - выход он поднимает сильнее, чем тепло, поэтому выгоден, однако бесплатным не бывает: за каждый отражатель придётся чем-то остывать.",
     "Теплоноситель в соседстве не участвует вовсе - его эффект работает иначе, см. раздел «Зоны, стержни и охлаждение».",
+    "Катализатор ставится ПОВЕРХ уже стоящего в ячейке компонента, не занимая клетку. Он усиливает свою ячейку, но штрафует все соседние - и штраф считается по КВАДРАТУ вокруг него, включая диагонали, в отличие от обычного соседства ролей. Поэтому катализатор в углу решётки задевает меньше клеток, чем в середине, и «закатализировать всё подряд» невыгодно: соседние катализаторы гасят друг друга.",
+    "У каждого катализатора своя задача, и они НЕ взаимозаменяемы. Усиление поднимает силу любого нетопливного компонента - самый универсальный, годится и теплоносителю, и отражателю. Форсаж разгоняет сам стержень, но и греет его сильнее: он окупается там, где у контура остался запас охлаждения. Поле действует только на стержни, стоящие ВПЛОТНУЮ друг к другу: оно гасит их взаимный разогрев, усиливая взаимную подпитку, и тем самым делает плотную набивку топлива выгодной там, где без него она была бы убыточна. Стабилизация не добавляет ни капли выработки - она втрое растягивает запас заряда, то есть экономит топливо, а не энергию.",
+    "Отсюда простое правило выбора: пока топлива мало и добывать его тяжело, выгоднее стабилизация; когда сырья в избытке, экономить незачем - и её место занимает форсаж, который превращает изобилие топлива в выработку.",
   ]));
   body.appendChild(reactorManualSection("Зоны, стержни и охлаждение", [
-    "Решётка разделена на одну или несколько зон. У каждой зоны - свой независимый рычаг «Стержни» (глубина погружения, 0-100%) и свой клапан «Охлаждение» (0-100%), не связанные с другими зонами.",
-    "Глубина стержней демпфирует ОБА показателя зоны разом - суммарное тепло и суммарный выход всех топливных ячеек этой зоны, - но никогда не гасит их полностью до нуля, даже на 100% погружения.",
+    "Решётка разделена на одну или несколько зон. У каждой зоны - свой независимый ползунок «Мощность» (0-100%) и свой клапан «Охлаждение» (0-100%), не связанные с другими зонами.",
+    "«Мощность» - это положение управляющих стержней. Стержни поглощают излучение, поэтому 100% означает, что они ИЗВЛЕЧЕНЫ и зона работает в полную силу, а движение ползунка вниз вводит их обратно и глушит зону. Полностью остановить её одним ползунком нельзя: даже на нуле остаётся фоновый разогрев.",
+    "Снижение мощности душит ОБА показателя зоны разом - суммарное тепло и суммарный выход всех топливных ячеек. Вместе с ними притормаживается и РАСХОД ЗАРЯДА топлива: приглушённая зона даёт меньше энергии в ход, но топлива ей хватает на пропорционально большее число ходов. Поэтому ползунок - это ещё и регулятор аппетита: убавить мощность значит растянуть запас топлива.",
+    "Причём тепло падает ЗАМЕТНО быстрее выработки: убавив мощность вдвое, вы теряете половину выхода, но вчетверо меньше греете. Именно поэтому ползунок не аварийный тормоз, а полноценная настройка решётки: приглушённая зона требует меньше охлаждения, а освободившиеся клетки можно отдать под топливо. Для готовой решётки правило простое - держите мощность на максимуме, который ещё вытягивает контур; а вот САМА решётка при разной мощности выгодна разная, и чем сильнее вы глушите зону, тем больше стержней в неё влезает.",
     "Теплоносители не бонусят соседей - их суммарная мощность действует на ВСЮ зону целиком: доля этой суммарной мощности, которая реально снимает тепло за ход, определяется клапаном «Охлаждение» той же зоны.",
+    "Теплоносителям нужна ОХЛАЖДАЮЩАЯ ЖИДКОСТЬ - она выбирается одна на весь реактор и расходуется каждый ход. Расход считается от прокачки (мощность теплоносителей × процент клапана), а не от того, сколько тепла реально снялось: гонять контур вхолостую так же накладно. У каждой жидкости свои две характеристики - во сколько раз она усиливает снятие тепла и сколько единиц тратит; дешёвая вода снимает мало и расходуется быстро, дорогие жидкости - наоборот. Если жидкости в запасе не хватило, охлаждение срабатывает частично, пропорционально остатку, а пустой бак означает отсутствие охлаждения вовсе.",
     "Резкая перестройка клапана охлаждения на уже разогретой зоне (когда накопленное тепло уже выше половины предельной ёмкости зоны) вызывает термоудар - зона мгновенно, в момент самого действия, получает единовременную добавку тепла, не дожидаясь конца хода.",
-    "Деление на несколько зон само по себе НЕ увеличивает суммарный выход энергии - это инструмент риска и контроля, а не мощности: авария рушит только свою зону, а не всю решётку, и у каждой зоны можно выставить свою собственную политику (агрессивную или осторожную). Но тепло и охлаждение при этом считаются СТРОГО по своей зоне - теплоноситель в одной зоне никак не помогает топливу в другой. Если в зоне есть топливо, но нет собственного теплоносителя, рычаг стержней всё равно оставляет не меньше 10% разогрева - такая зона рано или поздно уйдёт в аварию при любых настройках.",
+    "Деление на несколько зон само по себе НЕ увеличивает суммарный выход энергии - это инструмент риска и контроля, а не мощности: авария рушит только свою зону, а не всю решётку, и у каждой зоны можно выставить свою собственную политику (агрессивную или осторожную). Но тепло и охлаждение при этом считаются СТРОГО по своей зоне - теплоноситель в одной зоне никак не помогает топливу в другой. Если в зоне есть топливо, но нет собственного теплоносителя, её не спасти и нулевой мощностью: даже полностью введённые стержни оставляют фоновый разогрев, а тепло само не рассеивается - такая зона рано или поздно уйдёт в аварию при любых настройках.",
   ]));
   body.appendChild(reactorManualSection("Накопление тепла и аварии", [
     "У каждой зоны есть предельная ёмкость тепла, зависящая от числа её ячеек. Накопленное зоной тепло растёт от собственной выработки топлива и снижается охлаждением - если охлаждение превышает выработку, тепло может дойти и до нуля.",
+    "Само по себе тепло не рассеивается: единственный способ его убрать - охлаждение. Поэтому главная проверка любой сборки такая: покрывает ли снятие тепла за ход всю выработку зоны, когда ВСЕ стержни свежие и работают. Если нет, сборка обречена, пусть и не сразу: накопленное тепло остаётся в зоне и после перезарядки стержней, так что до аварии она дойдёт не за эту загрузку топлива, так за следующую.",
     "Начиная с некоторого порога заполненности этой ёмкости, выход энергии зоны начинает линейно снижаться по мере дальнейшего роста тепла.",
     "При достижении 100% ёмкости зона немедленно сбрасывает накопленное тепло до нуля и запускает аварийную проверку - какой именно исход произойдёт, решает случайный бросок по таблице возможных последствий этой постройки.",
   ]));
@@ -7041,6 +7233,27 @@ async function setBuildingActiveCount(buildingId, activeCount) {
   }
 }
 
+// Снос одной копии постройки (см. engine.demolish_building) - ресурсы не
+// возвращаются, поэтому подтверждение обязательно (тот же приём, что у
+// "Начать заново"). Не тратит ход - как setBuildingActiveCount выше.
+async function demolishBuilding(buildingId, name) {
+  if (busy) return;
+  if (!confirm(`Снести «${name}»? Затраченные на неё ресурсы не вернутся.`)) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/demolish_building", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ building_id: buildingId }),
+    });
+    const payload = await res.json();
+    VIEW = payload.state;
+    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+    renderAll();
+  } finally {
+    busy = false;
+  }
+}
+
 async function abandonEncounter() {
   if (busy) return;
   busy = true;
@@ -7764,7 +7977,7 @@ function renderBuildings() {
     if (b.broken > 0) main.appendChild(renderBuildingRepairRow(b));
     head.appendChild(main);
 
-    if (b.upgrades || b.is_farm || b.is_breeding_station || b.is_genetics_lab || b.is_soul_collector || b.is_enchanting_table || b.is_ritual_circle || b.is_reactor || b.automation) {
+    {
       const actions = el("div", { class: "bld-row-actions" });
       if (b.upgrades) {
         const btn = el("button", { class: "upgrade-open-btn", text: "⚙ Улучшения" });
@@ -7819,6 +8032,12 @@ function renderBuildings() {
         btn.addEventListener("click", () => openReactorModal(b.id));
         actions.appendChild(btn);
       }
+      // Снос - всегда доступен для уже построенной копии (эта панель и так
+      // показывает только b.count >= 1), поэтому вне условия выше.
+      const demolishBtn = el("button", { class: "upgrade-open-btn danger", text: "💥 Снести" });
+      demolishBtn.title = "Снести одну копию. Затраченные ресурсы не возвращаются.";
+      demolishBtn.addEventListener("click", () => demolishBuilding(b.id, b.name));
+      actions.appendChild(demolishBtn);
       head.appendChild(actions);
     }
 
@@ -8987,6 +9206,418 @@ function closePrioritiesModal() {
   if (overlay) overlay.remove();
 }
 
+// ---------- Верстак (крафт на сетке, см. PLAN_grid_crafting.md) ----------
+
+// Раскладка на сетке НЕ сохраняется на сервер (см. план, этап 4) - живёт только
+// в этих модульных переменных, как ritualPlacedRing/reactorGrid у соседних
+// модалок: переживает перерисовку МЕЖДУ рендерами, пока модалка открыта на той
+// же локации, но открывается заново пустой. craftGridPlaced - плоский массив
+// длиной width*height, id ресурса или null в каждой ячейке.
+let craftGridLocationId = null;
+let craftGridPlaced = [];
+let craftGridSelected = null;
+let craftGridBatch = 1;
+let craftGridBankQuery = "";
+let craftGridStatus = "";
+
+function craftGridEntry(locationId) {
+  return (VIEW.crafting || []).find(c => c.location_id === locationId) || null;
+}
+
+function craftGridResetPlacement(entry) {
+  craftGridPlaced = new Array(entry.width * entry.height).fill(null);
+  craftGridSelected = null;
+  craftGridBatch = 1;
+  craftGridStatus = "";
+}
+
+// Та же нормализация (обрезка пустых краёв), что game/engine.py:_pattern_shape/
+// _normalize_grid - держать в паре: это клиентская копия ради мгновенной
+// реакции при раскладывании, сервер (POST /api/craft_grid) всё равно
+// перепроверяет раскладку сам через engine.match_grid, доверять этой копии
+// вслепую нельзя (см. план, этап 4).
+function craftGridPatternShape(pattern) {
+  const key = pattern.key || {};
+  const grid = (pattern.rows || []).map(row => Array.from(row).map(ch => (ch === "." ? null : (key[ch] || null))));
+  if (!grid.length) return [];
+  const rowsUsed = [];
+  grid.forEach((row, y) => { if (row.some(c => c !== null)) rowsUsed.push(y); });
+  const maxLen = grid.reduce((m, r) => Math.max(m, r.length), 0);
+  const colsUsed = [];
+  for (let x = 0; x < maxLen; x++) {
+    if (grid.some(row => x < row.length && row[x] !== null)) colsUsed.push(x);
+  }
+  if (!rowsUsed.length || !colsUsed.length) return [];
+  const top = rowsUsed[0], bottom = rowsUsed[rowsUsed.length - 1];
+  const left = colsUsed[0], right = colsUsed[colsUsed.length - 1];
+  const out = [];
+  for (let y = top; y <= bottom; y++) {
+    const row = [];
+    for (let x = left; x <= right; x++) row.push(x < grid[y].length ? grid[y][x] : null);
+    out.push(row);
+  }
+  return out;
+}
+
+function craftGridNormalize(cells, width, height) {
+  const grid = [];
+  for (let y = 0; y < height; y++) {
+    const row = [];
+    for (let x = 0; x < width; x++) row.push(cells[y * width + x] || null);
+    grid.push(row);
+  }
+  const rowsUsed = [];
+  grid.forEach((row, y) => { if (row.some(c => c !== null)) rowsUsed.push(y); });
+  const colsUsed = [];
+  for (let x = 0; x < width; x++) {
+    if (grid.some(row => row[x] !== null)) colsUsed.push(x);
+  }
+  if (!rowsUsed.length || !colsUsed.length) return [];
+  const top = rowsUsed[0], bottom = rowsUsed[rowsUsed.length - 1];
+  const left = colsUsed[0], right = colsUsed[colsUsed.length - 1];
+  const out = [];
+  for (let y = top; y <= bottom; y++) {
+    const row = [];
+    for (let x = left; x <= right; x++) row.push(grid[y][x]);
+    out.push(row);
+  }
+  return out;
+}
+
+function craftGridShapesEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].length !== b[i].length) return false;
+    for (let j = 0; j < a[i].length; j++) if (a[i][j] !== b[i][j]) return false;
+  }
+  return true;
+}
+function craftGridMirrorShape(shape) { return shape.map(row => row.slice().reverse()); }
+
+function craftGridMatchRecipe(entry, placed) {
+  const normalized = craftGridNormalize(placed, entry.width, entry.height);
+  if (!normalized.length) return null;
+  for (const recipe of entry.recipes) {
+    const shape = craftGridPatternShape(recipe.pattern);
+    if (craftGridShapesEqual(shape, normalized)) return recipe;
+    if (recipe.pattern_mirror && craftGridShapesEqual(craftGridMirrorShape(shape), normalized)) return recipe;
+  }
+  return null;
+}
+
+// Раскладывает рецепт ЦЕЛИКОМ в его исходной позиции на сетке (узор в контенте
+// уже хранится в размере ИМЕННО этой сетки, см. tools/content_validation.py:
+// check_action_pattern) - используется звездой "закреплённые" (первый коммит;
+// см. PLAN_grid_crafting.md про частичный перенос с подсветкой нехватки -
+// это уже второй коммит/удобство).
+function craftGridFlattenPattern(pattern) {
+  const key = pattern.key || {};
+  const out = [];
+  (pattern.rows || []).forEach(row => {
+    Array.from(row).forEach(ch => out.push(ch === "." ? null : (key[ch] || null)));
+  });
+  return out;
+}
+
+function craftGridMaxRuns(recipe) {
+  let max = Infinity;
+  for (const c of recipe.cost) {
+    const have = (VIEW.resources && VIEW.resources[c.id]) || 0;
+    max = Math.min(max, Math.floor(have / c.amount));
+  }
+  return Number.isFinite(max) ? Math.max(0, max) : 0;
+}
+
+async function craftGridSubmit(locationId, placed, times) {
+  if (busy) return null;
+  busy = true;
+  try {
+    const res = await fetch("/api/craft_grid", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location_id: locationId, placed, times }),
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      showErrorToast(payload.error || "Ошибка запроса.");
+      return null;
+    }
+    VIEW = payload.state;
+    (payload.logs || []).forEach(pushLog);
+    if (payload.logs && payload.logs.length) {
+      if (payload.logs.some(l => l.broken && l.broken.length)) playSound("breakdown");
+      else if (payload.ok) playSound("success");
+    }
+    if (!payload.ok) showErrorToast(payload.message);
+    return payload;
+  } finally {
+    busy = false;
+  }
+}
+
+async function craftGridTogglePin(actionId) {
+  if (busy) return null;
+  busy = true;
+  try {
+    const res = await fetch("/api/pin_recipe", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action_id: actionId }),
+    });
+    const payload = await res.json();
+    if (res.ok) VIEW = payload.state;
+    return payload;
+  } finally {
+    busy = false;
+  }
+}
+
+function craftGridCellClick(i, entry) {
+  const current = craftGridPlaced[i];
+  if (craftGridSelected == null) craftGridPlaced[i] = null;
+  else if (current === craftGridSelected) craftGridPlaced[i] = null;
+  else craftGridPlaced[i] = craftGridSelected;
+  openCraftGridModal(craftGridLocationId);
+}
+
+function craftGridCellEl(i, entry, resourceId) {
+  const cell = el("button", { type: "button", class: "cg-cell" + (resourceId ? " filled" : "") });
+  if (resourceId) {
+    const iconDef = resourceIcon(resourceId);
+    const wrap = el("div", { class: "cg-icon-wrap" });
+    if (iconDef) wrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 44));
+    cell.appendChild(wrap);
+    const name = RESOURCE_NAME_LOOKUP(resourceId);
+    cell.title = name;
+  }
+  cell.addEventListener("dragover", (e) => e.preventDefault());
+  cell.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const rid = e.dataTransfer.getData("text/plain");
+    if (!rid) return;
+    craftGridPlaced[i] = rid;
+    openCraftGridModal(craftGridLocationId);
+  });
+  cell.addEventListener("click", () => craftGridCellClick(i, entry));
+  return cell;
+}
+
+// Имя ресурса по id для title-подсказок внутри верстака - банк/сетка приходят
+// без словаря имён (VIEW.crafting не дублирует resource_names), берём из
+// VIEW.resource_names (см. tools/web_ui.py:build_view), общего для всей игры.
+function RESOURCE_NAME_LOOKUP(rid) {
+  return (VIEW.resource_names && VIEW.resource_names[rid]) || rid;
+}
+
+function craftGridPinnedTile(recipe, entry) {
+  const wrap = el("div", { class: "cg-pinned-tile" });
+  const btn = el("button", { type: "button", class: "cg-pinned-lay", title: recipe.name });
+  const outputId = recipe.gain[0] && recipe.gain[0].id;
+  const iconDef = outputId ? resourceIcon(outputId) : null;
+  const iconWrap = el("div", { class: "cg-icon-wrap" });
+  if (iconDef) iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 28));
+  btn.appendChild(iconWrap);
+  const dot = el("span", { class: "cg-pinned-dot " + (recipe.enough ? "ok" : "missing") });
+  btn.appendChild(dot);
+  btn.addEventListener("click", () => {
+    craftGridPlaced = craftGridFlattenPattern(recipe.pattern);
+    craftGridSelected = null;
+    craftGridStatus = `Разложено: ${recipe.name}.`;
+    openCraftGridModal(craftGridLocationId);
+  });
+  wrap.appendChild(btn);
+  const unpin = el("button", { type: "button", class: "cg-unpin-btn", title: `Открепить: ${recipe.name}`, text: "★" });
+  unpin.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const payload = await craftGridTogglePin(recipe.action_id);
+    if (payload) openCraftGridModal(craftGridLocationId);
+  });
+  wrap.appendChild(unpin);
+  return wrap;
+}
+
+function craftGridBankTile(item, entry) {
+  const btn = el("button", {
+    type: "button", class: "cg-bank-tile" + (craftGridSelected === item.id ? " selected" : ""),
+    title: `${item.name}, на складе ${item.amount}`, draggable: "true",
+  });
+  const iconDef = resourceIcon(item.id);
+  const iconWrap = el("div", { class: "cg-icon-wrap" });
+  if (iconDef) iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 26));
+  btn.appendChild(iconWrap);
+  btn.appendChild(el("span", { class: "cg-bank-amount", text: String(item.amount) }));
+  btn.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", item.id); });
+  btn.addEventListener("click", () => {
+    craftGridSelected = item.id;
+    craftGridStatus = `Взято: ${item.name}. Кликните по ячейке или перетащите.`;
+    openCraftGridModal(craftGridLocationId);
+  });
+  return btn;
+}
+
+function openCraftGridModal(locationId) {
+  const entry = craftGridEntry(locationId);
+  if (!entry) return;
+  if (craftGridLocationId !== locationId) {
+    craftGridLocationId = locationId;
+    craftGridResetPlacement(entry);
+  } else if (craftGridPlaced.length !== entry.width * entry.height) {
+    craftGridResetPlacement(entry);
+  }
+
+  const prevModal = document.querySelector("#craftGridOverlay .modal");
+  const savedScroll = prevModal ? prevModal.scrollTop : null;
+  closeCraftGridModal();
+
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeCraftGridModal(); });
+  const modal = el("div", { class: "modal craft-grid-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: entry.name }));
+  head.appendChild(el("span", {
+    class: "mono", style: "margin-left:10px;font-size:11px;color:var(--muted);",
+    text: `сетка ${entry.width}×${entry.height} · одна ячейка = одна единица`,
+  }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: closeCraftGridModal }));
+  modal.appendChild(head);
+
+  const body = el("div", { class: "cg-body" });
+  modal.appendChild(body);
+
+  // -- левая колонка: закреплённые --
+  const pinnedCol = el("div", { class: "cg-col cg-col-pinned" });
+  pinnedCol.appendChild(el("div", { class: "cg-heading", text: "ЗАКРЕПЛЁННЫЕ" }));
+  const pinnedRecipes = entry.recipes.filter(r => r.pinned);
+  const pinnedGrid = el("div", { class: "cg-pinned-grid" });
+  if (pinnedRecipes.length) {
+    pinnedRecipes.forEach(r => pinnedGrid.appendChild(craftGridPinnedTile(r, entry)));
+  }
+  pinnedCol.appendChild(pinnedGrid);
+  if (!pinnedRecipes.length) {
+    pinnedCol.appendChild(el("div", { class: "empty-note", text: "Пока ничего не закреплено - звезда в справочнике справа." }));
+  }
+  pinnedCol.appendChild(el("div", {
+    class: "cg-hint",
+    text: "Клик раскладывает узор, звезда открепляет. Точка в углу: зелёная — сырья хватает, красная — нет.",
+  }));
+  const mechInfo = el("div", { class: "cg-mechanism-info" });
+  const achievable = entry.recipes.filter(r => r.enough).length;
+  mechInfo.appendChild(el("div", { text: `Можно собрать сейчас: ${achievable} из ${entry.recipes.length}` }));
+  pinnedCol.appendChild(mechInfo);
+  body.appendChild(pinnedCol);
+
+  // -- центральная колонка: сетка + банк --
+  const centerCol = el("div", { class: "cg-col cg-col-center" });
+  const matched = craftGridMatchRecipe(entry, craftGridPlaced);
+
+  const stage = el("div", { class: "cg-stage" });
+  const gridEl = el("div", { class: "cg-grid", style: `grid-template-columns: repeat(${entry.width}, minmax(0, 1fr));` });
+  craftGridPlaced.forEach((rid, i) => gridEl.appendChild(craftGridCellEl(i, entry, rid)));
+  stage.appendChild(gridEl);
+  const arrowSvg = svgEl("svg", { width: "38", height: "20", viewBox: "0 0 38 20", fill: "none" });
+  arrowSvg.appendChild(svgEl("path", { d: "M2 10h30M25 3l8 7-8 7", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "square" }));
+  stage.appendChild(el("div", { class: "cg-arrow" }, [arrowSvg]));
+  const outputSlot = el("div", { class: "cg-output" });
+  if (matched) {
+    const outId = matched.gain[0] && matched.gain[0].id;
+    const iconDef = outId ? resourceIcon(outId) : null;
+    const wrap = el("div", { class: "cg-icon-wrap" });
+    if (iconDef) wrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 44));
+    outputSlot.appendChild(wrap);
+  }
+  const totalOut = matched ? matched.gain.reduce((s, g) => s + g.amount, 0) : 0;
+  outputSlot.appendChild(el("span", { class: "cg-output-count", text: matched ? `×${totalOut}` : "" }));
+  stage.appendChild(outputSlot);
+  centerCol.appendChild(stage);
+
+  const resultName = matched
+    ? `${matched.name} → ${matched.gain.map(g => g.name).join(", ")}`
+    : "Узор не распознан";
+  centerCol.appendChild(el("div", { class: "cg-result-name", text: resultName }));
+
+  const controlsRow = el("div", { class: "cg-controls-row" });
+  controlsRow.appendChild(el("label", { for: "cgBatchInput", text: "РАЗ" }));
+  const batchInput = el("input", {
+    id: "cgBatchInput", type: "number", min: "1", step: "1", class: "cg-batch-input",
+  });
+  batchInput.value = String(Math.max(1, craftGridBatch));
+  batchInput.addEventListener("input", (e) => {
+    craftGridBatch = Math.max(1, Math.floor(Number(e.target.value) || 1));
+  });
+  controlsRow.appendChild(batchInput);
+  const maxRuns = matched ? craftGridMaxRuns(matched) : 0;
+  const maxBtn = el("button", { class: "small", text: "макс", title: "Поставить максимум по складу" });
+  maxBtn.addEventListener("click", () => {
+    craftGridBatch = Math.max(1, maxRuns);
+    craftGridStatus = maxRuns ? `Поставлено по складу: ${maxRuns}.` : "Сырья не хватает ни на один раз.";
+    openCraftGridModal(craftGridLocationId);
+  });
+  controlsRow.appendChild(maxBtn);
+  const craftBtn = el("button", {
+    class: "primary", text: craftGridBatch > 1 ? `Скрафтить ×${craftGridBatch}` : "Скрафтить",
+  });
+  craftBtn.disabled = !matched;
+  craftBtn.addEventListener("click", async () => {
+    if (!matched) return;
+    const times = Math.max(1, craftGridBatch);
+    const payload = await craftGridSubmit(craftGridLocationId, craftGridPlaced, times);
+    if (payload) {
+      craftGridStatus = payload.message || "";
+      openCraftGridModal(craftGridLocationId);
+    }
+  });
+  controlsRow.appendChild(craftBtn);
+  const clearBtn = el("button", { text: "Очистить" });
+  clearBtn.addEventListener("click", () => {
+    craftGridResetPlacement(entry);
+    openCraftGridModal(craftGridLocationId);
+  });
+  controlsRow.appendChild(clearBtn);
+  centerCol.appendChild(controlsRow);
+  centerCol.appendChild(el("div", {
+    class: "cg-batch-note",
+    text: matched ? (maxRuns > 0 ? `сырья хватит на ${maxRuns} раз` : "сырья не хватает даже на один раз") : "",
+  }));
+  centerCol.appendChild(el("div", { class: "cg-status-line", text: craftGridStatus }));
+
+  const bankPanel = el("div", { class: "cg-bank-panel" });
+  const searchRow = el("div", { class: "cg-bank-search-row" });
+  searchRow.appendChild(el("label", { for: "cgBankSearch", text: "СКЛАД" }));
+  const searchInput = el("input", { id: "cgBankSearch", type: "text", placeholder: "поиск ресурса…" });
+  searchInput.value = craftGridBankQuery;
+  searchInput.addEventListener("input", (e) => {
+    craftGridBankQuery = e.target.value;
+    openCraftGridModal(craftGridLocationId);
+  });
+  searchRow.appendChild(searchInput);
+  bankPanel.appendChild(searchRow);
+  const bankTiles = el("div", { class: "cg-bank-tiles" });
+  const q = craftGridBankQuery.trim().toLowerCase();
+  entry.bank.filter(b => !q || b.name.toLowerCase().includes(q)).forEach(b => bankTiles.appendChild(craftGridBankTile(b, entry)));
+  if (!bankTiles.children.length) bankTiles.appendChild(el("div", { class: "empty-note", text: "Ничего не найдено." }));
+  bankPanel.appendChild(bankTiles);
+  centerCol.appendChild(bankPanel);
+  body.appendChild(centerCol);
+
+  // -- правая колонка: справочник источников (заглушка, см. отдельную задачу "Справочник") --
+  const sourcesCol = el("div", { class: "cg-col cg-col-sources" });
+  sourcesCol.appendChild(el("div", { class: "cg-heading cg-heading-blueprint", text: "СПРАВОЧНИК ИСТОЧНИКОВ" }));
+  sourcesCol.appendChild(el("div", {
+    class: "cg-sources-stub",
+    text: "Скоро здесь можно будет искать любой предмет игры и узнавать, как его получить - крафтом, постройкой, существом или душой.",
+  }));
+  body.appendChild(sourcesCol);
+
+  overlay.appendChild(modal);
+  overlay.id = "craftGridOverlay";
+  overlay.dataset.locationId = locationId;
+  document.body.appendChild(overlay);
+  if (savedScroll !== null) modal.scrollTop = savedScroll;
+}
+
+function closeCraftGridModal() {
+  const overlay = document.getElementById("craftGridOverlay");
+  if (overlay) overlay.remove();
+}
+
 const ACTION_TABS = [
   ["locations", "Локации"],
   ["build", "Построить"],
@@ -9011,6 +9642,7 @@ function locationItemCount(locId) {
     count += 1; // кнопка "искать" - показывается всегда, как поиск жилы в шахте
     count += VIEW.hunting.mobs.filter(m => m.location === locId && m.is_boss).length;
   }
+  if (loc && loc.crafting) count += 1; // одна кнопка "Открыть верстак"
   return count;
 }
 
@@ -9154,6 +9786,17 @@ function renderLocationsPanel() {
   }
 
   manualActionsAt(currentId).forEach(item => addCard("manual", item));
+  if (loc && loc.crafting) {
+    const card = el("button", { class: "action-card" });
+    card.dataset.search = "открыть верстак";
+    card.appendChild(pixelIcon(ICONS.machine.grid, ICONS.machine.palette, 30));
+    const main = el("div", { class: "main" });
+    main.appendChild(el("div", { class: "name", text: "Открыть верстак" }));
+    main.appendChild(el("div", { class: "desc", text: `Сетка ${loc.crafting.width}×${loc.crafting.height}` }));
+    card.appendChild(main);
+    card.addEventListener("click", () => openCraftGridModal(loc.id));
+    list.appendChild(card);
+  }
   if (loc && loc.is_mine) {
     const card = el("button", { class: "action-card" });
     card.dataset.search = "войти в шахту";
@@ -9329,8 +9972,26 @@ function locationPathTo(locationId) {
 // не на виду - RECIPE_BOARD_BUILDING_ID должен уметь довести игрока до рецепта
 // из ЛЮБОГО места, а не только подсветить то, что и так уже открыто. Если
 // карточка скрыта поиском по локации, поиск сбрасывается, чтобы она стала видна.
+// Сеточное действие (см. crafting_view/VIEW.crafting) больше не карточка в
+// VIEW.categories.manual (см. "Крафт только через раскладывание" в CLAUDE.md) -
+// jumpToAction ищет его тут отдельно, чтобы кнопка "Перейти к рецепту"
+// (costChip.jump_to) на ресурсе, чей единственный рецепт живёт на верстаке, не
+// превращалась в тихий no-op.
+function findGridRecipeLocation(actionId) {
+  for (const entry of VIEW.crafting || []) {
+    const recipe = entry.recipes.find(r => r.action_id === actionId);
+    if (recipe) return entry.location_id;
+  }
+  return null;
+}
+
 function jumpToAction(actionId) {
   closeOverlaysForJump();
+  const gridLocationId = findGridRecipeLocation(actionId);
+  if (gridLocationId) {
+    openCraftGridModal(gridLocationId);
+    return;
+  }
   const action = VIEW.categories.manual.find(m => m.id === actionId);
   if (!action) return; // действие сейчас недоступно/не существует - переходить некуда
   const targetPath = locationPathTo(action.location);
