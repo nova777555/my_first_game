@@ -1096,7 +1096,7 @@ def _aggregate_autocraft_demand(
         # РАБОТАЮЩАЯ копия постройки-механизма. requires_tool_tiers автокрафт
         # НАМЕРЕННО не проверяет (прямое пожелание).
         if not _action_building_ok(action, state):
-            failures[resource_id] = AutocraftFailure(resource_id, "building_missing", action["requires_building"])
+            failures[resource_id] = AutocraftFailure(resource_id, "building_missing", action_mechanism_building(action))
             continue
         effective_cost, effective_gain = graph.stats_of[resource_id]
         gain_per_fire = effective_gain[resource_id]
@@ -1802,8 +1802,9 @@ def effective_manual_action_stats(
     chosen_scale: int | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     """Базовые cost/gain ручного действия + множители от купленных улучшений
-    постройки, от которой действие зависит (MANUAL_ACTIONS[id]["requires_building"] -
-    см. _apply_building_upgrades). Именно так улучшения "механизма, который сам по
+    постройки, от которой действие зависит (action_mechanism_building - свой
+    requires_building действия или унаследованный от его локации, см.
+    _apply_building_upgrades). Именно так улучшения "механизма, который сам по
     себе ничего не производит" (пустые produces/consumes у постройки) реально влияют
     на игру: постройка открывает ЛОКАЦИЮ с ручными действиями (см. requires_building
     у локаций), а уже ИХ cost/gain улучшает апгрейд постройки. Действие без
@@ -1838,7 +1839,7 @@ def effective_manual_action_stats(
         multiplier = tool_tier(state, tool_scaling["tool"])
         if multiplier != 1:
             gain = {r: _scale_amount(v, multiplier) for r, v in gain.items()}
-    building_id = action.get("requires_building")
+    building_id = action_mechanism_building(action)
     if building_id:
         purchased = building_upgrades.get(building_id, [])
         gain, cost = _apply_building_upgrades(building_id, purchased, gain, cost, scale_override=chosen_scale)
@@ -1861,7 +1862,7 @@ def manual_action_duration(
     duration = MANUAL_ACTIONS[action_id].get("duration_turns") or 1
     if duration <= 1:
         return duration
-    building_id = MANUAL_ACTIONS[action_id].get("requires_building")
+    building_id = action_mechanism_building(MANUAL_ACTIONS[action_id])
     if not building_id:
         return duration
     if building_upgrades is None:
@@ -1999,12 +2000,34 @@ def set_building_active_count(state: GameState, building_id: str, active_count: 
     return ActionResult(True, f"«{name}»: включено {active_count} из {working}.")
 
 
+def action_mechanism_building(action: dict) -> str | None:
+    """Постройка-механизм, от которой зависит ручное действие: его СОБСТВЕННЫЙ
+    requires_building, а если его нет - requires_building ЛОКАЦИИ, в которой
+    действие лежит (action["location"], только сама локация, не рекурсивно по
+    parent_location). Так рецепты внутри механизма (печь с сеткой, открытая
+    постройкой) автоматически получают и гейт "механизм построен и не сломан", и
+    улучшения этой постройки (_apply_building_upgrades/manual_action_duration/
+    mechanism_scale_cap) - без того, чтобы автор контента прописывал постройку
+    каждому рецепту вручную. Собственный requires_building действия побеждает
+    (например, заклёпка на верстаке зависит от прецизионной мастерской).
+    ЕДИНСТВЕННАЯ точка этого правила в движке - все чтения "постройки действия"
+    идут через неё; content_validation.py держит его копию (держать в паре)."""
+    own = action.get("requires_building")
+    if own:
+        return own
+    location_id = action.get("location")
+    if location_id and location_id in LOCATIONS:
+        return LOCATIONS[location_id].get("requires_building") or None
+    return None
+
+
 def _action_building_ok(action: dict, state: GameState) -> bool:
-    """requires_building ручного действия - необязательный доп. гейт: нужна хотя бы
+    """Постройка-механизм ручного действия (action_mechanism_building - своя или
+    унаследованная от локации) - необязательный доп. гейт: нужна хотя бы
     одна РАБОТАЮЩАЯ (не сломанная целиком) копия конкретной постройки, а не просто
     "когда-то построена". Общий для клика игрока (is_manual_action_unlocked) и
     автокрафта (_aggregate_autocraft_demand, _process_autocraft_jobs)."""
-    req_building = action.get("requires_building")
+    req_building = action_mechanism_building(action)
     return not req_building or working_count(state, req_building) > 0
 
 
@@ -5496,7 +5519,7 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
         if other_id is not None:
             return ActionResult(False, f"В этой локации уже выполняется другое действие: «{MANUAL_ACTIONS[other_id]['name']}».")
     resolved_scale = None
-    building_id = action.get("requires_building")
+    building_id = action_mechanism_building(action)
     if building_id and scale is not None:
         cap = mechanism_scale_cap(building_id, state)
         resolved_scale = max(1, min(int(scale), cap))
@@ -5991,7 +6014,7 @@ def resolve_action_cost(state: GameState, action_type: str, action_id: str, scal
     действия эту функцию не вызывает, там цена и так уже под рукой по месту."""
     if action_type == "manual":
         action = MANUAL_ACTIONS[action_id]
-        building_id = action.get("requires_building")
+        building_id = action_mechanism_building(action)
         resolved_scale = None
         if building_id and scale is not None:
             cap = mechanism_scale_cap(building_id, state)

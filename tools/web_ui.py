@@ -308,11 +308,12 @@ def energy_converter_view(building_id: str) -> dict | None:
 
 
 def _dependent_action_ids(building_id: str) -> list[str]:
-    """Ручные действия, зависящие ОТ ЭТОЙ постройки (requires_building) - обычно
-    действия постройки-"механизма" без единого produces/consumes (см. CLAUDE.md) -
-    именно их cost/gain реально меняют улучшения такой постройки, а не пустые
-    produces/consumes самой постройки."""
-    return [aid for aid, a in MANUAL_ACTIONS.items() if a.get("requires_building") == building_id]
+    """Ручные действия, зависящие ОТ ЭТОЙ постройки (engine.action_mechanism_building -
+    свой requires_building действия или унаследованный от его локации, например все
+    рецепты печи-механизма) - обычно действия постройки-"механизма" без единого
+    produces/consumes (см. CLAUDE.md) - именно их cost/gain реально меняют улучшения
+    такой постройки, а не пустые produces/consumes самой постройки."""
+    return [aid for aid, a in MANUAL_ACTIONS.items() if engine.action_mechanism_building(a) == building_id]
 
 
 def _building_upgrade_snapshot(building_id: str, state: GameState, building_upgrades: dict) -> dict:
@@ -1684,7 +1685,7 @@ def build_view(state: GameState) -> dict:
         # каждое движение ползунка. Для действия без requires_building или без
         # купленного scale-апгрейда это ЭКВИВАЛЕНТНО прежнему поведению
         # (scale_cap == 1 всегда, домножение на 1 - no-op).
-        building_id = action.get("requires_building")
+        building_id = engine.action_mechanism_building(action)
         scale_cap = engine.mechanism_scale_cap(building_id, state) if building_id else 1
         cost, gain = engine.effective_manual_action_stats(aid, state, chosen_scale=1)
         running_job = state.manual_jobs.get(aid)

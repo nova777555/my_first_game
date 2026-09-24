@@ -1832,6 +1832,9 @@ class BreakdownTypesAndToolDurabilityValidationTests(unittest.TestCase):
     def test_action_duration_reduction_requires_a_dependent_multiturn_action(self):
         d = copy.deepcopy(self.data)
         d["manual_actions"]["mechanism_a_delayed_action"]["requires_building"] = None
+        # Иначе действие унаследовало бы mechanism_a от своей локации mechanism_a_loc
+        # (см. engine.action_mechanism_building) и всё ещё считалось бы зависимым.
+        d["manual_actions"]["mechanism_a_delayed_action"]["location"] = "yard"
         errors = cv.validate(d)
         self.assertTrue(any("action_duration_reduction" in e and "многоходовое" in e for e in errors))
 

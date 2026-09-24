@@ -663,12 +663,16 @@ def validate(data: dict) -> list[str]:
                     elif kind == "action_duration_reduction":
                         if not isinstance(value, (int, float)) or isinstance(value, bool) or not (0 < value < 1):
                             errors.append(f"{where}: value для action_duration_reduction должен быть числом от 0 до 1 (не включая 1) - доля сокращения duration_turns")
+                        # Держать в паре с game/engine.py:action_mechanism_building -
+                        # действие зависит от постройки и через СВОЙ requires_building,
+                        # и через requires_building своей локации (рецепты печи-механизма).
                         has_multiturn_dependent = any(
-                            a.get("requires_building") == bid and (a.get("duration_turns") or 1) > 1
+                            (a.get("requires_building") or (locations.get(a.get("location")) or {}).get("requires_building")) == bid
+                            and (a.get("duration_turns") or 1) > 1
                             for a in manual_actions.values()
                         )
                         if not has_multiturn_dependent:
-                            errors.append(f"{where}: action_duration_reduction имеет смысл только у построек, от которых зависит (requires_building) хотя бы одно многоходовое (duration_turns > 1) ручное действие")
+                            errors.append(f"{where}: action_duration_reduction имеет смысл только у построек, от которых зависит (requires_building самого действия или его локации) хотя бы одно многоходовое (duration_turns > 1) ручное действие")
                     elif kind == "automation_slots":
                         if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
                             errors.append(f"{where}: value для automation_slots должен быть положительным числом (АБСОЛЮТНАЯ добавка к вместимости автоматизатора, уровни не складываются - см. game/engine.py:automation_slots_capacity)")
