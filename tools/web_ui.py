@@ -44,7 +44,7 @@ from game import engine  # noqa: E402
 from game.content import (  # noqa: E402
     BREAKDOWN_TYPES, BUILDINGS, COMBAT_SETTINGS, DEFAULT_ACTION_DELAY_MS,
     ENCHANTMENTS, ENERGY_RECIPES, ERAS, GENETIC_TRAITS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
-    MINE_FIELD, MINING_INFO, MOBS, QUESTS, RESOURCE_ICONS, RESOURCE_NAMES, RESOURCE_ORDER,
+    MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, RESOURCE_ICONS, RESOURCE_NAMES, RESOURCE_ORDER,
     RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TOOLS, UI_SOUNDS,
 )
 from game.state import GameState  # noqa: E402
@@ -1349,6 +1349,226 @@ def crafting_view(state: GameState) -> list[dict]:
     return result
 
 
+# ---------- Справочник источников ("Откуда берётся", см. PLAN_grid_crafting.md, этап 5) ----------
+# Всё в этом разделе - ЧИСТО по контенту (не по state) намеренно: справочник
+# отвечает на вопрос "как ВООБЩЕ получить этот ресурс", а не "чем игрок уже
+# владеет прямо сейчас" - то же решение, что recipe_board_target в engine.py
+# делает НАОБОРОТ (см. его комментарий) для другой задачи (навигация только по
+# уже доступному). Поэтому ничего здесь не читает state.techs/state.buildings.
+
+def _amount_display(amount):
+    """Число или диапазон {"min","max"} (см. CLAUDE.md "Случайное количество
+    produce") - справочник показывает оба вида честно, не притворяясь точным
+    числом там, где сам движок его не знает заранее."""
+    if isinstance(amount, dict):
+        return f"{amount['min']}–{amount['max']}"
+    return amount
+
+
+def _plain_cost_list(cost: dict) -> list[dict]:
+    """Как cost_list(cost, state), но без jump_to - клик по ингредиенту в
+    карточке источника ведёт к ЕГО СОБСТВЕННЫМ источникам (см.
+    web_ui.html: openSourceDetail), а не к карточке действия, поэтому
+    навигация jump_to тут не нужна и была бы только лишним полем."""
+    return [{"id": rid, "name": RESOURCE_NAMES[rid], "amount": amt} for rid, amt in cost.items()]
+
+
+def _farm_building_for_species(species_id: str) -> str | None:
+    """Постройка-ферма (breeding_slots > 0), которая расселяет эту особь - см.
+    CLAUDE.md "Разведение существ": совпадение по семейству (species.*.family +
+    buildings.*.breeding_accepts_family), либо ЛЮБАЯ ферма без ограничения по
+    семейству вовсе. Первая подходящая по порядку content.json - справочнику
+    этого достаточно, полный список ферм игрок и так видит в панели построек."""
+    family = SPECIES.get(species_id, {}).get("family")
+    for bid, b in BUILDINGS.items():
+        if not b.get("breeding_slots"):
+            continue
+        accepts = b.get("breeding_accepts_family")
+        if accepts is None or accepts == family:
+            return bid
+    return None
+
+
+def _soul_collector_building_for(soul_id: str) -> str | None:
+    kind = engine.soul_kind(soul_id)
+    for bid, b in BUILDINGS.items():
+        config = b.get("soul_collector")
+        if config and config.get("accepts_kind") == kind:
+            return bid
+    return None
+
+
+def _breeding_station_building() -> str | None:
+    """Постройка-механизм скрещивания (buildings.*.breeding_station) - см.
+    CLAUDE.md "Разведение существ": одна такая на всю игру, сама ферма
+    (пасека) в скрещивании не участвует. Используется, когда мутация не
+    привязана к конкретной постройке (mutations[].requires_building == null -
+    подходит ЛЮБАЯ станция)."""
+    for bid, b in BUILDINGS.items():
+        if b.get("breeding_station"):
+            return bid
+    return None
+
+
+def resource_sources(resource_id: str) -> list[dict]:
+    """Все известные контенту способы получить resource_id - один элемент на
+    каждый источник, по видам из PLAN_grid_crafting.md (этап 5): сеточный
+    крафт и обычное ручное действие (manual_actions), постройка (buildings.
+    produces), особь на ферме (species.produces), душа в синтезаторе
+    (soul_recipes), крафт за энергию (energy_recipes), ритуал
+    (ritual_recipes), шахта (mining_info), лут/душа с моба (mobs.loot/soul_id),
+    приз лутбокса (loot_cases.prizes, с именем квеста-награды, если есть)."""
+    sources: list[dict] = []
+
+    for aid, action in MANUAL_ACTIONS.items():
+        amount = (action.get("gain") or {}).get(resource_id)
+        if not amount:
+            continue
+        pattern = action.get("pattern")
+        entry = {
+            "kind": "grid_craft" if pattern else "manual",
+            "name": action["name"], "action_id": aid, "amount": _amount_display(amount),
+            "cost": _plain_cost_list(action.get("cost", {})),
+        }
+        chance = (action.get("gain_chance") or {}).get(resource_id)
+        if chance is not None and chance < 1:
+            entry["chance"] = chance
+        if pattern:
+            entry["location_id"] = action.get("location")
+        sources.append(entry)
+
+    # spawn_species - генетически НЕЗАВИСИМОЕ от gain поле (см. CLAUDE.md,
+    # do_manual_action): ловля дикой особи, отдельный проход по MANUAL_ACTIONS,
+    # а не ветка внутри цикла выше - id вида не копится в state.resources как
+    # обычный ресурс, поэтому пересечение с проверкой gain там было бы лишним.
+    for aid, action in MANUAL_ACTIONS.items():
+        if action.get("spawn_species") != resource_id:
+            continue
+        sources.append({
+            "kind": "spawn", "name": action["name"], "action_id": aid,
+            "location_id": action.get("location"), "amount": 1,
+            "cost": _plain_cost_list(action.get("cost", {})),
+        })
+
+    for mutation in MUTATIONS:
+        for outcome in mutation.get("outcomes", []):
+            if outcome.get("species_id") != resource_id:
+                continue
+            building_id = mutation.get("requires_building") or _breeding_station_building()
+            entry = {
+                "kind": "breeding",
+                "name": f"Скрещивание: {RESOURCE_NAMES[mutation['parent_a']]} × {RESOURCE_NAMES[mutation['parent_b']]}",
+                "building_id": building_id, "amount": 1,
+            }
+            chance = mutation.get("chance")
+            if chance is not None and chance < 1:
+                entry["chance"] = chance
+            sources.append(entry)
+
+    for bid, b in BUILDINGS.items():
+        amount = (b.get("produces") or {}).get(resource_id)
+        if not amount:
+            continue
+        sources.append({
+            "kind": "building", "name": b["name"], "building_id": bid,
+            "amount": _amount_display(amount), "cost": _plain_cost_list(b.get("consumes", {})),
+        })
+
+    for sid, sp in SPECIES.items():
+        amount = (sp.get("produces") or {}).get(resource_id)
+        if not amount:
+            continue
+        farm_id = _farm_building_for_species(sid)
+        farm_name = BUILDINGS.get(farm_id, {}).get("name", "Ферма")
+        sources.append({
+            "kind": "creature", "name": f"{farm_name}: {RESOURCE_NAMES[sid]}",
+            "building_id": farm_id, "species_id": sid, "amount": _amount_display(amount),
+        })
+
+    for soul_id, recipe in SOUL_RECIPES.items():
+        amount = (recipe.get("produces") or {}).get(resource_id)
+        if not amount:
+            continue
+        building_id = _soul_collector_building_for(soul_id)
+        building_name = BUILDINGS.get(building_id, {}).get("name", "Синтезатор душ")
+        entry = {
+            "kind": "soul", "name": f"{building_name}: {RESOURCE_NAMES[soul_id]}",
+            "building_id": building_id, "soul_id": soul_id, "amount": _amount_display(amount),
+        }
+        chance = (recipe.get("produces_chance") or {}).get(resource_id)
+        if chance is not None and chance < 1:
+            entry["chance"] = chance
+        sources.append(entry)
+
+    for rid, recipe in ENERGY_RECIPES.items():
+        amount = (recipe.get("produces") or {}).get(resource_id)
+        if not amount:
+            continue
+        sources.append({
+            "kind": "energy", "name": recipe["name"], "action_id": rid,
+            "amount": _amount_display(amount), "cost": _plain_cost_list(recipe.get("consumes", {})),
+        })
+
+    for rid, recipe in RITUAL_RECIPES.items():
+        amount = (recipe.get("produces") or {}).get(resource_id)
+        if not amount:
+            continue
+        entry = {
+            "kind": "ritual", "name": recipe["name"], "action_id": rid,
+            "building_id": recipe.get("requires_building"), "amount": _amount_display(amount),
+        }
+        chance = (recipe.get("produces_chance") or {}).get(resource_id)
+        if chance is not None and chance < 1:
+            entry["chance"] = chance
+        sources.append(entry)
+
+    mining = MINING_INFO.get(resource_id)
+    if mining:
+        sources.append({"kind": "mining", "name": "Шахта", "amount": mining.get("base_yield", 1)})
+
+    for mid, mob in MOBS.items():
+        loot_amount = (mob.get("loot") or {}).get(resource_id)
+        if loot_amount:
+            entry = {"kind": "loot", "name": f"Охота: {mob['name']}", "mob_id": mid, "amount": loot_amount}
+            chance = (mob.get("loot_chance") or {}).get(resource_id)
+            if chance is not None and chance < 1:
+                entry["chance"] = chance
+            sources.append(entry)
+        if mob.get("soul_id") == resource_id:
+            sources.append({
+                "kind": "loot", "name": f"Охота: {mob['name']} (душа)", "mob_id": mid,
+                "amount": 1, "chance": mob.get("soul_chance", 1.0),
+            })
+
+    for cid, case in LOOT_CASES.items():
+        matched = next((p for p in case.get("prizes", []) if p.get("resource") == resource_id), None)
+        if not matched:
+            continue
+        quest_name = next((q["name"] for q in QUESTS.values() if q.get("reward_case") == cid), None)
+        name = f"Лутбокс «{case['name']}»"
+        if quest_name:
+            name += f" (награда за квест «{quest_name}»)"
+        sources.append({"kind": "lootbox", "name": name, "case_id": cid, "amount": matched.get("amount", 1)})
+
+    return sources
+
+
+def sources_summary_view() -> list[dict]:
+    """Один элемент на КАЖДЫЙ ресурс, у которого есть хотя бы один известный
+    источник - список для поиска в панели "Справочник источников" (см.
+    web_ui.html: openSourcesModal/renderSourcesList). Считается по запросу
+    (отдельный эндпоинт /api/sources_summary), а не на каждый build_view -
+    незачем пересчитывать это на КАЖДЫЙ клик игрока, справочник по контенту
+    не меняется чаще, чем открывается его же панель."""
+    items = []
+    for rid in RESOURCE_ORDER:
+        srcs = resource_sources(rid)
+        if not srcs:
+            continue
+        items.append({"id": rid, "name": RESOURCE_NAMES[rid], "kinds": sorted({s["kind"] for s in srcs})})
+    return items
+
+
 def build_view(state: GameState) -> dict:
     stock, gen, cons = engine.energy_breakdown(state)
     capacity = engine.energy_capacity(state)
@@ -2067,6 +2287,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, build_view(STATE))
         elif self.path == "/api/saves":
             self._json(200, {"saves": list_saves()})
+        elif self.path == "/api/sources_summary":
+            # Чисто по контенту, не зависит от state - см. sources_summary_view.
+            self._json(200, {"items": sources_summary_view()})
         elif self.path.startswith("/sounds/"):
             self._serve_sound(self.path[len("/sounds/"):])
         else:
@@ -2145,6 +2368,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             result = craft_grid_view(STATE, payload.get("location_id"), placed, times)
             self._json(200, {**result, "state": build_view(STATE)})
+        elif self.path == "/api/sources":
+            # Read-only (см. resource_sources) - как /api/autocraft_preview, не
+            # трогает STATE/save.json и не отдаёт "state" в ответе, за этим не
+            # нужно перерисовывать всю игру.
+            resource_id = payload.get("resource_id")
+            if resource_id not in RESOURCE_NAMES:
+                self._json(400, {"error": "неизвестный ресурс"})
+                return
+            self._json(200, {"resource_id": resource_id, "sources": resource_sources(resource_id)})
         elif self.path == "/api/autocraft_toggle":
             result = engine.toggle_autocraft(STATE)
             save_state(STATE)

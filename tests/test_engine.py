@@ -1869,7 +1869,7 @@ class LocationTests(FixtureTestCase):
 
     def test_manual_actions_at_filters_by_location_and_tech(self):
         s = GameState()
-        self.assertEqual(set(engine.manual_actions_at("yard", s)), {"gather_a", "gather_b"})
+        self.assertEqual(set(engine.manual_actions_at("yard", s)), {"gather_a", "gather_b", "catch_critter_a"})
         self.assertEqual(engine.manual_actions_at("shaft", s), [])  # locked_action требует tech1
         s.techs.add("tech1")
         self.assertEqual(engine.manual_actions_at("shaft", s), ["locked_action"])

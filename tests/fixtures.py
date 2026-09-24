@@ -418,6 +418,13 @@ MANUAL_ACTIONS = {
         "cost": {"raw_a": 1, "raw_b": 1}, "gain": {"grid_mirror_output": 1},
         "pattern": {"rows": ["AB", ".."], "key": {"A": "raw_a", "B": "raw_b"}}, "pattern_mirror": True,
     },
+    # spawn_species (см. CLAUDE.md, do_manual_action) - ловля дикой особи,
+    # НЕЗАВИСИМО от gain (тут его нет вовсе) - для теста справочника источников
+    # (tools/web_ui.py: resource_sources, kind "spawn").
+    "catch_critter_a": {
+        "name": "Поймать дикое существо А", "requires_tech": None, "location": "yard",
+        "cost": {}, "gain": {}, "spawn_species": "critter_a",
+    },
     # Действие БЕЗ узора в той же локации-механизме - остаётся обычной карточкой
     # (см. CLAUDE.md, "два явных переключателя") - для теста, что оно не попадает
     # в grid_actions_at, хотя manual_actions_at его видит как обычно.
@@ -1509,7 +1516,7 @@ _ENGINE_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "GENETICS_SETT
 _WEB_UI_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "LOCATIONS",
                  "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "TOOLS", "RESOURCE_ICONS", "RESOURCE_NAMES",
                  "RESOURCE_ORDER", "TECHS", "RESOURCE_STORAGE", "MOBS", "SKILLS", "SOUL_RECIPES", "RITUAL_RECIPES",
-                 "LOOT_CASES", "QUESTS", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
+                 "LOOT_CASES", "QUESTS", "BREAKDOWN_TYPES", "ENCHANTMENTS", "SPECIES", "MUTATIONS"]
 
 
 def _fixture_values() -> dict:

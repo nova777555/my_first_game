@@ -212,6 +212,19 @@ class BrokenReferenceTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("required_tier" in e for e in errors))
 
+    def test_rejects_malformed_mining_vein_icon(self):
+        # mining_info.*.icon - как ЖИЛА выглядит на поле, отдельно от icon самого
+        # ресурса (icons.resources); проверяется тем же check_icon, что и везде.
+        d = copy.deepcopy(self.data)
+        any_resource = d["resources"][0]["id"]
+        d["mining_info"][any_resource] = {
+            "requires_tech": None, "required_tool": "pickaxe", "required_tier": 1,
+            "rarity": 1, "toughness": 1, "field_cluster_size": [1, 2], "base_yield": 1,
+            "icon": {"grid": ["A"]},  # нет palette
+        }
+        errors = cv.validate(d)
+        self.assertTrue(any("icon" in e for e in errors))
+
     def test_rejects_requires_tool_tiers_pointing_at_unknown_tool(self):
         d = copy.deepcopy(self.data)
         any_action = next(iter(d["manual_actions"]))
@@ -303,6 +316,55 @@ class QuestValidationTests(unittest.TestCase):
         any_q = next(iter(d["quests"]))
         d["quests"][any_q]["conditions"] = [
             {"type": "tool_tier_at_least", "tool": "pickaxe", "amount": 2}
+        ]
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_rejects_manual_action_performed_at_least_referencing_unknown_action(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "manual_action_performed_at_least", "action": "no_such_action", "amount": 1}
+        ]
+        errors = cv.validate(d)
+        self.assertTrue(any("no_such_action" in e for e in errors))
+
+    def test_accepts_manual_action_performed_at_least_with_known_action(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        any_action = next(iter(d["manual_actions"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "manual_action_performed_at_least", "action": any_action, "amount": 1}
+        ]
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_rejects_species_discovered_referencing_unknown_species(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "species_discovered", "species": "no_such_species"}
+        ]
+        errors = cv.validate(d)
+        self.assertTrue(any("no_such_species" in e for e in errors))
+
+    def test_rejects_building_upgrade_purchased_referencing_unknown_upgrade(self):
+        # Постройка известна, но у НЕЁ конкретно такого улучшения нет (ошибка
+        # отдельная от generic "неизвестная постройка" - см. content_validation.py).
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        any_building = next(iter(d["buildings"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "building_upgrade_purchased", "building": any_building, "upgrade": "no_such_upgrade"}
+        ]
+        errors = cv.validate(d)
+        self.assertTrue(any("no_such_upgrade" in e for e in errors))
+
+    def test_accepts_building_upgrade_purchased_with_known_upgrade(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "building_upgrade_purchased", "building": "flaky_typed", "upgrade": "flaky_typed_immune"}
         ]
         errors = cv.validate(d)
         self.assertEqual(errors, [])
@@ -944,13 +1006,6 @@ class ClickDelayValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("click_delay_ms" in e for e in errors))
 
-    def test_rejects_negative_click_delay_on_mining(self):
-        d = copy.deepcopy(self.data)
-        any_ore = next(iter(d["mining_info"]))
-        d["mining_info"][any_ore]["click_delay_ms"] = -50
-        errors = cv.validate(d)
-        self.assertTrue(any("click_delay_ms" in e for e in errors))
-
     def test_accepts_global_default_action_delay_override(self):
         d = copy.deepcopy(self.data)
         d["ui"] = {"default_action_delay_ms": 800}
@@ -1013,6 +1068,20 @@ class SoundValidationTests(unittest.TestCase):
         d = copy.deepcopy(self.data)
         any_action = next(iter(d["manual_actions"]))
         d["manual_actions"][any_action]["sound"] = 123
+        errors = cv.validate(d)
+        self.assertTrue(any("sound" in e for e in errors))
+
+    def test_accepts_valid_sound_filename_on_ritual_recipe(self):
+        d = copy.deepcopy(self.data)
+        any_recipe = next(iter(d["ritual_recipes"]))
+        d["ritual_recipes"][any_recipe]["sound"] = f"{any_recipe}.ogg"
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_rejects_disallowed_extension_in_ritual_recipe_sound(self):
+        d = copy.deepcopy(self.data)
+        any_recipe = next(iter(d["ritual_recipes"]))
+        d["ritual_recipes"][any_recipe]["sound"] = f"{any_recipe}.exe"
         errors = cv.validate(d)
         self.assertTrue(any("sound" in e for e in errors))
 
@@ -1171,66 +1240,72 @@ class RandomProduceRangeValidationTests(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
-class MiningQualityValidationTests(unittest.TestCase):
-    """quality_tiers (mining_info[...].quality_tiers) - веса/множители запаса
-    (size_multiplier)/min_tool_tier для качества найденной жилы, зависящего от
-    тира инструмента."""
+class MiningFieldValidationTests(unittest.TestCase):
+    """toughness/field_cluster_size (mining_info[...]) и mine_field (настройки
+    самого поля шахты - size/dig_tool/cluster_density/rock_*)."""
 
     def setUp(self):
         self.data = fixtures.as_content_dict()
 
-    def _quality_tiers(self, **overrides):
-        tier = {"name": "Бедная", "weight": 1, "size_multiplier": 0.5, "min_tool_tier": 1}
-        tier.update(overrides)
-        return [tier]
-
-    def test_accepts_valid_quality_tiers(self):
-        d = copy.deepcopy(self.data)
-        d["mining_info"]["mineral"]["quality_tiers"] = [
-            {"name": "Бедная", "weight": 1, "size_multiplier": 0.5, "min_tool_tier": 1},
-            {"name": "Богатая", "weight": 1, "size_multiplier": 2, "min_tool_tier": 2},
-        ]
-        errors = cv.validate(d)
+    def test_current_fixture_mining_info_and_mine_field_are_valid(self):
+        errors = cv.validate(copy.deepcopy(self.data))
         self.assertEqual(errors, [])
 
-    def test_missing_quality_tiers_is_fine(self):
+    def test_rejects_non_positive_toughness(self):
         d = copy.deepcopy(self.data)
-        d["mining_info"]["mineral"].pop("quality_tiers", None)
+        d["mining_info"]["mineral"]["toughness"] = 0
         errors = cv.validate(d)
-        self.assertEqual(errors, [])
+        self.assertTrue(any("toughness" in e for e in errors))
 
-    def test_rejects_empty_quality_tiers_list(self):
+    def test_rejects_field_cluster_size_with_min_greater_than_max(self):
         d = copy.deepcopy(self.data)
-        d["mining_info"]["mineral"]["quality_tiers"] = []
+        d["mining_info"]["mineral"]["field_cluster_size"] = [5, 2]
         errors = cv.validate(d)
-        self.assertTrue(any("quality_tiers" in e for e in errors))
+        self.assertTrue(any("field_cluster_size" in e for e in errors))
 
-    def test_rejects_non_positive_weight(self):
+    def test_rejects_missing_mine_field_section(self):
         d = copy.deepcopy(self.data)
-        d["mining_info"]["mineral"]["quality_tiers"] = self._quality_tiers(weight=0)
+        del d["mine_field"]
         errors = cv.validate(d)
-        self.assertTrue(any("weight" in e for e in errors))
+        self.assertTrue(any("mine_field" in e for e in errors))
 
-    def test_rejects_non_positive_size_multiplier(self):
+    def test_rejects_mine_field_dig_tool_referencing_unknown_tool(self):
         d = copy.deepcopy(self.data)
-        d["mining_info"]["mineral"]["quality_tiers"] = self._quality_tiers(size_multiplier=0)
+        d["mine_field"]["dig_tool"] = "does_not_exist"
         errors = cv.validate(d)
-        self.assertTrue(any("size_multiplier" in e for e in errors))
+        self.assertTrue(any("dig_tool" in e for e in errors))
 
-    def test_rejects_min_tool_tier_out_of_range(self):
+    def test_rejects_mine_field_rock_resource_referencing_unknown_resource(self):
         d = copy.deepcopy(self.data)
-        # required_tool у mineral - "pickaxe", в фикстуре у него 3 тира
-        d["mining_info"]["mineral"]["quality_tiers"] = self._quality_tiers(min_tool_tier=99)
+        d["mine_field"]["rock_resource"] = "does_not_exist"
         errors = cv.validate(d)
-        self.assertTrue(any("min_tool_tier" in e for e in errors))
+        self.assertTrue(any("rock_resource" in e for e in errors))
 
-    def test_rejects_pool_with_no_tier_available_at_required_tier(self):
+    def test_rejects_non_positive_mine_field_size(self):
         d = copy.deepcopy(self.data)
-        # required_tier у mineral - 1, но единственный тир качества требует тир 2 -
-        # на пороге открытия добычи розыгрыш качества окажется пустым.
-        d["mining_info"]["mineral"]["quality_tiers"] = self._quality_tiers(min_tool_tier=2)
+        d["mine_field"]["size"] = 0
         errors = cv.validate(d)
-        self.assertTrue(any("не доступен на пороге открытия добычи" in e for e in errors))
+        self.assertTrue(any("mine_field.size" in e for e in errors))
+
+
+class PickaxeMiningTierFieldsValidationTests(unittest.TestCase):
+    """mining_area/mining_power (tools.pickaxe.tiers[...]) - зона удара и урон по
+    клетке поля шахты за клик, необязательные, положительные целые."""
+
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    def test_rejects_non_positive_mining_area(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["pickaxe"]["tiers"][0]["mining_area"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("mining_area" in e for e in errors))
+
+    def test_rejects_non_positive_mining_power(self):
+        d = copy.deepcopy(self.data)
+        d["tools"]["pickaxe"]["tiers"][0]["mining_power"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("mining_power" in e for e in errors))
 
 
 class SpeciesAndBreedingValidationTests(unittest.TestCase):
@@ -1254,6 +1329,11 @@ class SpeciesAndBreedingValidationTests(unittest.TestCase):
         d.pop("species", None)
         d.pop("mutations", None)
         d.pop("genetics", None)
+        # spawn_species (см. MANUAL_ACTIONS["catch_critter_a"] в fixtures.py) ссылается
+        # на вид - без секции species это ЗАКОНОМЕРНО стало бы ошибкой валидации,
+        # но тут проверяется именно "секции species/mutations/genetics опциональны",
+        # а не это отдельное поле - убираем зависящее от неё действие тем же приёмом.
+        d["manual_actions"].pop("catch_critter_a", None)
         errors = cv.validate(d)
         self.assertEqual(errors, [])
 
@@ -1754,6 +1834,206 @@ class BreakdownTypesAndToolDurabilityValidationTests(unittest.TestCase):
         d["manual_actions"]["mechanism_a_delayed_action"]["requires_building"] = None
         errors = cv.validate(d)
         self.assertTrue(any("action_duration_reduction" in e and "многоходовое" in e for e in errors))
+
+    def test_fixture_research_turns_and_research_speed_upgrade_are_valid(self):
+        errors = cv.validate(copy.deepcopy(self.data))
+        self.assertEqual(errors, [])
+
+    def test_research_turns_null_is_fine(self):
+        d = copy.deepcopy(self.data)
+        d["techs"]["tech_tier2_slow"]["research_turns"] = None
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_research_turns_must_be_an_integer_at_least_two(self):
+        d = copy.deepcopy(self.data)
+        d["techs"]["tech_tier2_slow"]["research_turns"] = 1
+        errors = cv.validate(d)
+        self.assertTrue(any("research_turns" in e for e in errors))
+
+    def test_research_speed_value_must_be_a_positive_number(self):
+        d = copy.deepcopy(self.data)
+        d["buildings"]["lab2"]["upgrades"][0]["value"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("research_speed" in e for e in errors))
+
+    def test_research_speed_requires_a_lab_tier_building(self):
+        d = copy.deepcopy(self.data)
+        del d["buildings"]["lab2"]["lab_tier"]
+        errors = cv.validate(d)
+        self.assertTrue(any("research_speed" in e and "лабораторий" in e for e in errors))
+
+
+class CraftingPatternValidationTests(unittest.TestCase):
+    """locations.*.crafting (сетка механизма) + manual_actions.*.pattern (узор).
+
+    Наличие pattern у действия И есть переключатель «крафтится на сетке»: без него
+    действие остаётся обычной карточкой, даже если его локация - механизм.
+    """
+
+    LOC = "workshop_loc"
+
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+        self.data["locations"][self.LOC]["crafting"] = {"width": 3, "height": 3}
+
+    def pattern(self, rows, key):
+        return {"rows": rows, "key": key}
+
+    def apply(self, data, aid, rows, key):
+        """Ставит узор и приводит cost к нему: одна ячейка = одна единица."""
+        action = data["manual_actions"][aid]
+        action["pattern"] = self.pattern(rows, key)
+        cost = {}
+        for row in rows:
+            for ch in row:
+                rid = key.get(ch)
+                if rid:
+                    cost[rid] = cost.get(rid, 0) + 1
+        action["cost"] = cost
+        return action
+
+    def test_accepts_a_valid_pattern(self):
+        d = copy.deepcopy(self.data)
+        self.apply(d, "craft_mid", ["AA.", "AA.", "..."], {"A": "raw_a"})
+        self.assertEqual(cv.validate(d), [])
+
+    def test_rejects_pattern_that_disagrees_with_cost(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["AA.", "...", "..."], {"A": "raw_a"})
+        d["manual_actions"]["craft_mid"]["cost"] = {"raw_a": 4}
+        errors = cv.validate(d)
+        self.assertTrue(any("обязаны совпадать" in e for e in errors))
+
+    def test_rejects_pattern_missing_a_resource_that_cost_has(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_final"]["pattern"] = self.pattern(["AA.", "...", "..."], {"A": "mid"})
+        d["manual_actions"]["craft_final"]["cost"] = {"mid": 2, "raw_b": 1}
+        errors = cv.validate(d)
+        self.assertTrue(any("обязаны совпадать" in e for e in errors))
+
+    def test_action_without_pattern_stays_a_plain_card(self):
+        """Механизм с сеткой не обязывает КАЖДОЕ своё действие быть сеточным."""
+        self.assertEqual(cv.validate(copy.deepcopy(self.data)), [])
+
+    def test_rejects_pattern_when_location_has_no_grid(self):
+        d = copy.deepcopy(self.data)
+        del d["locations"][self.LOC]["crafting"]
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["A..", "...", "..."], {"A": "raw_a"})
+        errors = cv.validate(d)
+        self.assertTrue(any("нет крафт-сетки" in e for e in errors))
+
+    def test_rejects_pattern_of_a_different_size_than_the_grid(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["AA", ".."], {"A": "raw_a"})
+        errors = cv.validate(d)
+        self.assertTrue(any("не совпадает с сеткой" in e for e in errors))
+
+    def test_rejects_rows_of_unequal_length(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["AA.", "..", "..."], {"A": "raw_a"})
+        errors = cv.validate(d)
+        self.assertTrue(any("одной длины" in e for e in errors))
+
+    def test_rejects_unknown_resource_in_key(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["A..", "...", "..."], {"A": "no_such_res"})
+        errors = cv.validate(d)
+        self.assertTrue(any("неизвестный ресурс" in e for e in errors))
+
+    def test_rejects_symbol_missing_from_key(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["AB.", "...", "..."], {"A": "raw_a"})
+        errors = cv.validate(d)
+        self.assertTrue(any("не описан в key" in e for e in errors))
+
+    def test_rejects_unused_key_symbol(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(
+            ["A..", "...", "..."], {"A": "raw_a", "B": "raw_b"}
+        )
+        errors = cv.validate(d)
+        self.assertTrue(any("не встречаются в rows" in e for e in errors))
+
+    def test_rejects_empty_pattern(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["...", "...", "..."], {"A": "raw_a"})
+        errors = cv.validate(d)
+        self.assertTrue(any("узор пуст" in e or "не встречаются в rows" in e for e in errors))
+
+    def test_rejects_dot_as_a_key_symbol(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["A..", "...", "..."], {"A": "raw_a", ".": "raw_b"})
+        errors = cv.validate(d)
+        self.assertTrue(any("ОДНИМ символом" in e for e in errors))
+
+    def test_rejects_two_actions_with_the_same_shape_in_one_location(self):
+        d = copy.deepcopy(self.data)
+        same = self.pattern(["AA.", "...", "..."], {"A": "raw_a"})
+        d["manual_actions"]["craft_mid"]["pattern"] = copy.deepcopy(same)
+        d["manual_actions"]["craft_lucky"]["pattern"] = copy.deepcopy(same)
+        errors = cv.validate(d)
+        self.assertTrue(any("та же форма узора" in e for e in errors))
+
+    def test_shifted_pattern_counts_as_the_same_shape(self):
+        """Пустые края обрезаются, поэтому сдвиг по сетке - не новый рецепт."""
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["AA.", "...", "..."], {"A": "raw_a"})
+        d["manual_actions"]["craft_lucky"]["pattern"] = self.pattern(["...", ".AA", "..."], {"A": "raw_a"})
+        errors = cv.validate(d)
+        self.assertTrue(any("та же форма узора" in e for e in errors))
+
+    def test_same_shape_of_different_resources_is_allowed(self):
+        d = copy.deepcopy(self.data)
+        self.apply(d, "craft_mid", ["AA.", "...", "..."], {"A": "raw_a"})
+        self.apply(d, "craft_lucky", ["AA.", "...", "..."], {"A": "raw_b"})
+        self.assertEqual(cv.validate(d), [])
+
+    def test_same_shape_in_different_locations_is_allowed(self):
+        d = copy.deepcopy(self.data)
+        d["locations"]["mechanism_a_loc"]["crafting"] = {"width": 3, "height": 3}
+        self.apply(d, "craft_mid", ["AA.", "...", "..."], {"A": "raw_a"})
+        self.apply(d, "mechanism_a_action", ["AA.", "...", "..."], {"A": "raw_a"})
+        self.assertEqual(cv.validate(d), [])
+
+    def test_mirror_flag_makes_the_mirrored_shape_taken_too(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern"] = self.pattern(["AB.", "...", "..."], {"A": "raw_a", "B": "raw_b"})
+        d["manual_actions"]["craft_mid"]["pattern_mirror"] = True
+        d["manual_actions"]["craft_lucky"]["pattern"] = self.pattern(["BA.", "...", "..."], {"A": "raw_a", "B": "raw_b"})
+        errors = cv.validate(d)
+        self.assertTrue(any("та же форма узора" in e for e in errors))
+
+    def test_rejects_mirror_flag_without_a_pattern(self):
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["craft_mid"]["pattern_mirror"] = True
+        errors = cv.validate(d)
+        self.assertTrue(any("pattern_mirror" in e for e in errors))
+
+    def test_rejects_bad_grid_size(self):
+        for width in (0, 10, "3", 2.5):
+            with self.subTest(width=width):
+                d = copy.deepcopy(self.data)
+                d["locations"][self.LOC]["crafting"]["width"] = width
+                errors = cv.validate(d)
+                self.assertTrue(any("crafting.width" in e for e in errors))
+
+    def test_rejects_crafting_that_is_not_an_object(self):
+        d = copy.deepcopy(self.data)
+        d["locations"][self.LOC]["crafting"] = 3
+        errors = cv.validate(d)
+        self.assertTrue(any("crafting" in e for e in errors))
+
+    def test_pattern_shape_trims_empty_edges(self):
+        shape = cv.pattern_shape({"rows": ["...", ".A.", "..."], "key": {"A": "raw_a"}})
+        self.assertEqual(shape, (("raw_a",),))
+
+    def test_pattern_shape_of_an_empty_grid_is_empty(self):
+        self.assertEqual(cv.pattern_shape({"rows": ["...", "...", "..."], "key": {"A": "raw_a"}}), ())
+
+    def test_mirror_shape_flips_horizontally(self):
+        shape = cv.pattern_shape({"rows": ["AB.", "...", "..."], "key": {"A": "raw_a", "B": "raw_b"}})
+        self.assertEqual(cv.mirror_shape(shape), (("raw_b", "raw_a"),))
 
 
 if __name__ == "__main__":
