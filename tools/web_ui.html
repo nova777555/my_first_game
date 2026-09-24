@@ -2698,6 +2698,10 @@
   .cg-cell.ghost-missing .cg-icon-wrap { opacity: .4; filter: grayscale(1); }
   .cg-cell.ghost-out { box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); background-color: rgba(0,0,0,.3); }
   .cg-cell.ghost-ok .cg-icon-wrap { opacity: .75; }
+  /* Метка "!" на ячейке, которую нечем было заполнить при частичном переносе
+     (см. craftGridRenderCellContent/craftGridPartialLay) - ячейка остаётся
+     пустой (без иконки), просто обведена красным с этой меткой в углу. */
+  .cg-cell-mark { position: absolute; right: 3px; top: 1px; font-family: Consolas, monospace; font-size: 11px; font-weight: 700; color: var(--danger); }
   .cg-arrow { color: var(--accent); display: flex; align-items: center; }
   .cg-output {
     position: relative; width: 92px; height: 92px; background: var(--bg);
@@ -9219,6 +9223,19 @@ let craftGridSelected = null;
 let craftGridBatch = 1;
 let craftGridBankQuery = "";
 let craftGridStatus = "";
+// action_id закреплённого рецепта, над плиткой которого сейчас наведена мышь -
+// показывает узор ПРИЗРАКОМ прямо в сетке, полностью перекрывая реальную
+// раскладку на время наведения (см. CLAUDE.md/PLAN_grid_crafting.md, этап 4,
+// "второй коммит"), саму craftGridPlaced не трогает. null - наведения нет.
+let craftGridHoverPinned = null;
+// Плоский узор (см. craftGridFlattenPattern) ПОСЛЕДНЕГО переноса ("Разложить" -
+// клик по закреплённой плитке), даже если перенос вышел частичным - нужен,
+// чтобы после переноса ячейка, которую было НЕЧЕМ заполнить, осталась обведена
+// красным с меткой "!" (а не просто выглядела пустой, как обычная незанятая
+// ячейка) - см. craftGridRenderCellContent. Сбрасывается любым ручным
+// изменением сетки (клик/перетаскивание/очистка) - "!" имеет смысл только
+// СРАЗУ после переноса, пока игрок ничего не трогал руками.
+let craftGridLastLaidPattern = null;
 
 function craftGridEntry(locationId) {
   return (VIEW.crafting || []).find(c => c.location_id === locationId) || null;
@@ -9229,6 +9246,8 @@ function craftGridResetPlacement(entry) {
   craftGridSelected = null;
   craftGridBatch = 1;
   craftGridStatus = "";
+  craftGridHoverPinned = null;
+  craftGridLastLaidPattern = null;
 }
 
 // Та же нормализация (обрезка пустых краёв), что game/engine.py:_pattern_shape/
@@ -9328,6 +9347,44 @@ function craftGridMaxRuns(recipe) {
   return Number.isFinite(max) ? Math.max(0, max) : 0;
 }
 
+// Сколько занято на складе И сколько не хватает для плоского узора (patternFlat -
+// тот же формат, что craftGridFlattenPattern: id ресурса в каждой ячейке или
+// null) - общий хелпер для наведения-призрака (ничего не меняет) и частичного
+// переноса (craftGridPartialLay) ниже.
+function craftGridShortfall(patternFlat) {
+  const need = {};
+  patternFlat.forEach(rid => { if (rid) need[rid] = (need[rid] || 0) + 1; });
+  const missing = new Set();
+  Object.keys(need).forEach(rid => {
+    const have = (VIEW.resources && VIEW.resources[rid]) || 0;
+    if (have < need[rid]) missing.add(rid);
+  });
+  return { need, missing };
+}
+
+// "Перенос кладёт только то, что есть на складе" (см. CLAUDE.md/
+// PLAN_grid_crafting.md, этап 4, правило 1 артборда FillHover) - для каждого
+// вида ресурса в узоре заполняет min(нужно, есть на складе) ячеек ПО ПОРЯДКУ
+// (первую нехватку получают самые последние по порядку ячейки этого вида),
+// остальные остаются пустыми. Само по себе НИЧЕГО не списывает - реальное
+// списание происходит на сервере в момент "Скрафтить".
+function craftGridPartialLay(patternFlat) {
+  const { need } = craftGridShortfall(patternFlat);
+  const available = {};
+  Object.keys(need).forEach(rid => {
+    const have = (VIEW.resources && VIEW.resources[rid]) || 0;
+    available[rid] = Math.min(need[rid], have);
+  });
+  const used = {};
+  return patternFlat.map(rid => {
+    if (!rid) return null;
+    used[rid] = used[rid] || 0;
+    if (used[rid] < available[rid]) { used[rid]++; return rid; }
+    used[rid]++;
+    return null;
+  });
+}
+
 async function craftGridSubmit(locationId, placed, times) {
   if (busy) return null;
   busy = true;
@@ -9375,29 +9432,100 @@ function craftGridCellClick(i, entry) {
   if (craftGridSelected == null) craftGridPlaced[i] = null;
   else if (current === craftGridSelected) craftGridPlaced[i] = null;
   else craftGridPlaced[i] = craftGridSelected;
+  craftGridLastLaidPattern = null; // ручная правка отменяет метку "!" от переноса
   openCraftGridModal(craftGridLocationId);
 }
 
-function craftGridCellEl(i, entry, resourceId) {
-  const cell = el("button", { type: "button", class: "cg-cell" + (resourceId ? " filled" : "") });
-  if (resourceId) {
-    const iconDef = resourceIcon(resourceId);
+// Наведённый закреплённый рецепт (см. craftGridHoverPinned) - null, если
+// наведения нет или закреплённый рецепт с тех пор пропал из entry.recipes
+// (контент/тех успели измениться, пока курсор был занесён).
+function craftGridHoverInfo(entry) {
+  if (!craftGridHoverPinned) return null;
+  const recipe = entry.recipes.find(r => r.action_id === craftGridHoverPinned);
+  if (!recipe) return null;
+  const patternFlat = craftGridFlattenPattern(recipe.pattern);
+  return { recipe, patternFlat, shortfall: craftGridShortfall(patternFlat) };
+}
+
+// Перерисовывает СОДЕРЖИМОЕ одной уже существующей ячейки (не создаёт новую
+// кнопку) - используется и при первой сборке сетки, и при наведении/уходе
+// курсора с закреплённой плитки (см. craftGridApplyHoverToDom), где важно НЕ
+// трогать саму плитку под курсором (полная пересборка модалки на mouseenter
+// пересоздала бы её DOM-узел и вызвала гонку mouseenter/mouseleave).
+// hover=null - обычный режим (реальная раскладка craftGridPlaced/пометка "!"
+// последнего переноса), hover={recipe,patternFlat,shortfall} - режим
+// призрака: узор наведённого рецепта ПОЛНОСТЬЮ перекрывает то, что реально
+// разложено (ровно как в design-канвасе Main.dc.html: shown = hoverPattern ?
+// want : c).
+function craftGridRenderCellContent(cell, i, hover) {
+  cell.className = "cg-cell";
+  cell.innerHTML = "";
+  cell.title = "";
+  let icon = null, mark = false;
+  if (hover) {
+    const want = hover.patternFlat[i];
+    if (want) {
+      const missing = hover.shortfall.missing.has(want);
+      cell.classList.add(missing ? "ghost-missing" : "ghost-ok");
+      icon = want;
+    } else {
+      cell.classList.add("ghost-out");
+    }
+  } else {
+    const placedId = craftGridPlaced[i];
+    if (placedId) {
+      cell.classList.add("filled");
+      icon = placedId;
+    } else if (craftGridLastLaidPattern && craftGridLastLaidPattern[i]) {
+      // Перенос был нечем заполнить именно эту ячейку - см. craftGridPartialLay
+      // (правило "перенос кладёт только то, что есть", CLAUDE.md/план, этап 4).
+      cell.classList.add("ghost-missing");
+      mark = true;
+    }
+  }
+  if (icon) {
+    const iconDef = resourceIcon(icon);
     const wrap = el("div", { class: "cg-icon-wrap" });
     if (iconDef) wrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 44));
     cell.appendChild(wrap);
-    const name = RESOURCE_NAME_LOOKUP(resourceId);
-    cell.title = name;
+    cell.title = RESOURCE_NAME_LOOKUP(icon);
   }
+  if (mark) cell.appendChild(el("span", { class: "cg-cell-mark", text: "!" }));
+}
+
+function craftGridCellEl(i, entry, hover) {
+  const cell = el("button", { type: "button" });
+  craftGridRenderCellContent(cell, i, hover);
   cell.addEventListener("dragover", (e) => e.preventDefault());
   cell.addEventListener("drop", (e) => {
     e.preventDefault();
     const rid = e.dataTransfer.getData("text/plain");
     if (!rid) return;
     craftGridPlaced[i] = rid;
+    craftGridLastLaidPattern = null;
     openCraftGridModal(craftGridLocationId);
   });
   cell.addEventListener("click", () => craftGridCellClick(i, entry));
   return cell;
+}
+
+// Перекрашивает уже смонтированную сетку и строку статуса под текущее
+// craftGridHoverPinned - вызывается mouseenter/mouseleave закреплённой
+// плитки НАПРЯМУЮ (без openCraftGridModal), см. комментарий у
+// craftGridRenderCellContent про гонку пересборки под курсором.
+function craftGridApplyHoverToDom() {
+  const overlay = document.getElementById("craftGridOverlay");
+  if (!overlay) return;
+  const entry = craftGridEntry(craftGridLocationId);
+  if (!entry) return;
+  const hover = craftGridHoverInfo(entry);
+  overlay.querySelectorAll(".cg-grid button").forEach((cell, i) => craftGridRenderCellContent(cell, i, hover));
+  const statusEl = overlay.querySelector(".cg-status-line");
+  if (!statusEl) return;
+  if (!hover) { statusEl.textContent = craftGridStatus; return; }
+  statusEl.textContent = hover.shortfall.missing.size
+    ? `Не хватает: ${Array.from(hover.shortfall.missing).map(RESOURCE_NAME_LOOKUP).join(", ")}.`
+    : "Сырья хватает — можно раскладывать.";
 }
 
 // Имя ресурса по id для title-подсказок внутри верстака - банк/сетка приходят
@@ -9417,10 +9545,18 @@ function craftGridPinnedTile(recipe, entry) {
   btn.appendChild(iconWrap);
   const dot = el("span", { class: "cg-pinned-dot " + (recipe.enough ? "ok" : "missing") });
   btn.appendChild(dot);
+  btn.addEventListener("mouseenter", () => { craftGridHoverPinned = recipe.action_id; craftGridApplyHoverToDom(); });
+  btn.addEventListener("mouseleave", () => { craftGridHoverPinned = null; craftGridApplyHoverToDom(); });
   btn.addEventListener("click", () => {
-    craftGridPlaced = craftGridFlattenPattern(recipe.pattern);
+    const patternFlat = craftGridFlattenPattern(recipe.pattern);
+    craftGridPlaced = craftGridPartialLay(patternFlat);
+    craftGridLastLaidPattern = patternFlat;
     craftGridSelected = null;
-    craftGridStatus = `Разложено: ${recipe.name}.`;
+    craftGridHoverPinned = null;
+    const complete = patternFlat.every((want, idx) => !want || craftGridPlaced[idx] === want);
+    craftGridStatus = complete
+      ? `Разложено: ${recipe.name}.`
+      : `Разложено частично: не хватает сырья для «${recipe.name}».`;
     openCraftGridModal(craftGridLocationId);
   });
   wrap.appendChild(btn);
@@ -9507,10 +9643,11 @@ function openCraftGridModal(locationId) {
   // -- центральная колонка: сетка + банк --
   const centerCol = el("div", { class: "cg-col cg-col-center" });
   const matched = craftGridMatchRecipe(entry, craftGridPlaced);
+  const initialHover = craftGridHoverInfo(entry);
 
   const stage = el("div", { class: "cg-stage" });
   const gridEl = el("div", { class: "cg-grid", style: `grid-template-columns: repeat(${entry.width}, minmax(0, 1fr));` });
-  craftGridPlaced.forEach((rid, i) => gridEl.appendChild(craftGridCellEl(i, entry, rid)));
+  craftGridPlaced.forEach((rid, i) => gridEl.appendChild(craftGridCellEl(i, entry, initialHover)));
   stage.appendChild(gridEl);
   const arrowSvg = svgEl("svg", { width: "38", height: "20", viewBox: "0 0 38 20", fill: "none" });
   arrowSvg.appendChild(svgEl("path", { d: "M2 10h30M25 3l8 7-8 7", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "square" }));
@@ -9576,7 +9713,12 @@ function openCraftGridModal(locationId) {
     class: "cg-batch-note",
     text: matched ? (maxRuns > 0 ? `сырья хватит на ${maxRuns} раз` : "сырья не хватает даже на один раз") : "",
   }));
-  centerCol.appendChild(el("div", { class: "cg-status-line", text: craftGridStatus }));
+  const initialStatusText = initialHover
+    ? (initialHover.shortfall.missing.size
+        ? `Не хватает: ${Array.from(initialHover.shortfall.missing).map(RESOURCE_NAME_LOOKUP).join(", ")}.`
+        : "Сырья хватает — можно раскладывать.")
+    : craftGridStatus;
+  centerCol.appendChild(el("div", { class: "cg-status-line", text: initialStatusText }));
 
   const bankPanel = el("div", { class: "cg-bank-panel" });
   const searchRow = el("div", { class: "cg-bank-search-row" });
