@@ -379,6 +379,137 @@ class ConverterOrderTests(OrdersTestCase):
         self.assertEqual((s.energy_jobs, s.orders), ([], []))
 
 
+class ConverterRecipeOrderTests(OrdersTestCase):
+    """«Заказать ×N» рецепта преобразователя (ключ "energy_recipe:<id>"): N - партии."""
+
+    def conv_state(self, **kw):
+        buildings = {"energy_converter": 2, "cpu": 1, "e_gen": 1, "e_bank": 1}
+        buildings.update(kw.pop("buildings", {}))
+        return GameState(buildings=buildings, building_upgrades={"energy_converter": ["conv_auto"]}, **kw)
+
+    def test_order_runs_n_batches_in_converter_slots(self):
+        s = self.conv_state(resources={"energy": 100})
+        # 2 слота, порог 10 при 4 энергии/ход: 2 круга по 3 хода
+        self.assertEqual(engine.converter_eta_turns(s, "make_raw_b", 3), 6)
+        result = engine.order_recipe(s, "energy_recipe:make_raw_b", 3)
+        self.assertTrue(result.ok, result.message)
+        (order,) = s.orders
+        self.assertEqual(order["label"], "«Сделать сырьё B из энергии» ×3")
+        self.assertEqual(order["steps"][0]["kind"], "energy")
+        self.turns(s, 5)
+        self.assertEqual(len(s.orders), 1)
+        self.turns(s, 1)
+        self.assertEqual((s.orders, s.resources.get("raw_b")), ([], 3))
+
+    def test_order_reserves_consumes_and_uses_the_recipe_machine(self):
+        s = GameState(
+            resources={"raw_a": 12}, buildings={"matter_generator": 1, "cpu": 1},
+            building_upgrades={"matter_generator": ["matter_auto"]},
+        )
+        result = engine.order_recipe(s, "energy_recipe:upgrade_matter", 2)
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual((s.orders[0]["reserved"], s.resources["raw_a"]), ({"raw_a": 10}, 2))
+        engine._process_orders(s, engine.ProductionReport(), {})
+        self.assertEqual([j["building_id"] for j in s.energy_jobs], ["matter_generator"])
+
+    def test_random_output_counts_batches_not_units(self):
+        s = GameState(resources={"energy": 100}, buildings={"conv_asm": 1, "cpu": 1, "e_bank": 1})
+        self.assertTrue(engine.order_recipe(s, "energy_recipe:make_variable", 2).ok)
+        engine._process_orders(s, engine.ProductionReport(), {})
+        self.assertEqual((s.orders, s.resources["energy"]), ([], 90))  # ровно 2 партии по 5
+        self.assertTrue(6 <= s.resources["variable_output"] <= 14)
+
+    def test_needs_converter_automation(self):
+        s = GameState(buildings={"energy_converter": 1, "cpu": 1})
+        result = engine.order_recipe(s, "energy_recipe:make_raw_b", 1)
+        self.assertFalse(result.ok)
+        self.assertIn("«Автоматизация» постройки", result.message)
+        self.assertEqual(engine.check_order(s, "energy_recipe:make_raw_b", 1).reason, "not_automated")
+
+    def test_locked_recipe_cannot_be_ordered(self):
+        engine.ENERGY_RECIPES = copy.deepcopy(engine.ENERGY_RECIPES)
+        engine.ENERGY_RECIPES["make_raw_b"]["requires_tech"] = "t_locked"
+        s = self.conv_state()
+        self.assertIn("ещё не открыт", engine.order_recipe(s, "energy_recipe:make_raw_b", 1).message)
+        self.assertEqual(engine.check_order(s, "energy_recipe:make_raw_b", 1).reason, "tech_locked")
+        self.assertFalse(engine.order_recipe(s, "energy_recipe:no_such", 1).ok)
+
+    def test_orders_view_marks_batch_steps(self):
+        s = self.conv_state()
+        engine.order_recipe(s, "energy_recipe:make_raw_b", 2)
+        (step,) = engine.orders_view(s)[0]["steps"]
+        self.assertEqual((step["batches_of"], step["total"]), ("make_raw_b", 2))
+
+
+class ConverterFallbackTests(OrdersTestCase):
+    """raw_b делается и обычным рецептом (m_make_b в механизме m_loc из raw_a), и на
+    преобразователе (make_raw_b): заказ берёт обычный, а если он невозможен -
+    преобразователь."""
+
+    def setUp(self):
+        super().setUp()
+        engine.MANUAL_ACTIONS = {
+            **engine.MANUAL_ACTIONS,
+            "m_make_b": _action("Тест: B в механизме", "m_loc", {"raw_a": 2}, {"raw_b": 1}),
+            "m_use_b": _action("Тест: из B", "m_loc", {"raw_b": 1}, {"b_top": 1}),
+        }
+        engine.RESOURCE_NAMES = {**engine.RESOURCE_NAMES, "b_top": "Тест-итог из B"}
+
+    def state(self, mech_auto=True, conv_auto=True, **kw):
+        upgrades = {}
+        if mech_auto:
+            upgrades["m_mech"] = ["m_auto"]
+        if conv_auto:
+            upgrades["energy_converter"] = ["conv_auto"]
+        return GameState(
+            buildings={"m_mech": 1, "cpu": 1, "energy_converter": 1, "e_gen": 1, "e_bank": 1},
+            building_upgrades=upgrades, **kw,
+        )
+
+    def step_kinds(self, s, cost):
+        failure, plan = engine._plan_order(s, cost)
+        self.assertIsNone(failure)
+        return [(st["kind"], st.get("action_id") or st.get("recipe_id")) for st in plan["steps"]]
+
+    def test_ordinary_recipe_comes_first(self):
+        s = self.state(resources={"raw_a": 10})
+        self.assertEqual(self.step_kinds(s, {"raw_b": 2}), [("action", "m_make_b")])
+
+    def test_converter_when_raw_material_is_missing(self):
+        s = self.state()
+        self.assertEqual(self.step_kinds(s, {"raw_b": 2}), [("energy", "make_raw_b")])
+
+    def test_converter_when_mechanism_is_not_automated(self):
+        s = self.state(mech_auto=False, resources={"raw_a": 10})
+        self.assertEqual(self.step_kinds(s, {"raw_b": 2}), [("energy", "make_raw_b")])
+
+    def test_failure_explains_the_ordinary_path_when_converter_fails_too(self):
+        s = self.state(conv_auto=False)
+        failure, _ = engine._plan_order(s, {"raw_b": 2})
+        self.assertEqual((failure.resource_id, failure.reason), ("raw_a", "no_recipe"))
+
+    def test_chain_through_the_converter_finishes(self):
+        s = self.state()
+        result = engine.order_recipe(s, "m_use_b", 2)
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(
+            [(st["kind"], st["resource_id"]) for st in s.orders[0]["steps"]], [("energy", "raw_b"), ("action", "b_top")],
+        )
+        for _ in range(12):
+            if not s.orders:
+                break
+            engine.advance_turn(s)
+        self.assertEqual((s.orders, s.resources.get("b_top"), s.resources.get("raw_b", 0)), ([], 2, 0))
+
+    def test_preview_follows_the_same_route(self):
+        s = self.state()
+        (node,) = engine.autocraft_preview(s, {"raw_b": 2})["nodes"]
+        self.assertEqual((node["energy_recipe_id"], node["action_id"], node["fires"]), ("make_raw_b", None, 2))
+        s.resources["raw_a"] = 10
+        (node,) = engine.autocraft_preview(s, {"raw_b": 2})["nodes"]
+        self.assertEqual((node["energy_recipe_id"], node["action_id"]), (None, "m_make_b"))
+
+
 class ViewAndEstimateTests(OrdersTestCase):
     def test_orders_view(self):
         s = self.mech_state(resources={"raw_a": 5})
