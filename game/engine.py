@@ -2184,15 +2184,63 @@ def grid_actions_at(location_id: str, state: GameState) -> list[str]:
     return [a for a in manual_actions_at(location_id, state) if is_grid_action(a)]
 
 
-def match_grid(state: GameState, location_id: str, placed: list) -> str | None:
+def energy_recipe_pattern(recipe_id: str) -> dict | None:
+    """energy_recipes.*.pattern - узор рецепта крафта за энергию в сетке
+    преобразователя (CONVERTER_LOCATION_ID), слой НАД consumes ровно так же, как
+    manual_actions.*.pattern над cost: узор решает, КАКОЙ рецепт собран, а
+    списывает start_energy_recipe всё равно consumes (валидатор требует их
+    точного совпадения). Автокрафт и автоматизатор узор не читают вовсе."""
+    return ENERGY_RECIPES[recipe_id].get("pattern")
+
+
+def grid_energy_recipes_at(location_id: str, state: GameState) -> list[str]:
+    """Открытые рецепты крафта за энергию с узором, которые собираются в сетке
+    ЭТОЙ локации - только у преобразователя (у energy_recipes нет своего поля
+    location: все они запускаются из CONVERTER_LOCATION_ID) и только если у него
+    есть сетка (locations.converter.crafting)."""
+    if location_id != CONVERTER_LOCATION_ID or location_crafting(location_id) is None:
+        return []
+    return [rid for rid in available_energy_recipes(state) if energy_recipe_pattern(rid) is not None]
+
+
+# state.pinned_recipes хранит строки: id сеточного ручного действия как есть (так
+# было с самого начала - старые сохранения не мигрируются) или "energy_recipe:<id>"
+# для рецепта крафта за энергию - id двух разделов content.json друг от друга
+# не зависят и могут совпасть, префикс не даёт им перепутаться.
+ENERGY_RECIPE_KEY_PREFIX = "energy_recipe:"
+
+
+def grid_recipe_key(kind: str, target_id: str) -> str:
+    """Ключ сеточного рецепта (kind - из AUTOMATION_TARGET_KINDS) в
+    state.pinned_recipes и в ответах HTTP."""
+    return ENERGY_RECIPE_KEY_PREFIX + target_id if kind == "energy_recipe" else target_id
+
+
+def parse_grid_recipe_key(key: str) -> tuple[str, str]:
+    """Обратное к grid_recipe_key: (kind, target_id). Существование id не проверяет."""
+    if key.startswith(ENERGY_RECIPE_KEY_PREFIX):
+        return "energy_recipe", key[len(ENERGY_RECIPE_KEY_PREFIX):]
+    return "manual_action", key
+
+
+def _shape_matches(pattern: dict, mirror: bool, normalized: tuple) -> bool:
+    shape = _pattern_shape(pattern)
+    if shape == normalized:
+        return True
+    return mirror and tuple(tuple(reversed(row)) for row in shape) == normalized
+
+
+def match_grid_target(state: GameState, location_id: str, placed: list) -> tuple[str, str] | None:
     """Принимает раскладку игрока на сетке локации-механизма (список длиной
-    width*height: id ресурса в ячейке или None) и возвращает id собранного
-    действия, либо None, если сетки у локации нет, раскладка пуста или не
-    совпала ни с одним узором ОТКРЫТОГО действия этой локации (is_manual_action_unlocked -
-    иначе игрок мог бы собрать рецепт технологии, которую ещё не исследовал).
-    Матчит только действия ЭТОЙ локации - сетка соседнего механизма своих
-    рецептов сюда не приносит (см. CLAUDE.md, план сеточного крафта, раздел 4).
-    Учитывает pattern_mirror - зеркальный по горизонтали узор тоже засчитывается."""
+    width*height: id ресурса в ячейке или None) и возвращает собранный рецепт
+    как (kind, id) - kind из AUTOMATION_TARGET_KINDS: сеточное ручное действие
+    или рецепт крафта за энергию (только в преобразователе, см.
+    grid_energy_recipes_at). None - если сетки у локации нет, раскладка пуста
+    или не совпала ни с одним узором ОТКРЫТОГО рецепта этой локации (иначе игрок
+    мог бы собрать рецепт технологии, которую ещё не исследовал). Матчит только
+    рецепты ЭТОЙ локации - сетка соседнего механизма своих рецептов сюда не
+    приносит. Учитывает pattern_mirror - зеркальный по горизонтали узор тоже
+    засчитывается."""
     crafting = location_crafting(location_id)
     if crafting is None:
         return None
@@ -2200,12 +2248,19 @@ def match_grid(state: GameState, location_id: str, placed: list) -> str | None:
     if not normalized:
         return None
     for action_id in grid_actions_at(location_id, state):
-        shape = _pattern_shape(action_pattern(action_id))
-        if shape == normalized:
-            return action_id
-        if MANUAL_ACTIONS[action_id].get("pattern_mirror") and tuple(tuple(reversed(row)) for row in shape) == normalized:
-            return action_id
+        if _shape_matches(action_pattern(action_id), bool(MANUAL_ACTIONS[action_id].get("pattern_mirror")), normalized):
+            return "manual_action", action_id
+    for recipe_id in grid_energy_recipes_at(location_id, state):
+        if _shape_matches(energy_recipe_pattern(recipe_id), bool(ENERGY_RECIPES[recipe_id].get("pattern_mirror")), normalized):
+            return "energy_recipe", recipe_id
     return None
+
+
+def match_grid(state: GameState, location_id: str, placed: list) -> str | None:
+    """То же, что match_grid_target, но только сеточные ручные действия: id
+    действия или None (в том числе когда раскладка собрала рецепт за энергию)."""
+    target = match_grid_target(state, location_id, placed)
+    return target[1] if target and target[0] == "manual_action" else None
 
 
 def current_time(state: GameState) -> dict:
@@ -5416,10 +5471,19 @@ def toggle_pinned_recipe(state: GameState, action_id: str) -> ActionResult:
     if action_id in state.pinned_recipes:
         state.pinned_recipes.remove(action_id)
         return ActionResult(True, "Рецепт откреплён.")
-    if action_id not in MANUAL_ACTIONS or not is_grid_action(action_id):
-        return ActionResult(False, "Это не сеточный рецепт.")
+    # action_id - ключ сеточного рецепта (grid_recipe_key): id ручного действия
+    # или "energy_recipe:<id>" для рецепта преобразователя с узором.
+    kind, target_id = parse_grid_recipe_key(action_id)
+    if kind == "energy_recipe":
+        if target_id not in ENERGY_RECIPES or energy_recipe_pattern(target_id) is None:
+            return ActionResult(False, "Это не сеточный рецепт.")
+        name = ENERGY_RECIPES[target_id]["name"]
+    else:
+        if target_id not in MANUAL_ACTIONS or not is_grid_action(target_id):
+            return ActionResult(False, "Это не сеточный рецепт.")
+        name = MANUAL_ACTIONS[target_id]["name"]
     state.pinned_recipes.append(action_id)
-    return ActionResult(True, f"Закреплено: {MANUAL_ACTIONS[action_id]['name']}.")
+    return ActionResult(True, f"Закреплено: {name}.")
 
 
 def toggle_autocraft(state: GameState) -> ActionResult:
