@@ -9,12 +9,21 @@ Guidance for Claude Code в этом репозитории. **Держи это
 "Майнкрафт на минималках" — пошаговая idle/incremental игра: руби дерево,
 стройте генераторы, исследуй технологии, копай руду в шахте.
 
-Три интерфейса поверх одного `save.json`:
+Три интерфейса поверх одного `saves/autosave.json`:
 - `python tools/web_ui.py` (http://127.0.0.1:8790) — **единственный интерфейс,
   которым реально пользуется игрок.** Логика в `tools/web_ui.py` +
   `tools/web_ui.html`. Открывается в отдельном окне (pywebview), не в
   системном браузере — HTTP-сервер при этом всё равно поднят и на том же
-  адресе, страницу можно открыть и вручную в браузере.
+  адресе, страницу можно открыть и вручную в браузере. **Для проверки через
+  Playwright** запускай с флагом `--server-only` (`python tools/web_ui.py
+  --server-only`, аналогично `content_editor.py`) — это пропускает
+  `webview.create_window`/`webview.start()` и сразу отдаёт сервер. Без флага
+  playwright всё равно не смог бы управлять нативным окном pywebview и
+  пришлось бы ОТДЕЛЬНО открывать страницу его собственным браузером — игра
+  визуально запускалась бы дважды (нативное окно + браузер playwright) и
+  дольше стартовала (лишняя инициализация WebView2). Сервер сам остановится
+  через 45с без heartbeat от закрытой вкладки (`_watchdog`), но это не
+  освобождает от явного `TaskStop`/закрытия процесса, если тест упал раньше.
 - `python tools/content_editor.py` (http://127.0.0.1:8765) — GUI-редактор
   `content.json`. Тоже отдельное окно pywebview, тот же приём, что у web_ui.
   Есть переносимая exe-сборка (`build_content_editor.ps1` →
@@ -29,8 +38,13 @@ Guidance for Claude Code в этом репозитории. **Держи это
   Тривиальную правку (пара строк, без отдельного дизайна) в `main.py` можно
   делать заодно, но никогда не обязательно.
 
-Кроме автосохранения `save.json` есть `saves/` — именованные сохранения
-("Сохранить как"/"Открыть", явный выбор игрока в обоих интерфейсах).
+Автосохранение живёт в `saves/autosave.json` — в той же папке `saves/`, что и
+именованные сохранения ("Сохранить как"/"Открыть", явный выбор игрока в обоих
+интерфейсах), просто под зарезервированным именем `autosave` (нельзя создать
+именованное сохранение с таким же именем). Раньше автосейв лежал отдельно, в
+корне репозитория (`save.json`) — при первом запуске после переноса старый
+файл сам переезжает в новое место (`_migrate_legacy_save` в `web_ui.py`/
+`main.py`/`content_editor.py`), так что уже начатые партии не теряются.
 
 **Тесты**: `python -m unittest discover tests -v` — все зелёные. Хук
 (`.claude/hooks/run_tests_on_core_edit.py`) гоняет их автоматически после
@@ -93,24 +107,69 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 `manual_actions.*.location` — необязательное поле; `null` = действие в корне
 дерева локаций. Ходить по локациям бесплатно, ход тратит только само действие.
 
+**Крафт на сетке (верстак).** `locations.*.crafting` = `{width, height}` делает
+локацию механизмом-верстаком — произвольные `width`/`height` поддержаны от
+рождения (настоящий верстак 3×3; строка 2×1 и будущий 9×9 «ужасающий верстак»
+не требуют отдельного кода, см. `engine.py: _normalize_grid`/`match_grid`).
+`manual_actions.*.pattern` = `{rows: ["AA.", ...], key: {"A": "ore"}}` — узор
+рецепта, тот же приём «сетка символов + легенда», что у пиксельных иконок;
+необязательный `pattern_mirror: true` засчитывает и зеркальную по горизонтали
+раскладку. Наличие этих полей И ЕСТЬ два явных переключателя: локация без
+`crafting` работает как раньше (список карточек), действие без `pattern`
+внутри механизма тоже остаётся карточкой. Одна ячейка = одна единица ресурса,
+и валидатор ТРЕБУЕТ точного совпадения узора с `cost` — два источника истины
+тут давали бы тихое расхождение (игрок видит узор, движок списывает `cost`).
+Редактор показывает расхождение красной плашкой и даёт кнопку «Записать узор
+в cost».
+
+Сеточные действия физически убраны из `VIEW.categories.manual` — граница
+«крафт только через раскладывание» живёт в `tools/web_ui.py: build_view`, НЕ
+в движке: `do_manual_action` по-прежнему выполняет их как обычно, автоматизация
+и докрафт не задеты. Раскладывание и матчинг узора мгновенно считаются на
+клиенте (`web_ui.html: craftGridMatchRecipe`) для отклика, но сервер ВСЕГДА
+перепроверяет сам (`engine.match_grid`) при реальном крафте
+(`POST /api/craft_grid`, крутит цикл «действие + `advance_turn`» `times` раз за
+один запрос). Закреплённые рецепты — `state.pinned_recipes`
+(`engine.toggle_pinned_recipe`, `POST /api/pin_recipe`) — переживают закрытие
+модалки и перезапуск игры; клик по закреплённой плитке кладёт то, что реально
+есть на складе (`craftGridPartialLay`), оставляя недостающие ячейки обведёнными
+красным, наведение красит сетку призраком заранее, ничего не трогая
+(`craftGridApplyHoverToDom`, НЕ через полную пересборку модалки — иначе
+пересозданная под курсором кнопка гонялась бы сама с собой по mouseenter/
+mouseleave).
+
+Справочник источников (`tools/web_ui.py: resource_sources`/
+`sources_summary_view`, `GET /api/sources_summary` + `POST /api/sources`)
+отвечает «откуда берётся» по ЛЮБОМУ ресурсу — не только сеточным рецептам:
+крафт (сеточный и обычный), ловля дикой особи (`spawn_species`), мутация при
+скрещивании, постройка, особь на ферме, душа в синтезаторе, крафт за энергию,
+ритуал, шахта, лут с моба (включая шансовую душу), приз лутбокса (с именем
+квеста-награды). Чисто по контенту, не по `state` — отвечает на «как вообще
+получить», а не «чем я уже владею» (то же решение наоборот, что
+`recipe_board_target` в движке, см. его комментарий). Живёт в правой колонке
+модалки верстака (`web_ui.html: craftGridBuildSourcesPanel`), с поиском,
+фильтром по виду источника и переходом по ингредиентам (история — `sourcesTrail`).
+
 ## Карта: тема → где искать в коде
 
 | Тема | Где искать |
 |---|---|
 | Энергия и хранилища (обрезка в конце хода) | `engine.py`: `ENERGY_RESOURCE_ID`, `energy_capacity`, `is_building_active_now` |
-| Шахта, поиск/добыча жил | `engine.py`: `MINE_LOCATION_ID`, `search_vein_any`, `mine_vein`; `web_ui.py:build_view` (`categories.mining`) |
+| Шахта: fog-of-war сетка, добыча клеток, щуп-детектор (радиус/типы/счёт/полная подсветка) | `engine.py`: `MINE_LOCATION_ID`, `_generate_mine_field`, `hit_mine_field`, `mine_field_view`, `scanner_tier`, `_scanner_sense_radius`; контент `mine_field` (+`scanner_radius_tiers` - список {tier, radius}, действует самый большой разблокированный, не сумма) + `mining_info`; только в web_ui, у `main.py` нет (см. `tools/web_ui.py`: вызовы `engine.hit_mine_field`/`engine.mine_field_view`) |
 | Инструменты и тиры (произвольное число линеек) | `engine.py`: `tool_tier`, `upgrade_tool`, `next_tool_tier_info`, `upgradable_tools`; `web_ui.html: openToolsModal` |
 | Дерево технологий, тиры лабораторий | `engine.py`: `tech_unlocks`, `tech_levels`, `lab_tier_capacity`, `research()`; `web_ui.html: renderTechTree/openTechTreeModal` |
+| Исследование за ходы (research_turns, апгрейд лаборатории research_speed) | `engine.py`: `tech_research_turns`, `research()`, `_process_research`, `cancel_research`; `state.active_research`; контент `techs.*.research_turns` + `buildings.*.upgrades[].type == "research_speed"`; `web_ui.html: researchProgressRow/renderResearchPanel`, `.tech-node.researching` |
 | Улучшения построек (типизированные + repeatable) | `engine.py`: `_apply_building_upgrades`, `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `purchase_building_upgrade`, `building_upgrade_prerequisite`, `effective_building_stats`; `web_ui.html: openBuildingUpgradesModal`; `content_editor.html: openBuildingUpgradesEditorModal` |
 | Охота: мобы/боссы, схватка, боевой навык | `engine.py`: `MOBS`, `COMBAT_SKILL_ID`, `search_mob_any`, `summon_boss`, `attack_encounter`, `abandon_encounter`, `_weapon_bonuses`; `state.active_encounter`; `web_ui.py: hunting_view`; `web_ui.html: renderActiveEncounterBlock` |
 | Разведение существ: фермы, скрещивание, генетика, синтез | `engine.py`: `GENOTYPE_TRAIT_IDS`, `MUTATIONS_BY_PAIR`, `trait_alleles`, `_cross_genotype`, `breed_creatures`, `spawn_creature`, `analyze_creature`, `synthesize_creature`, `_ensure_farm_instances`, `_process_habitat`; `state.creatures`/`state.farm_instances`/`state.known_alleles`; контент `species`/`genetic_traits`/`mutations`/`genetics`; `web_ui.html: renderFarmSection`, `renderCreatureBankSection`, `openSpeciesBookModal`, `openBreedingModal`, `openGeneticsLabModal` |
 | Навыки (generic-прокачка, любое число линеек) | `engine.py`: `skill_level`, `skill_level_effects`, `add_skill_xp`, `skills_view`; `state.skill_xp`; контент `skills`; `web_ui.html: openSkillsModal` |
 | Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_kind`, `soul_collector_accepts_kind`, `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `resources.*.soul_kind` + `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: openSoulSynthesizerModal` |
 | Автоматизатор (правила "если ресурс — тогда действие/рецепт энергокрафта", проверяются каждый ход) | `engine.py`: `automation_slots_capacity`, `is_automation_eligible_action`/`is_automation_eligible_energy_recipe`, `automation_eligible_targets`, `add_automation_rule`/`update_automation_rule`/`remove_automation_rule` (принимают `kind`+`target_id`), `process_automation_rules`; `state.automation_rules`; контент `buildings.*.automation_hub` + апгрейд типа `automation_slots`; `web_ui.py: automation_view`; `web_ui.html: openAutomationModal`/`openAutomationRuleEditorModal` |
-| Квестбук (вкладка-граф на каждую эру, requires между эрами гейтит без явного ребра) и лутбоксы (кейс = один приз из барабана) | `engine.py`: `is_quest_available`, `_condition_met`, `check_quests`, `_roll_loot_case_prize`, `claim_quest_reward`; `state.completed_quests`/`claimed_quests`; контент `quests` (`era`/`requires`) + `loot_cases`; `web_ui.html: openQuestsModal`/`renderQuestGraph`/`openLootBoxModal`; `content_editor.html: renderQuestGraphView` |
+| Квестбук (вкладка-граф на каждую эру, requires между эрами гейтит без явного ребра), оформление эр/квестов и лутбоксы (кейс = один приз из барабана) | `engine.py`: `is_quest_available`, `_condition_met`, `check_quests`, `_roll_loot_case_prize`, `claim_quest_reward`; `state.completed_quests`/`claimed_quests`; контент `quests` (`era`/`requires`/`icon`/`bg`/`border`) + `eras` (`game/content.py: ERAS`) + `loot_cases`; `web_ui.html: openQuestsModal`/`renderQuestGraph`/`eraTheme`/`buildQuestNode`/`openLootBoxModal`; `content_editor.html: renderQuestGraphView`/`renderEraManager` |
 | Repeatable-апгрейды (покупка N раз, цена растёт геометрически) | `engine.py`: `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `building_upgrade_purchase_count`, `farm_instance_upgrade_purchase_count`; контент `upgrades[].repeatable`/`cost_growth`/`max_purchases` |
 | Ползунок масштаба ручного действия | `engine.py`: `mechanism_scale_cap`, `effective_manual_action_stats(chosen_scale=...)`; `POST /api/action {scale}` |
 | Меню "Механизмы": вкл/выкл N из M копий пассивной постройки (produces И consumes непустые) | `state.building_disabled`; `engine.py`: `is_disableable_building`, `building_active_count`, `set_building_active_count`; `POST /api/set_building_active_count`; `web_ui.html: renderMechanismToggle` |
+| Снос постройки (1 копия за вызов, без возврата ресурсов, ход не тратится; сначала сносит сломанную копию, если есть; у ферм/синтезаторов душ/реакторов удаляет весь физический экземпляр, расселяя заселённых особей обратно в банк) | `engine.py: demolish_building`; `POST /api/demolish_building`; `web_ui.html: demolishBuilding` |
 | "Механизмы" (постройка без produces/consumes + завязанные действия) | `locations.*.requires_building`, `manual_actions.*.requires_building`, `engine.py: effective_manual_action_stats` |
 | Дробные/целые ресурсы | `content.json resources.*.fractional`; `engine.py: _round_amounts`; `content.py: RESOURCE_FRACTIONAL` |
 | Приоритет автокрафт-рецептов | `engine.py`: `resource_recipe`, `action_priority`, `set_action_priority`; контент `manual_actions.*.priority`, `state.action_priority` |
@@ -124,9 +183,10 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 | Многоэтапное строительство | контент `buildings.*.construction_stages`; `engine.py`: `current_construction_stage`, `state.construction_progress` |
 | Многоходовые ручные действия | контент `manual_actions.*.duration_turns`; `engine.py`: `do_manual_action`, `_process_manual_jobs`, `cancel_manual_job`; `state.manual_jobs`; `web_ui.html: manualJobProgressRow` (прогресс + отмена и на карточке действия, и в панели «Долгие действия») |
 | Задержка после клика (антиавтокликер, клиент-онли) | контент `ui.default_action_delay_ms` + `click_delay_ms`; `web_ui.html`: `tryRunAction`/`applyCooldownVisual` |
-| Звук: пресеты, кастомные файлы (действия + 3 глобальных слота), громкость | контент `manual_actions.*.sound` + `ui.sounds` (`background_music`/`lootbox_open`/`button_click`); `web_ui.html`: `SOUND_PRESETS`, `playSound`/`playCustomSound`/`playGlobalSound`, `_sfxVolume`/`_musicVolume`; `web_ui.py`: `sound_url`, `SOUNDS_DIR`; `content_editor.html`: `soundRow`, вкладка «Настройки» |
+| Звук: пресеты, кастомные файлы (действия + ритуалы + 3 глобальных слота), громкость | контент `manual_actions.*.sound`/`ritual_recipes.*.sound` + `ui.sounds` (`background_music`/`lootbox_open`/`button_click`); `web_ui.html`: `SOUND_PRESETS`, `playSound`/`playCustomSound`/`playGlobalSound`, `_sfxVolume`/`_musicVolume`; `web_ui.py`: `sound_url`, `SOUNDS_DIR`; `content_editor.html`: `soundRow` (вызывается и на карточке ручного действия, и на карточке ритуала), вкладка «Настройки» |
 | Отмена фоновой задачи | `engine.py`: `cancel_autocraft_job`/`cancel_energy_job`; `web_ui.html: jobCancelButton` |
 | Вложенные локации | контент `locations.*.parent_location`; `engine.py: location_children`; `web_ui.html: locationPath` |
+| Крафт на сетке (верстак): узор, матчинг, перенос, справочник источников | `engine.py`: `location_crafting`, `action_pattern`, `match_grid`, `_normalize_grid`, `toggle_pinned_recipe`; `state.pinned_recipes`; контент `locations.*.crafting` + `manual_actions.*.pattern`/`pattern_mirror`; валидация - `content_validation.py`: `pattern_shape`, `mirror_shape`, `check_action_pattern`; редактор - `content_editor.html`: `craftingGridRow`, `actionPatternRow`, `openPatternModal`; HTTP - `tools/web_ui.py`: `crafting_view`, `craft_grid_view`, `resource_sources`, `sources_summary_view`, `/api/craft_grid`, `/api/pin_recipe`, `/api/sources`, `/api/sources_summary`; UI - `web_ui.html`: `openCraftGridModal`, `craftGridMatchRecipe`, `craftGridApplyHoverToDom`, `craftGridBuildSourcesPanel` |
 | Потолок ресурса (1e9) | `engine.py`: `MAX_RESOURCE_AMOUNT`, `_add_resource` (ЕДИНСТВЕННАЯ точка начисления) |
 | Вместимость склада | контент `resources.*.storage`; `engine.py`: `storage_capacity`, `state.storage_tier`, `upgrade_storage`; `web_ui.html: openStorage` |
 | Подтверждение автокрафта (модалка "спишется/докрафтится") | `engine.py`: `autocraft_preview`, `resolve_action_cost`; `web_ui.py: autocraft_preview_view`; `web_ui.html: openAutocraftConfirmModal` |
@@ -197,7 +257,13 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
   тикает (`state.manual_jobs`, одна активная задача НА action_id) `+1 ход` каждый
   `advance_turn` без учёта пропускной способности — `gain`/`gain_chance` разворачиваются
   РОВНО ОДИН РАЗ в момент завершения. Повторный клик, пока задача не закончилась,
-  ЗАБЛОКИРОВАН (`ActionResult(False, ...)`, хода не тратит). `cancel_manual_job`
+  ЗАБЛОКИРОВАН (`ActionResult(False, ...)`, хода не тратит) — и это распространяется на
+  ЛЮБОЕ другое многоходовое действие той же локации (`action["location"]`, точное
+  совпадение значения, `None` тоже валидная "локация" — корень дерева), не только на
+  тот же `action_id`: пока в локации уже тикает один job, запустить в НЕЙ ЖЕ второй
+  нельзя (`do_manual_action`). Проверка НЕ рекурсивная по `parent_location` — дочерние
+  локации ограничением не связаны (например, многоходовая добыча в шахте не мешает
+  охоте в её подлокации). `cancel_manual_job`
   снимает задачу немедленно (без хода) И ВОЗВРАЩАЕТ игроку весь списанный `cost` —
   в этом её поведение НАМЕРЕННО отличается от `cancel_energy_job`/`cancel_autocraft_job`
   (у тех прогресс/прокрутки потрачены по-настоящему на предыдущих ходах, возврату не
@@ -207,6 +273,30 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
   `build_view`) и в отдельной панели «Долгие действия» (нужна, т.к. действие может
   сейчас идти в другой локации, не видной на экране) — обе точки рендерят один и тот
   же `web_ui.html: manualJobProgressRow`, чтобы не разойтись.
+- **Исследование технологий за ходы** (`techs.*.research_turns`, необязательное
+  поле — отсутствие/`null`/`1` значит "мгновенно", как раньше) списывает `cost`
+  ОДНИМ платежом целиком в момент клика (как многоходовое ручное действие), а
+  при `research_turns >= 2` заводит `state.active_research` вместо немедленного
+  добавления в `state.techs`. В отличие от `manual_jobs` (своя задача НА
+  action_id, несколько РАЗНЫХ действий разных локаций идут параллельно — см. выше
+  про ограничение ОДНОЙ локации), слот ГЛОБАЛЬНЫЙ — один
+  на всю игру, как `state.active_encounter`/`veins`. Переключиться на ДРУГОЕ
+  исследование можно В ЛЮБОЙ момент ОДНИМ кликом — если слот занят чем-то ещё,
+  `research()` сам тихо отменяет старое (`cancel_research` — `cost` возвращается
+  целиком, накопленные `turns_done` нет, тот же принцип, что `cancel_manual_job`)
+  и тут же стартует новое, без отдельного шага "сначала отмените". Порядок
+  внутри `research()` намеренный: cost НОВОЙ технологии списывается ПЕРВЫМ
+  (после проверки `is_tech_available`/`lab_tier_capacity`), и только ПОСЛЕ
+  успешной оплаты отменяется старая — если новую не на что/нечем исследовать,
+  старый прогресс остаётся нетронутым, а не стирается впустую. Повторный клик
+  на ТУ ЖЕ технологию, что уже идёт, — no-op (явный отказ, ничего не
+  переигрывает). Отдельная явная `cancel_research` (кнопка "✕" в UI) по-прежнему
+  работает и без переключения — просто освобождает слот. Сокращает время апгрейд построек
+  типа `research_speed` (`buildings.*.upgrades[].type`) — АБСОЛЮТНОЕ число ходов
+  (не доля, как у `action_duration_reduction`), действует только на техи ТОГО ЖЕ
+  тира, что `lab_tier` этой постройки («лаборатория той же эры»), не «лаборатория
+  тира N и выше», как у `lab_tier_capacity`. Тир 1 своей лаборатории не имеет
+  (см. `lab_tier_capacity`) — тир-1 технологии сократить нельзя в принципе.
 - **Автокрафт выключен по умолчанию** для КАЖДОГО ресурса, включается через
   `unlocks_autocraft` работающей постройки; ограничен `compute_power`
   (размер), `autocraft_speed` (скорость/ход), `autocraft_slots` (параллелизм
@@ -428,18 +518,42 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 
 ## Квестбук и лутбоксы
 
-- Квест (`quests`) — `{name, description, era, requires, conditions, reward_case}`.
-  `requires` ссылается на ДРУГИЕ КВЕСТЫ (не на технологии). `era` — ГРУППИРОВКА
-  В ОТДЕЛЬНЫЕ ГРАФЫ: каждая эра — своя вкладка со своим независимым графом
-  (см. ниже), НЕ колонка одного общего графа (как было раньше и как до сих пор
-  устроено у `techs.*.tier`) и никак не связана с технологиями.
+- Квест (`quests`) — `{name, description, era, requires, conditions, reward_case,
+  icon?, bg?, border?}`. `requires` ссылается на ДРУГИЕ КВЕСТЫ (не на
+  технологии). `era` — ГРУППИРОВКА В ОТДЕЛЬНЫЕ ГРАФЫ: каждая эра — своя вкладка
+  со своим независимым графом (см. ниже), НЕ колонка одного общего графа (как
+  было раньше и как до сих пор устроено у `techs.*.tier`) и никак не связана с
+  технологиями; само число остаётся ключом-позицией (как тир инструмента), а
+  ЕГО ОФОРМЛЕНИЕ (имя вкладки, главный цвет) живёт отдельно в top-level
+  `eras` — `{"<era>": {"name", "color"}}`, необязательный раздел (`game/
+  content.py: ERAS`): у era без записи тут UI сам подставляет дефолт "Эра N" +
+  цикличную палитру (`tierBandColor`/`tierBandColorEditor`), тем самым старый
+  контент без `eras` продолжает работать как раньше. `content_editor.html`
+  держит эту секцию УДОБНОЙ для правки через `renderEraManager` (вкладка
+  "Граф" у квестов) — переименование/перекраска, добавление, реордер (кнопки
+  ↑/↓ — `swapEras`, меняет местами оформление ДВУХ id И `era` у всех их
+  квестов, сам номер остаётся позицией) и удаление (только если ни один квест
+  этой era не использует, см. `eraUsageCount`). `icon`/`bg`/`border` —
+  необязательные per-квестовые оверрайды узла графа: `icon` подменяет значок
+  ТОЛЬКО для статусов `completed`/`claimed` (у `locked`/`available` значок
+  означает статус, а не сам квест), `bg`/`border` подменяют цвет узла целиком
+  вместо цвета, унаследованного от `era`. Оба редактора рисуют эти поля живым
+  превью узла (`content_editor.html` — в самом графе, хотя там нет игрового
+  статуса; `web_ui.html: buildQuestNode` — в реальной игре).
 - `conditions` — форма `{type, ...}` (унаследована от убранной из игры механики
   достижений — она ЦЕЛИКОМ удалена в пользу квестбука; `CONDITION_TYPES`/
   `renderConditions`/`CONDITION_FIELDS`/`_condition_met` — переиспользуемые
   общие имена без "achievement" в названии). Типы: `resource_at_least`,
   `building_count_at_least`, `total_buildings_at_least`, `tech_researched`,
   `tech_count_at_least`, `all_techs_researched`, `turn_at_least`,
-  `tool_tier_at_least`, `species_discovered_at_least`, проверяются через И.
+  `tool_tier_at_least`, `species_discovered_at_least`, `species_discovered`
+  (конкретный вид, а не счётчик — например «вывести/поймать пчелу»),
+  `manual_action_performed_at_least` (действие УСПЕШНО дало результат —
+  `state.action_performed_count`, растёт при начислении gain: на мгновенном
+  клике сразу, на многоходовом — только по завершении job'а, не на старте),
+  `building_upgrade_purchased` (апгрейд куплен хоть раз — `building` +
+  `upgrade`, id улучшения уникален только ВНУТРИ постройки), проверяются
+  через И.
 - `requires` — ГЕЙТ ДОСТУПНОСТИ: `is_quest_available` (буквальная копия
   `is_tech_available`, только сверяется с `state.completed_quests`, а не
   `state.techs`) — квест, у которого хоть один prerequisite ещё не выполнен, не
