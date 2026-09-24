@@ -1116,29 +1116,96 @@ def _aggregate_autocraft_demand(
     return failures, total_needed, fires_map, gain_per_fire_map, resolved_of
 
 
+def _guaranteed_amount(value) -> float:
+    """Сколько produce-значение даёт НАВЕРНЯКА - нижняя граница диапазона
+    {"min","max"} (см. _is_range_amount) или само число. Нужно, чтобы считать
+    число партий "с запасом не в пользу игрока": недобор просто доберётся
+    следующей партией на повторной попытке, а перебор сжёг бы энергию/материал."""
+    return value["min"] if _is_range_amount(value) else value
+
+
+def _start_energy_batches(
+    state: GameState, resource_id: str, needed: float, resources: dict[str, int], energy_jobs: list[dict],
+) -> AutocraftFailure | None:
+    """Запускает столько партий рецепта крафта за энергию, сколько нужно, чтобы
+    покрыть needed (с учётом уже идущих партий ТОГО ЖЕ рецепта), но не больше, чем
+    есть свободных преобразователей подходящего типа - по одной партии на свободный
+    слот, параллельно, а не одну за раз. Преобразователи достаются жадно, в порядке
+    обработки (graph.ingredient_first): если два разных ресурса ждут партий, а слотов
+    на всех не хватает, первый заберёт сколько ему нужно, второй подождёт.
+
+    Материальную цену (consumes) автокрафт сам не докрафчивает (осознанное
+    упрощение, см. CLAUDE.md) - партия стартует, только если материал уже в
+    наличии. Ошибка missing_energy_recipe_material - только если материала нет
+    даже на ОДНУ партию, свободный преобразователь есть, а ни одна партия этого
+    рецепта ещё не идёт (иначе ждать есть чего - просто стартуем, сколько смогли)."""
+    recipe_id = ENERGY_RECIPE_FOR_RESOURCE[resource_id]
+    energy_recipe = ENERGY_RECIPES[recipe_id]
+    machine = energy_recipe.get("machine")
+    running = sum(
+        1 for j in energy_jobs
+        if j["recipe_id"] == recipe_id and (machine is None or j.get("building_id") == machine)
+    )
+    per_batch = _guaranteed_amount(energy_recipe["produces"][resource_id])
+    if per_batch > 0:
+        deficit = needed - resources.get(resource_id, 0) - running * per_batch
+        batches = max(0, -(-deficit // per_batch))  # округление вверх
+    else:
+        # Нижняя граница диапазона 0 - сколько партий нужно, заранее не сосчитать;
+        # ведём по одной за раз, как раньше.
+        batches = 0 if running else 1
+    consumes = energy_recipe.get("consumes", {})
+    started = 0
+    while started < batches:
+        building_id = _pick_converter_building_with_free_slot(state, energy_jobs, machine)
+        if building_id is None:
+            break
+        if not all(resources.get(r, 0) >= amt for r, amt in consumes.items()):
+            if started == 0 and running == 0:
+                return AutocraftFailure(resource_id, "missing_energy_recipe_material")
+            break
+        for r, amt in consumes.items():
+            resources[r] -= amt
+        energy_jobs.append({"recipe_id": recipe_id, "progress": 0, "building_id": building_id})
+        started += 1
+    return None
+
+
 def _commit_autocraft_plan(
     state: GameState, graph: _AutocraftGraph, resolved_of: dict[str, str], fires_map: dict[str, float],
-    gain_per_fire_map: dict[str, float], resources: dict[str, int], jobs: dict[str, dict], slots: dict[str, int],
-    energy_jobs: list[dict],
+    gain_per_fire_map: dict[str, float], total_needed: dict[str, float], resources: dict[str, int],
+    jobs: dict[str, dict], slots: dict[str, int], energy_jobs: list[dict],
 ) -> tuple[AutocraftFailure | None, dict[str, str]]:
     """Второй проход по графу, ПО graph.ingredient_first КАК ЕСТЬ (сырьё раньше того,
     кто его ест) - все гейты (не_открыт/технология/мощность/цикл) уже решены заранее в
     _aggregate_autocraft_demand, здесь только то, что ЗАВИСИТ от статуса ингредиентов
     или порядка обработки:
-    - "energy_pending": попытка запуска рецепта конкурирует за свободные преобразователи
-      с другими energy_pending resource_id - порядок обработки решает, кому какой достанется;
-    - "action_pending": если хоть один ингредиент застрял в фоновой задаче (child_blocked),
-      этот рецепт тоже откладывается целиком - его прокрутка не может случиться раньше,
-      чем подвезут сырьё. К этому моменту КАЖДЫЙ ингредиент уже обработан
-      (ingredient_first), поэтому статус известен точно;
+    - "energy_pending": партии конкурируют за свободные преобразователи с другими
+      energy_pending resource_id - порядок обработки решает, кому какой достанется
+      (см. _start_energy_batches);
+    - "action_pending": если хоть один ингредиент ещё не готов, этот рецепт тоже
+      откладывается целиком - его прокрутка не может случиться раньше, чем подвезут
+      сырьё. К этому моменту КАЖДЫЙ ингредиент уже обработан (ingredient_first),
+      поэтому статус известен точно;
     - тот же порядок (сырьё раньше) даёт фоновым задачам ПОПАДАТЬ в jobs (dict, порядок
       вставки = порядок обработки в _process_autocraft_jobs) в правильной
       последовательности - глубокие (сырьевые) задачи первыми, чтобы успеть подвезти
       сырьё вышестоящим задачам В ТОТ ЖЕ ход (см. CLAUDE.md, _process_autocraft_jobs).
-    Возвращает первую настоящую (не "in_progress") ошибку, если она где-то встретилась -
-    вызывающий должен ничего не коммитить в state в этом случае (resources/jobs/energy_jobs
-    здесь - рабочие копии). status_of - как resolved_of, но "energy_pending"/"action_pending"
-    уже разрешены в "ok"/"in_progress"."""
+
+    Два разных "ещё не готово" в status_of:
+    - "in_progress" - ресурс подвезёт фоновая задача автокрафта (autocraft_jobs): она
+      заведена с полным fires_total и сама доделает всё до конца;
+    - "waiting" - ресурс идёт ПАРТИЯМИ (крафт за энергию, многоходовое действие), и
+      каждую следующую партию запускает только очередная повторная попытка
+      (_process_pending_actions). Рецепт поверх такого ингредиента НЕ заводит свою
+      фоновую задачу, а тоже ждёт ("waiting" заразен вверх по цепочке): задача
+      повисла бы навсегда - по ресурсу с задачей спрос дальше на ингредиенты не идёт
+      (см. existing_job в _aggregate_autocraft_demand), и следующую партию никто бы не
+      запустил. Без задачи повторная попытка каждый ход заново пускает спрос вниз.
+    Возвращает первую настоящую (не "in_progress"/"waiting") ошибку, если она где-то
+    встретилась - вызывающий должен ничего не коммитить в state в этом случае
+    (resources/jobs/energy_jobs здесь - рабочие копии). status_of - как resolved_of, но
+    "*_pending" уже разрешены в "ok"/"in_progress"/"waiting"."""
     status_of: dict[str, str] = {}
     for resource_id in graph.ingredient_first:
         resolution = resolved_of.get(resource_id, "ok")
@@ -1147,26 +1214,10 @@ def _commit_autocraft_plan(
             continue
 
         if resolution == "energy_pending":
-            recipe_id = ENERGY_RECIPE_FOR_RESOURCE[resource_id]
-            energy_recipe = ENERGY_RECIPES[recipe_id]
-            machine = energy_recipe.get("machine")
-            already_running = any(
-                j["recipe_id"] == recipe_id and (machine is None or j.get("building_id") == machine)
-                for j in energy_jobs
-            )
-            if not already_running:
-                building_id = _pick_converter_building_with_free_slot(state, energy_jobs, machine)
-                if building_id is not None:
-                    # Рецепт крафта за энергию может нести материальную цену (consumes) в
-                    # дополнение к порогу энергии - автокрафт её САМ не докрафчивает
-                    # (осознанное упрощение, см. CLAUDE.md), требует, чтобы уже была в наличии.
-                    consumes = energy_recipe.get("consumes", {})
-                    if not all(resources.get(r, 0) >= amt for r, amt in consumes.items()):
-                        return AutocraftFailure(resource_id, "missing_energy_recipe_material"), status_of
-                    for r, amt in consumes.items():
-                        resources[r] -= amt
-                    energy_jobs.append({"recipe_id": recipe_id, "progress": 0, "building_id": building_id})
-            status_of[resource_id] = "in_progress"  # партия за энергию всегда растянута на ходы, никогда мгновенно
+            failure = _start_energy_batches(state, resource_id, total_needed[resource_id], resources, energy_jobs)
+            if failure is not None:
+                return failure, status_of
+            status_of[resource_id] = "waiting"  # партия за энергию всегда растянута на ходы, никогда мгновенно
             continue
 
         # resolution == "action_pending"
@@ -1175,6 +1226,9 @@ def _commit_autocraft_plan(
         fires = fires_map[resource_id]
         gain_per_fire = gain_per_fire_map[resource_id]
 
+        if any(status_of.get(ing_id) == "waiting" for ing_id in effective_cost):
+            status_of[resource_id] = "waiting"
+            continue
         child_blocked = any(status_of.get(ing_id) == "in_progress" for ing_id in effective_cost)
         needs_job = child_blocked or fires > autocraft_speed_capacity(state)
 
@@ -1246,7 +1300,7 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
         best_id = min(failures, key=lambda rid: graph.preorder[rid])
         return failures[best_id]  # настоящая ошибка - state.resources/autocraft_jobs/energy_jobs не трогаем
     hard_failure, status_of = _commit_autocraft_plan(
-        state, graph, resolved_of, fires_map, gain_per_fire_map,
+        state, graph, resolved_of, fires_map, gain_per_fire_map, total_needed,
         working_resources, working_jobs, slots, working_energy_jobs,
     )
     if hard_failure is not None:
@@ -1254,7 +1308,7 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
 
     queued: AutocraftFailure | None = None
     for resource_id in cost:
-        if status_of.get(resource_id) == "in_progress":
+        if status_of.get(resource_id) in ("in_progress", "waiting"):
             queued = AutocraftFailure(resource_id, "in_progress")
             break
 
