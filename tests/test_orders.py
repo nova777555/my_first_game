@@ -434,6 +434,14 @@ class ConverterRecipeOrderTests(OrdersTestCase):
         self.assertEqual(engine.check_order(s, "energy_recipe:make_raw_b", 1).reason, "tech_locked")
         self.assertFalse(engine.order_recipe(s, "energy_recipe:no_such", 1).ok)
 
+    def test_preview_shows_the_energy_the_converter_waits_for(self):
+        # Слоты копят порог по ходам - в предпросмотре это ожидание энергии, как у
+        # рецепта с энергией в цене (иначе карточка молчала бы про ночь без солнца).
+        s = self.conv_state(resources={"energy": 5})
+        (node,) = engine.autocraft_preview(s, {"raw_b": 2})["nodes"]
+        (energy,) = [c for c in node["children"] if c["resource_id"] == "energy"]
+        self.assertEqual((energy["needed"], energy["taken"], energy.get("energy_wait")), (20, 5, True))
+
     def test_orders_view_marks_batch_steps(self):
         s = self.conv_state()
         engine.order_recipe(s, "energy_recipe:make_raw_b", 2)

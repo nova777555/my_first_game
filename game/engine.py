@@ -1731,12 +1731,13 @@ def _preview_node(
             node["children"].append(
                 _preview_node(state, ing_id, ing_amount * batches, next_visiting, working, recipe, via_converter)
             )
-        if location_assembler_capacity(state, CONVERTER_LOCATION_ID) != 0:
-            # Сборщик преобразователя платит порог энергии разом (см. _advance_energy_step).
-            node["children"].append(_preview_node(
-                state, ENERGY_RESOURCE_ID, energy_recipe["threshold"] * batches, next_visiting, working, recipe,
-                via_converter,
-            ))
+        # Порог энергии: сборщик платит его разом, слоты копят по ходам (см.
+        # _advance_energy_step) - в обоих случаях недостачу игрок ждёт, как у рецепта
+        # с энергией в цене (узел energy_wait с оценкой ходов).
+        node["children"].append(_preview_node(
+            state, ENERGY_RESOURCE_ID, energy_recipe["threshold"] * batches, next_visiting, working, recipe,
+            via_converter,
+        ))
         return node
     effective_cost, effective_gain = effective_manual_action_stats(action_id, state)
     gain_per_fire = effective_gain.get(resource_id, 0)
@@ -1779,7 +1780,8 @@ def autocraft_preview(state: GameState, cost: dict[str, int]) -> dict | None:
         return None
     working = dict(state.resources)
     recipe = resource_recipe(state)
-    via_converter = _order_route(state, cost)[2]
+    # Маршрут - по предметам: энергию заказ ждёт, на выбор рецептов она не влияет.
+    via_converter = _order_route(state, {r: a for r, a in cost.items() if r != ENERGY_RESOURCE_ID})[2]
     nodes = [
         _preview_node(state, resource_id, amount, frozenset(), working, recipe, via_converter)
         for resource_id, amount in cost.items()
