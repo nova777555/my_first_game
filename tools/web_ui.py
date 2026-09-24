@@ -1435,6 +1435,7 @@ def resource_sources(resource_id: str) -> list[dict]:
             entry["chance"] = chance
         if pattern:
             entry["location_id"] = action.get("location")
+            entry["pattern_mirror"] = bool(action.get("pattern_mirror"))
         sources.append(entry)
 
     # spawn_species - генетически НЕЗАВИСИМОЕ от gain поле (см. CLAUDE.md,

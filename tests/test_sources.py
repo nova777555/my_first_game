@@ -39,6 +39,13 @@ class GridCraftSourceTests(FixtureTestCase):
         self.assertEqual(entry["location_id"], "grid_loc")
         self.assertEqual(entry["cost"], [{"id": "raw_a", "name": "Сырьё A", "amount": 2}])
         self.assertEqual(entry["amount"], 1)
+        self.assertFalse(entry["pattern_mirror"])
+
+    def test_grid_recipe_reports_pattern_mirror_flag(self):
+        sources = web_ui.resource_sources("grid_mirror_output")
+        entry = _find(sources, kind="grid_craft", action_id="grid_mirror")
+        self.assertIsNotNone(entry)
+        self.assertTrue(entry["pattern_mirror"])
 
 
 class PlainManualSourceTests(FixtureTestCase):

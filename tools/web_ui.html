@@ -9557,7 +9557,12 @@ function RESOURCE_NAME_LOOKUP(rid) {
 
 function craftGridPinnedTile(recipe, entry) {
   const wrap = el("div", { class: "cg-pinned-tile" });
-  const btn = el("button", { type: "button", class: "cg-pinned-lay", title: recipe.name });
+  // pattern_mirror (см. PLAN_grid_crafting.md, этап 6) - подсказкой в title,
+  // не отдельной иконкой: сама механика (зеркальная раскладка тоже
+  // засчитывается) касается только матчинга, для переноса/раскладывания
+  // разницы нет - полноценный значок был бы декорацией без действия.
+  const title = recipe.pattern_mirror ? `${recipe.name} (зеркальный узор тоже подходит)` : recipe.name;
+  const btn = el("button", { type: "button", class: "cg-pinned-lay", title });
   const outputId = recipe.gain[0] && recipe.gain[0].id;
   const iconDef = outputId ? resourceIcon(outputId) : null;
   const iconWrap = el("div", { class: "cg-icon-wrap" });
@@ -9748,7 +9753,9 @@ function craftGridSourceDetailView(currentEntry) {
     wrap.appendChild(navRow);
   }
 
-  wrap.appendChild(el("div", { style: `font-family:Consolas,monospace;font-size:11px;text-align:center;letter-spacing:.04em;color:${kindInfo.color};`, text: kindInfo.label.toUpperCase() }));
+  let kindLine = kindInfo.label.toUpperCase();
+  if (src.pattern_mirror) kindLine += " · ⇄ ЗЕРКАЛЬНО";
+  wrap.appendChild(el("div", { style: `font-family:Consolas,monospace;font-size:11px;text-align:center;letter-spacing:.04em;color:${kindInfo.color};`, text: kindLine }));
   wrap.appendChild(el("div", { style: "font-size:12.5px;text-align:center;color:var(--text);", text: src.name }));
   let amountLine = `×${src.amount}`;
   if (src.chance != null) amountLine += ` · шанс ${Math.round(src.chance * 100)}%`;
