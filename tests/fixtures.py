@@ -583,8 +583,10 @@ BUILDINGS = {
         "name": "Автоматизация", "description": "Тестовая постройка, открывающая автокрафт и дающая вычислительную мощность и скорость.",
         "requires_tech": None, "cost": {"raw_a": 1},
         "produces": {}, "consumes": {}, "breakdown_chance": 0.0,
-        "repair_cost": {"raw_a": 1}, "unlocks_autocraft": ["mid", "capacitor"], "compute_power": 15,
-        "autocraft_speed": 50,  # с запасом выше любых fires в существующих тестах - они не про скорость
+        "repair_cost": {"raw_a": 1}, "compute_power": 15,
+        # Сборщик локации мастерской (workshop_loc): мгновенно, 50 крафтов за ход - с
+        # запасом выше любых fires в тестах, которые не про лимит сборщика.
+        "autocraft_assembler": {"location": "workshop_loc", "per_turn": 50},
     },
     "bare_processor": {
         "name": "Голый процессор", "description": "Тестовая постройка: даёт compute_power, но НИЧЕГО не разблокирует - нужна отдельно от automation_hub, чтобы проверять not_unlocked/tech_locked в изоляции от нового no_processor (см. engine._ensure_available).",
@@ -596,8 +598,9 @@ BUILDINGS = {
         "name": "Медленный хаб", "description": "Тестовая постройка с большой мощностью, но низкой скоростью автокрафта.",
         "requires_tech": None, "cost": {"raw_a": 1},
         "produces": {}, "consumes": {}, "breakdown_chance": 0.0,
-        "repair_cost": {"raw_a": 1}, "unlocks_autocraft": ["slow_mid", "slow_final", "other_mid"],
-        "compute_power": 10000, "autocraft_speed": 2,
+        "repair_cost": {"raw_a": 1},
+        "compute_power": 10000,
+        "autocraft_assembler": {"location": "workshop_loc", "per_turn": 2},
     },
     "slot_hub": {
         "name": "Диспетчер", "description": "Тестовая постройка, дающая +1 слот автокрафта; можно построить только одну.",
@@ -654,6 +657,8 @@ BUILDINGS = {
              "type": "energy_converter_capacity", "value": 3, "requires_tech": None, "cost": {"raw_a": 1}},
             {"id": "conv_cap_2", "name": "Расширение II", "description": "+9 энергии/ход.",
              "type": "energy_converter_capacity", "value": 9, "requires_tech": None, "cost": {"raw_a": 2}},
+            {"id": "conv_auto", "name": "Автоматизация", "description": "Автокрафт может запускать рецепты.",
+             "type": "autocraft", "value": 1, "requires_tech": None, "cost": {}},
         ],
     },
     "mega_converter": {
@@ -665,6 +670,8 @@ BUILDINGS = {
         "upgrades": [
             {"id": "mega_cap_1", "name": "Расширение", "description": "Не даёт эффекта - у mega_converter и так нет потолка.",
              "type": "energy_converter_capacity", "value": 100, "requires_tech": None, "cost": {"raw_a": 1}},
+            {"id": "mega_auto", "name": "Автоматизация", "description": "Автокрафт может запускать рецепты.",
+             "type": "autocraft", "value": 1, "requires_tech": None, "cost": {}},
         ],
     },
     "amplifier": {
@@ -688,6 +695,8 @@ BUILDINGS = {
             {"id": "matter_cap_1", "name": "Расширение", "description": "+30 энергии/ход - для теста, что апгрейд "
              "ОДНОЙ постройки не задевает пропускную способность ДРУГОГО типа (energy_converter).",
              "type": "energy_converter_capacity", "value": 30, "requires_tech": None, "cost": {"raw_a": 1}},
+            {"id": "matter_auto", "name": "Автоматизация", "description": "Автокрафт может запускать рецепты.",
+             "type": "autocraft", "value": 1, "requires_tech": None, "cost": {}},
         ],
     },
     "apiary": {

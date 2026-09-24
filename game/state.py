@@ -73,8 +73,15 @@ class GameState:
     # готовая партия убирается из списка целиком (крафт одноразовый, не крутится
     # по кругу как раньше).
     energy_jobs: list[dict] = field(default_factory=list)
-    autocraft_jobs: dict[str, dict] = field(default_factory=dict)  # resource_id -> {"action_id", "fires_total", "fires_done"}
-    pending_actions: list[dict] = field(default_factory=list)  # [{"kind", "target_id", "label"}] - действия, ждущие фоновый автокрафт
+    # Заказы автокрафта (game/engine.py: _place_order/_process_orders) - вместо прежних
+    # фоновых задач (autocraft_jobs) и очереди отложенных действий (pending_actions).
+    # Каждый заказ ФИЗИЧЕСКИ держит своё: всё нужное сырьё изымается со склада в
+    # order["reserved"] в момент заказа, промежуточные предметы его шагов копятся там
+    # же - никто другой их не перехватит; отмена (cancel_order) возвращает резерв на
+    # склад. Старые сохранения: autocraft_jobs/pending_actions при загрузке просто
+    # отбрасываются (в них ничего не было зарезервировано - ресурсы не теряются).
+    orders: list[dict] = field(default_factory=list)
+    next_order_id: int = 1
     # action_id -> многоходовое ручное действие "в процессе" (manual_actions.*.duration_turns
     # > 1) - см. game/engine.py:_process_manual_jobs/do_manual_action. Одна активная задача НА
     # ДЕЙСТВИЕ (ключ - action_id, как autocraft_jobs по resource_id) - повторный клик, пока
@@ -94,12 +101,6 @@ class GameState:
     # ("Открыть") и при сохранении под новым именем ("Сохранить как") - см. main.py/
     # tools/web_ui.py. Сбрасывается в None при "Начать заново".
     save_name: str | None = None
-    # Галочка "Автокрафт" в UI (появляется, только когда compute_capacity(state) > 0 -
-    # см. game/engine.py) - пока включена, нехватка ресурса пытается докрафтиться
-    # автоматически (с автокрафт-специфичными ошибками); выключена - действия делаются
-    # строго руками, как при отсутствии автокрафта вообще (см. _ensure_available).
-    # По умолчанию True, чтобы поведение старых сохранений не менялось молча.
-    autocraft_enabled: bool = True
     # building_id -> сколько этапов многоэтапного строительства (BUILDINGS[id]
     # ["construction_stages"]) УЖЕ оплачено для текущей строящейся копии. Ключ
     # присутствует, только пока 0 < прогресс < числа этапов - как только оплачен
@@ -341,11 +342,10 @@ class GameState:
             "active_mine_field": self.active_mine_field,
             "history": self.history,
             "energy_jobs": self.energy_jobs,
-            "autocraft_jobs": self.autocraft_jobs,
-            "pending_actions": self.pending_actions,
+            "orders": self.orders,
+            "next_order_id": self.next_order_id,
             "manual_jobs": self.manual_jobs,
             "save_name": self.save_name,
-            "autocraft_enabled": self.autocraft_enabled,
             "construction_progress": self.construction_progress,
             "building_upgrades": self.building_upgrades,
             "action_priority": self.action_priority,
@@ -414,11 +414,10 @@ class GameState:
             active_mine_field=data.get("active_mine_field"),
             history=list(data.get("history", []))[-HISTORY_MAX_ENTRIES:],
             energy_jobs=[dict(j) for j in data.get("energy_jobs", [])],
-            autocraft_jobs={k: dict(v) for k, v in data.get("autocraft_jobs", {}).items()},
-            pending_actions=[dict(p) for p in data.get("pending_actions", [])],
+            orders=[dict(o) for o in data.get("orders", [])],
+            next_order_id=int(data.get("next_order_id", 1)),
             manual_jobs={k: dict(v) for k, v in data.get("manual_jobs", {}).items()},
             save_name=data.get("save_name"),
-            autocraft_enabled=data.get("autocraft_enabled", True),
             construction_progress=dict(data.get("construction_progress", {})),
             building_upgrades={k: list(v) for k, v in data.get("building_upgrades", {}).items()},
             action_priority=dict(data.get("action_priority", {})),

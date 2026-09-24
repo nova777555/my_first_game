@@ -388,28 +388,29 @@ class AutocraftFailure:
     энергетическом преобразователе (если он есть), а если все заняты - просто ждёт
     своей очереди, без отдельной фоновой задачи/слота автокрафта.
     building_id - только для "building_missing": какой постройки не хватает рецепту.
+    "not_automated" - рецепт делается на механизме, который автокрафт пока не умеет
+    запускать (нет сборщика/улучшения «Автоматизация», см. location_autocraft_capacity);
+    extra = {"where", "hint"} для текста.
     Энергия (ENERGY_RESOURCE_ID) - не сырьё "без рецепта": её нехватка не ошибка,
     автокрафт её ЖДЁТ (см. _energy_wait_failure). Настоящих ошибок у неё две:
     "no_energy_source" (ждать неоткуда) и "energy_over_capacity" (за один крафт нужно
     больше, чем вмещают хранилища - не накопить никогда; extra = {"per_craft",
     "capacity"} для текста)."""
     resource_id: str
-    reason: str  # "no_processor" | "autocraft_disabled" | "no_recipe" | "not_unlocked" | "tech_locked" | "building_missing" | "insufficient_compute" | "no_free_slots" | "in_progress" | "missing_energy_recipe_material" | "no_energy_source" | "energy_over_capacity"
+    reason: str  # "no_processor" | "no_recipe" | "not_automated" | "tech_locked" | "building_missing" | "insufficient_compute" | "no_free_slots" | "in_progress" | "no_energy_source" | "energy_over_capacity"
     building_id: str | None = None
     extra: dict = field(default_factory=dict)
 
 
 _AUTOCRAFT_REASON_TEXT = {
     "no_processor": "автокрафт пока недоступен - в игре ещё нет ни одного работающего процессора",
-    "autocraft_disabled": "автокрафт выключен галочкой в интерфейсе - рецепты делаются только руками",
     "no_recipe": "«{name}» - сырьё, автокрафтить его не из чего",
-    "not_unlocked": "автокрафт «{name}» ещё не открыт - нужна постройка, которая его включает",
+    "not_automated": "«{name}» делается на «{where}» - для автокрафта {hint}",
     "tech_locked": "рецепт «{name}» ещё не изучен",
     "building_missing": "рецепту «{name}» нужна работающая постройка «{building}»",
-    "insufficient_compute": "не хватает вычислительной мощности процессора для автокрафта «{name}»",
-    "no_free_slots": "не хватает свободных слотов автокрафта, чтобы начать докрафт «{name}» в фоне",
+    "insufficient_compute": "заказ слишком большой для процессоров: нужно {size}, мощность {capacity}",
+    "no_free_slots": "все слоты заказов процессоров заняты ({slots}) - дождись выполнения или отмени заказ",
     "in_progress": "«{name}» уже докрафтывается в фоне",
-    "missing_energy_recipe_material": "для «{name}» не хватает сырья на крафт за энергию - автокрафт не докрафчивает его сам",
     "no_energy_source": "нет ни одного работающего источника энергии - ждать её притока неоткуда",
     "energy_over_capacity": "за один крафт нужно {per_craft} энергии, а хранилища вмещают только {capacity} - столько не накопить",
 }
@@ -433,18 +434,6 @@ def _add_resource(resources: dict[str, int], resource_id: str, amount: int) -> N
 def _gain(resources: dict[str, int], amounts: dict[str, int]) -> None:
     for r, amount in amounts.items():
         _add_resource(resources, r, amount)
-
-
-def is_autocraft_unlocked(resource_id: str, state: GameState) -> bool:
-    """Автокрафт по умолчанию закрыт для ВСЕХ ресурсов - конкретная постройка должна
-    явно перечислить его в своём unlocks_autocraft (и при этом работать, не быть
-    сломанной целиком), иначе игрок обязан делать этот ресурс руками."""
-    for building_id in state.buildings:
-        if working_count(state, building_id) <= 0:
-            continue
-        if resource_id in BUILDINGS[building_id].get("unlocks_autocraft", []):
-            return True
-    return False
 
 
 def lab_tier_capacity(state: GameState) -> int:
@@ -860,36 +849,16 @@ def soul_collector_instance_slots_used(state: GameState, instance_id: str) -> in
     return len(instance["installed"]) if instance is not None else 0
 
 
-# Базовые скорость и число слотов автокрафта БЕЗ единой профильной постройки - без этой
-# базы автокрафт был бы бесполезен даже для мелких партий, пока игрок не построит первый
-# ускоритель/диспетчер. Подобраны так, чтобы мелкие партии (единицы прокруток) по-прежнему
-# решались мгновенно, а вот сколько-нибудь крупные требовали построек на скорость/слоты.
-BASE_AUTOCRAFT_SPEED = 1
+# Базовое число слотов заказов БЕЗ единой профильной постройки - один заказ за раз.
 BASE_AUTOCRAFT_SLOTS = 1
 
 
-def autocraft_speed_capacity(state: GameState) -> int:
-    """Сколько прокруток (операций) автокрафт суммарно может выполнить ЗА ОДИН ход -
-    в отличие от compute_capacity (потолок РАЗМЕРА запроса безотносительно времени), это
-    ПРОПУСКНАЯ СПОСОБНОСТЬ: если прокруток нужно больше, чем есть скорости, лишнее не
-    проваливается, а растягивается на несколько ходов фоновой задачей (см. state.autocraft_jobs
-    и _process_autocraft_jobs) - отсюда и смысл строить более скоростные механизмы вместо
-    того, чтобы просто ждать."""
-    capacity = BASE_AUTOCRAFT_SPEED
-    for building_id in state.buildings:
-        working = working_count(state, building_id)
-        if working <= 0:
-            continue
-        capacity += BUILDINGS[building_id].get("autocraft_speed", 0) * working
-    return capacity
-
-
 def autocraft_slot_capacity(state: GameState) -> int:
-    """Сколько фоновых автокрафт-задач может выполняться ОДНОВРЕМЕННО - по одной на
-    КАЖДЫЙ ресурс в цепочке докрафта, включая промежуточные (не только на верхний
-    запрошенный). БАЗА - BASE_AUTOCRAFT_SLOTS без единой постройки, плюс autocraft_slots
-    работающих построек (в контенте это, как правило, уникальная дорогая постройка с
-    max_count, а не то, что стоит строить десятками)."""
+    """Сколько заказов с докрафтом (state.orders с шагами) может идти ОДНОВРЕМЕННО -
+    процессоры как "мозг заказов" (как в AE2): BASE_AUTOCRAFT_SLOTS плюс autocraft_slots
+    работающих построек. Заказ, который только ждёт энергию (без шагов), слота не
+    занимает. Скорость крафта задают не процессоры, а сборщики и «Автоматизация»
+    механизмов (см. location_autocraft_capacity)."""
     capacity = BASE_AUTOCRAFT_SLOTS
     for building_id in state.buildings:
         working = working_count(state, building_id)
@@ -899,31 +868,95 @@ def autocraft_slot_capacity(state: GameState) -> int:
     return capacity
 
 
-def autocraft_jobs_view(state: GameState) -> list[dict]:
-    """Список активных фоновых автокрафт-задач для UI (панель "Автокрафт"): какой
-    ресурс, сколько прокруток сделано/нужно всего и через сколько ходов доделается
-    при ТЕКУЩЕЙ скорости (None - никогда, если скорость сейчас нулевая)."""
-    speed = autocraft_speed_capacity(state)
-    energy_have = state.resources.get(ENERGY_RESOURCE_ID, 0)
-    jobs = []
-    for resource_id, job in state.autocraft_jobs.items():
-        remaining = job["fires_total"] - job["fires_done"]
-        eta = None if speed <= 0 else -(-remaining // speed)
-        # Рецепт с энергией в цене идёт не быстрее, чем она притекает (задача берёт
-        # за ход столько прокруток, на сколько хватает накопленного).
-        per_fire_energy = effective_manual_action_stats(job["action_id"], state)[0].get(ENERGY_RESOURCE_ID, 0)
-        waits_energy = per_fire_energy > energy_have
-        if per_fire_energy > 0 and eta is not None:
-            energy_eta = energy_wait_eta_turns(state, remaining * per_fire_energy - energy_have)
-            eta = None if energy_eta is None and waits_energy else max(eta, energy_eta or 0)
-        jobs.append({
-            "resource_id": resource_id,
-            "fires_done": job["fires_done"],
-            "fires_total": job["fires_total"],
-            "eta_turns": eta,
-            "waits_energy": waits_energy,
-        })
-    return jobs
+def has_autocraft_upgrade(state: GameState, building_id: str) -> bool:
+    """Куплено ли у постройки улучшение типа "autocraft" («Автоматизация»)."""
+    purchased = state.building_upgrades.get(building_id, [])
+    return any(
+        u["type"] == "autocraft" and u["id"] in purchased
+        for u in BUILDINGS.get(building_id, {}).get("upgrades", [])
+    )
+
+
+def location_assembler_capacity(state: GameState, location_id: str | None) -> int | None:
+    """Сколько крафтов рецептов этой локации сборщики делают ЗА ХОД: 0 - сборщиков
+    нет, None - без лимита. Сборщик - постройка с autocraft_assembler {location,
+    per_turn}: per_turn на КАЖДУЮ работающую копию (32 молекулярных сборщика по 1 -
+    32 крафта за ход), per_turn = null - без лимита (ускоренный). Главное свойство
+    сборщика - крафт МГНОВЕННЫЙ при любой длительности рецепта (даже если в самом
+    механизме он шёл бы 100 ходов). Поле generic - сборщик заводится под ЛЮБУЮ
+    локацию-механизм, включая преобразователь."""
+    if not location_id:
+        return 0
+    total = 0
+    for building_id in state.buildings:
+        spec = BUILDINGS[building_id].get("autocraft_assembler")
+        if not spec or spec.get("location") != location_id:
+            continue
+        working = working_count(state, building_id)
+        if working <= 0:
+            continue
+        if spec.get("per_turn") is None:
+            return None
+        total += spec["per_turn"] * working
+    return total
+
+
+def mechanism_automated(state: GameState, location_id: str | None) -> bool:
+    """Куплена ли «Автоматизация» (улучшение типа autocraft) у постройки, которая
+    открывает эту локацию (locations.*.requires_building). Автоматизированный механизм
+    работает как игрок, стоящий у него: 1 крафт за ход, многоходовой рецепт - одна
+    партия за раз своей длительностью (см. _advance_order_step)."""
+    mechanism = LOCATIONS.get(location_id, {}).get("requires_building") if location_id else None
+    return bool(mechanism) and working_count(state, mechanism) > 0 and has_autocraft_upgrade(state, mechanism)
+
+
+def location_autocraft_capacity(state: GameState, location_id: str | None) -> int | None:
+    """Сколько крафтов этой локации автокрафт может сделать ЗА ХОД в сумме: сборщики
+    (location_assembler_capacity) плюс 1, если механизм автоматизирован. 0 - локация
+    не автоматизирована (рецепт вне механизма, без сборщиков и «Автоматизации», -
+    только вручную), None - без лимита."""
+    assemblers = location_assembler_capacity(state, location_id)
+    if assemblers is None:
+        return None
+    return assemblers + (1 if mechanism_automated(state, location_id) else 0)
+
+
+def automated_converter_types(state: GameState, machine: str | None) -> list[str]:
+    """Типы преобразователей (energy_converter), на которых автокрафт может запускать
+    рецепты крафта за энергию партиями (как игрок): у самого типа куплена
+    «Автоматизация». machine (energy_recipes.*.machine) сужает выбор до одного типа.
+    Сборщик локации преобразователя работает иначе - мгновенно, минуя слоты (см.
+    _advance_order_step)."""
+    candidates = [machine] if machine else energy_converter_building_types(state)
+    return [b for b in candidates if b in BUILDINGS and has_autocraft_upgrade(state, b)]
+
+
+def _automation_hint(location_id: str | None) -> dict:
+    """extra для отказа not_automated: где делается рецепт и что нужно игроку."""
+    loc = LOCATIONS.get(location_id) if location_id else None
+    where = loc["name"] if loc else "без механизма"
+    parts = []
+    mechanism = loc.get("requires_building") if loc else None
+    if mechanism:
+        parts.append(f"нужна «Автоматизация» постройки «{BUILDINGS[mechanism]['name']}»")
+    assemblers = [
+        b["name"] for b in BUILDINGS.values()
+        if (b.get("autocraft_assembler") or {}).get("location") == location_id
+    ]
+    if assemblers:
+        parts.append("нужна постройка " + " или ".join(f"«{n}»" for n in assemblers))
+    hint = " или ".join(parts) if parts else "нет ни сборщика, ни механизма - этот рецепт только вручную"
+    return {"where": where, "hint": hint}
+
+
+def _converter_hint(machine: str | None) -> dict:
+    names = [BUILDINGS[machine]["name"]] if machine else [
+        b["name"] for b in BUILDINGS.values() if b.get("energy_converter")
+    ]
+    return {
+        "where": LOCATIONS.get(CONVERTER_LOCATION_ID, {}).get("name", "преобразователь"),
+        "hint": "нужна «Автоматизация» постройки " + " или ".join(f"«{n}»" for n in names),
+    }
 
 
 def energy_wait_eta_turns(state: GameState, deficit: float) -> int | None:
@@ -941,33 +974,53 @@ def energy_wait_eta_turns(state: GameState, deficit: float) -> int | None:
     return math.ceil(deficit / net)
 
 
-def cancel_autocraft_job(state: GameState, resource_id: str) -> ActionResult:
-    """Снимает фоновую автокрафт-задачу с очереди немедленно, БЕЗ траты хода - чтобы
-    игрок, запустивший что-то слишком долгое (например, не хватает скорости на много
-    ходов вперёд), не был заложником уже принятого решения и мог освободить слот под
-    другой ресурс. Прокрутки, которые задача УЖЕ успела сделать (fires_done из
-    fires_total), возврату не подлежат - соответствующие ингредиенты и результат уже
-    честно обменяны на предыдущих ходах (см. _process_autocraft_jobs: расход и выпуск
-    происходят СРАЗУ по факту прокрутки, а не резервируются заранее на весь fires_total) -
-    отменяются только ЕЩЁ НЕ сделанные прокрутки, поэтому возвращать здесь нечего.
-    Действие, которое всё ещё ждёт этот ресурс (state.pending_actions), само по себе
-    не отменяется - если ресурс ему по-прежнему нужен, обычный ретрай на следующем ходу
-    заново поставит задачу в очередь (если останется свободный слот)."""
-    if resource_id not in state.autocraft_jobs:
-        return ActionResult(False, "Такой фоновой задачи уже нет.")
-    del state.autocraft_jobs[resource_id]
-    return ActionResult(True, f"Автокрафт «{RESOURCE_NAMES[resource_id]}» отменён.")
+def _find_order(state: GameState, order_id) -> dict | None:
+    return next((o for o in state.orders if o["id"] == order_id), None)
+
+
+def drop_removed_content(state: GameState) -> None:
+    """Сохранение старше контента: убирает постройки, которых в content.json больше нет
+    (например, удалённый «Ускоритель автокрафта»), вместе с их поломками, улучшениями и
+    ползунком вкл/выкл - иначе первый же обход state.buildings упал бы KeyError.
+    Вызывается при загрузке сохранения (tools/web_ui.py: load_state/открытие)."""
+    for building_id in [b for b in state.buildings if b not in BUILDINGS]:
+        state.buildings.pop(building_id, None)
+        state.broken.pop(building_id, None)
+        state.building_upgrades.pop(building_id, None)
+        state.building_disabled.pop(building_id, None)
+
+
+def cancel_order(state: GameState, order_id: int) -> ActionResult:
+    """Отменяет заказ немедленно, БЕЗ траты хода: всё, что лежит в его резерве (изъятое
+    со склада сырьё и уже сделанные промежуточные предметы), возвращается на склад.
+    Потраченная энергия не возвращается. Партии, которые заказ уже запустил на
+    механизмах/преобразователях, доиграют сами и отдадут результат на склад."""
+    order = _find_order(state, order_id)
+    if order is None:
+        return ActionResult(False, "Такого заказа уже нет.")
+    state.orders.remove(order)
+    _gain(state.resources, order["reserved"])
+    for job in state.manual_jobs.values():
+        if job.get("order_id") == order_id:
+            job.pop("order_id", None)
+    for job in state.energy_jobs:
+        if job.get("order_id") == order_id:
+            job.pop("order_id", None)
+    return ActionResult(True, f"Заказ отменён: {order['label']} - резерв вернулся на склад.")
 
 
 def _pick_converter_building_with_free_slot(
-    state: GameState, energy_jobs: list[dict], machine: str | None,
+    state: GameState, energy_jobs: list[dict], machine: str | None, automated_only: bool = False,
 ) -> str | None:
     """Первый ТИП постройки с energy_converter, у которого есть свободный слот
-    прямо сейчас (с учётом уже идущих energy_jobs - может быть как state.energy_jobs,
-    так и рабочая копия из _ensure_available) - None, если такого типа нет. machine
+    прямо сейчас (с учётом уже идущих energy_jobs) - None, если такого типа нет. machine
     (см. content.json energy_recipes.*.machine) сужает перебор до ОДНОГО конкретного
-    типа, если задан; иначе перебираются все типы в порядке BUILDINGS/content.json."""
-    candidates = [machine] if machine else energy_converter_building_types(state)
+    типа, если задан; иначе перебираются все типы в порядке BUILDINGS/content.json.
+    automated_only - только типы, на которых автокрафт может запускать рецепты
+    (automated_converter_types)."""
+    candidates = automated_converter_types(state, machine) if automated_only else (
+        [machine] if machine else energy_converter_building_types(state)
+    )
     for building_id in candidates:
         capacity = energy_converter_capacity(state, building_id)
         if capacity <= 0:
@@ -1022,6 +1075,15 @@ def _discover_autocraft_graph(state: GameState, resource_ids, recipe: dict[str, 
         action_id = recipe.get(resource_id)
         if action_id is None:
             graph.kind_of[resource_id] = "energy" if resource_id in ENERGY_RECIPE_FOR_RESOURCE else "none"
+            if graph.kind_of[resource_id] == "energy":
+                # Материальная цена крафта за энергию (consumes) - обычные ингредиенты
+                # заказа: резервируются/докрафчиваются, как у любого рецепта.
+                for ing_id in ENERGY_RECIPES[ENERGY_RECIPE_FOR_RESOURCE[resource_id]].get("consumes", {}):
+                    visit(ing_id)
+                # Сборщик преобразователя платит порог энергии РАЗОМ - энергия
+                # становится обычным ингредиентом (ожидание/резерв/ёмкость).
+                if location_assembler_capacity(state, CONVERTER_LOCATION_ID) != 0:
+                    visit(ENERGY_RESOURCE_ID)
         else:
             # Длительность - уже с апгрейдом action_duration_reduction: сокращённое до
             # 1 хода действие становится обычным мгновенным рецептом.
@@ -1040,55 +1102,31 @@ def _discover_autocraft_graph(state: GameState, resource_ids, recipe: dict[str, 
 
 
 def _aggregate_autocraft_demand(
-    state: GameState, cost: dict[str, int], graph: _AutocraftGraph, jobs: dict[str, dict],
-    manual_jobs: dict[str, dict],
+    state: GameState, cost: dict[str, int], graph: _AutocraftGraph,
 ) -> tuple[dict[str, AutocraftFailure], dict[str, float], dict[str, float], dict[str, float], dict[str, str], float]:
     """Считает СУММАРНЫЙ спрос на каждый resource_id (от исходного cost плюс от ВСЕХ
-    рецептов дерева, которым он нужен как ингредиент), и одновременно решает всё, что
-    решаемо БЕЗ знания статуса ингредиентов - открыт ли рецепт/технология/хватает ли
-    мощности процессора, не идёт ли по нему уже фоновая задача. Идёт по
-    graph.ingredient_first В ОБРАТНОМ порядке (потребитель раньше своего сырья) - к
-    тому моменту, как дошли до resource_id, весь спрос НА НЕГО от всех потребителей уже
-    посчитан, поэтому fires считается сразу верно и ОДИН раз, без пересчёта задним числом.
+    рецептов дерева, которым он нужен как ингредиент) и решает, можно ли его покрыть.
+    Идёт по graph.ingredient_first В ОБРАТНОМ порядке (потребитель раньше своего сырья) -
+    к моменту, когда дошли до resource_id, весь спрос НА НЕГО уже посчитан, поэтому
+    fires считается сразу верно и ОДИН раз ("ромбы" в дереве не дают экспоненты).
 
-    Критично, что "годится ли resource_id для автокрафта вообще" (не_открыт/технология/
-    цикл/нет рецепта) проверяется ЗДЕСЬ, ПЕРЕД тем как на его ингредиенты будет пущен
-    спрос - а не после, как можно было бы подумать глядя на порядок обхода. Если бы
-    проверка ждала своей очереди по ingredient_first (сырьё раньше), сначала пришлось бы
-    разбираться с сырьём НЕ_ОТКРЫТОГО родителя - и игрок увидел бы "не хватает сырья",
-    хотя настоящая причина - "этот рецепт ещё не открыт", как и было у старого
-    рекурсивного кода (там проверка стояла ДО рекурсии в ингредиенты).
+    Спрос сначала покрывается запасом склада (у заказа он будет изъят в резерв, см.
+    _place_order), недостача - рецептом. Годится ли ресурс для автокрафта (не открыт/
+    нет автоматизации/технология/постройка) проверяется ДО того, как спрос пущен на его
+    ингредиенты. Ошибки копятся в failures (resource_id -> AutocraftFailure), проход не
+    прерывается - вызывающий выбирает ту, что с наименьшим graph.preorder (порядок
+    первого обнаружения - как было у старой рекурсии).
 
-    Найденные ошибки НЕ прерывают проход немедленно - копятся в failures (resource_id ->
-    AutocraftFailure), а resource_id просто становится тупиком (спрос на его ингредиенты
-    не идёт дальше, как будто у него kind="none"). Так проход остаётся за ОДИН раз по
-    графу (см. модуль) - другой вариант, вернуться немедленно при первой же находке, дал
-    бы более простой код, но привязал бы "какая именно ошибка попадёт игроку" к порядку
-    ОБХОДА (потребитель раньше своего сырья), а не к порядку исходного cost и порядку
-    ингредиентов В РЕЦЕПТЕ - именно так вела себя старая рекурсия (см. ensure_and_pay,
-    где из failures выбирается ошибка с наименьшим graph.preorder - порядком ПЕРВОГО
-    обнаружения, который как раз и совпадает со старым рекурсивным порядком).
-
-    resolved_of[resource_id] - что Phase 3 (_commit_autocraft_plan) должна с ним
-    сделать: "ok" (запаса хватает, ничего не менять), "existing_job" (уже фоновая
-    задача, при необходимости продлена ЗДЕСЬ же), "energy_pending" (гейты пройдены,
-    сама попытка запуска/проверки материала - в Phase 3, т.к. конкурирует за
-    свободные преобразователи с другими resource_id по порядку обработки),
-    "action_pending" (гейты и fires посчитаны, финальное "мгновенно или фоновая
-    задача" зависит ещё и от готовности ингредиентов - решается в Phase 3),
-    "long_running" (многоходовое действие уже идёт, либо его локацию уже занимает
-    другое многоходовое действие - ждать, спрос дальше не пускать), "long_pending"
-    (можно запускать следующую партию - спрос на ингредиенты пущен ровно на ОДНУ
-    партию, сам запуск - в Phase 3)."""
+    resolved_of[resource_id]: "ok" (хватает запаса), "craft"/"long" (мгновенный/
+    многоходовой рецепт, fires в fires_map), "energy" (крафт за энергию, партии в
+    fires_map), "energy_wait" (энергию ждём, она притекает сама). energy_per_craft -
+    самый большой РАЗОВЫЙ платёж энергией в запросе (его обязано вместить хранилище,
+    см. _energy_wait_failure)."""
     total_needed: dict[str, float] = dict(cost)
     fires_map: dict[str, float] = {}
     gain_per_fire_map: dict[str, float] = {}
     resolved_of: dict[str, str] = {}
     failures: dict[str, AutocraftFailure] = {}
-    # Самый большой РАЗОВЫЙ платёж энергией в этом запросе - на одну прокрутку,
-    # одну многоходовую партию или само действие (его обязано вместить хранилище,
-    # см. _energy_wait_failure). Энергия - лист графа, обход доходит до неё ПОСЛЕ
-    # всех её потребителей, так что к тому моменту максимум уже известен целиком.
     energy_per_craft = cost.get(ENERGY_RESOURCE_ID, 0)
     for resource_id in reversed(graph.ingredient_first):
         needed = total_needed.get(resource_id, 0)
@@ -1096,19 +1134,10 @@ def _aggregate_autocraft_demand(
         if needed <= have:
             resolved_of[resource_id] = "ok"
             continue
-        if not state.autocraft_enabled:
-            failures[resource_id] = AutocraftFailure(resource_id, "autocraft_disabled")
-            continue
-        if compute_capacity(state) <= 0:
-            failures[resource_id] = AutocraftFailure(resource_id, "no_processor")
-            continue
-
         kind = graph.kind_of[resource_id]
         if kind == "none" and resource_id == ENERGY_RESOURCE_ID:
             # Энергию не крафтят, она ПРИТЕКАЕТ сама (генераторы) - нехватку ждём, а не
-            # отказываем: потребители уходят в фоновые задачи, которые каждый ход берут
-            # столько прокруток, на сколько хватает накопленного (_process_autocraft_jobs),
-            # а само действие - в очередь (_pay_or_defer). Ровно как игрок руками.
+            # отказываем: шаги заказа берут её по ходам, сколько накопилось.
             failure = _energy_wait_failure(state, energy_per_craft)
             if failure is not None:
                 failures[resource_id] = failure
@@ -1118,24 +1147,35 @@ def _aggregate_autocraft_demand(
         if kind == "none":
             failures[resource_id] = AutocraftFailure(resource_id, "no_recipe")  # сырьё без рецепта (или цикл)
             continue
+        if compute_capacity(state) <= 0:
+            failures[resource_id] = AutocraftFailure(resource_id, "no_processor")
+            continue
 
         if kind == "energy":
             recipe_id = ENERGY_RECIPE_FOR_RESOURCE[resource_id]
             energy_recipe = ENERGY_RECIPES[recipe_id]
-            machine = energy_recipe.get("machine")
-            if energy_converter_capacity(state, machine) <= 0:
-                failures[resource_id] = AutocraftFailure(resource_id, "not_unlocked")
-                continue
             if energy_recipe.get("requires_tech") and energy_recipe["requires_tech"] not in state.techs:
                 failures[resource_id] = AutocraftFailure(resource_id, "tech_locked")
                 continue
-            resolved_of[resource_id] = "energy_pending"  # не имеет своих ингредиентов - спрос дальше не идёт
+            machine = energy_recipe.get("machine")
+            assembled = location_assembler_capacity(state, CONVERTER_LOCATION_ID) != 0
+            if not assembled and not any(
+                energy_converter_capacity(state, b) > 0 for b in automated_converter_types(state, machine)
+            ):
+                failures[resource_id] = AutocraftFailure(resource_id, "not_automated", extra=_converter_hint(machine))
+                continue
+            per_batch = _guaranteed_amount(energy_recipe["produces"][resource_id])
+            batches = -(-(needed - have) // per_batch) if per_batch > 0 else 1
+            fires_map[resource_id] = batches
+            resolved_of[resource_id] = "energy"
+            for ing_id, ing_amount in energy_recipe.get("consumes", {}).items():
+                total_needed[ing_id] = total_needed.get(ing_id, 0) + ing_amount * batches
+            if assembled:
+                total_needed[ENERGY_RESOURCE_ID] = total_needed.get(ENERGY_RESOURCE_ID, 0) + energy_recipe["threshold"] * batches
+                energy_per_craft = max(energy_per_craft, energy_recipe["threshold"])
             continue
 
         # kind == "action" | "long_action"
-        if not is_autocraft_unlocked(resource_id, state):
-            failures[resource_id] = AutocraftFailure(resource_id, "not_unlocked")
-            continue
         action_id = graph.action_of[resource_id]
         action = MANUAL_ACTIONS[action_id]
         if action["requires_tech"] and action["requires_tech"] not in state.techs:
@@ -1147,59 +1187,17 @@ def _aggregate_autocraft_demand(
         if not _action_building_ok(action, state):
             failures[resource_id] = AutocraftFailure(resource_id, "building_missing", action_mechanism_building(action))
             continue
+        if location_autocraft_capacity(state, action.get("location")) == 0:
+            failures[resource_id] = AutocraftFailure(
+                resource_id, "not_automated", extra=_automation_hint(action.get("location")),
+            )
+            continue
         effective_cost, effective_gain = graph.stats_of[resource_id]
         gain_per_fire = effective_gain[resource_id]
         fires = -(-(needed - have) // gain_per_fire)  # округление вверх
-
-        # Мощность процессора - количество потребляемых рецептом предметов за ОДНУ
-        # прокрутку (сложный рецепт "дороже" простого) - жёсткий потолок на размер
-        # запроса (не на скорость): если суммарной мощности не хватает даже
-        # теоретически, ждать бессмысленно, фоновая задача тут не поможет.
-        # Энергия - не предмет: её рецепт ждёт притоком (см. _energy_wait_failure),
-        # мощность процессора на неё не тратится.
-        compute_per_fire = sum(v for r, v in effective_cost.items() if r != ENERGY_RESOURCE_ID)
-        if fires * compute_per_fire > compute_capacity(state):
-            failures[resource_id] = AutocraftFailure(resource_id, "insufficient_compute")
-            continue
-
-        if kind == "long_action":
-            # Многоходовое действие идёт ПАРТИЯМИ: настоящий manual_job, одна
-            # активная задача НА action_id и одна многоходовая НА локацию (те же
-            # правила, что у клика игрока, см. do_manual_action). Поэтому за раз
-            # запускается одна партия, спрос на ингредиенты - ровно на неё; следующую
-            # запустит повторная попытка отложенного действия, когда эта закончится
-            # (_process_manual_jobs идёт в advance_turn раньше _process_pending_actions -
-            # без хода простоя). Скорость/слоты автокрафта партия не тратит - её
-            # ограничивает сама локация. Локация проверяется здесь только по УЖЕ
-            # идущим задачам: если её занял кто-то ещё, спрос вниз не пускаем зря.
-            # Конфликт между двумя партиями ЭТОГО ЖЕ запроса решает Phase 3, в
-            # порядке "сырьё раньше" - иначе потребитель, обработанный здесь первым,
-            # занял бы локацию, нужную его же собственному ингредиенту.
-            if _busy_manual_job_in_location(manual_jobs, action_id) is not None:
-                resolved_of[resource_id] = "long_running"
-                continue
-            resolved_of[resource_id] = "long_pending"
-            for ing_id, ing_amount in effective_cost.items():
-                total_needed[ing_id] = total_needed.get(ing_id, 0) + ing_amount
-            energy_per_craft = max(energy_per_craft, effective_cost.get(ENERGY_RESOURCE_ID, 0))
-            continue
-
-        # Пока по ресурсу уже идёт фоновая задача, ВЕСЬ его дальнейший выпуск идёт
-        # ТОЛЬКО через неё - продлеваем при нехватке, но не докрафчиваем "хвост" отдельным
-        # мгновенным путём в обход задачи, и НЕ пускаем спрос дальше на её ингредиенты
-        # (она сама заберёт их из наличия по ходу выполнения, см. _process_autocraft_jobs).
-        existing = jobs.get(resource_id)
-        if existing is not None:
-            remaining = existing["fires_total"] - existing["fires_done"]
-            projected = have + remaining * gain_per_fire
-            if projected < needed:
-                existing["fires_total"] += -(-(needed - projected) // gain_per_fire)
-            resolved_of[resource_id] = "existing_job"
-            continue
-
         fires_map[resource_id] = fires
         gain_per_fire_map[resource_id] = gain_per_fire
-        resolved_of[resource_id] = "action_pending"
+        resolved_of[resource_id] = "long" if kind == "long_action" else "craft"
         for ing_id, ing_amount in effective_cost.items():
             total_needed[ing_id] = total_needed.get(ing_id, 0) + ing_amount * fires
         energy_per_craft = max(energy_per_craft, effective_cost.get(ENERGY_RESOURCE_ID, 0))
@@ -1266,239 +1264,189 @@ def _guaranteed_amount(value) -> float:
     return value["min"] if _is_range_amount(value) else value
 
 
-def _start_energy_batches(
-    state: GameState, resource_id: str, needed: float, resources: dict[str, int], energy_jobs: list[dict],
-) -> AutocraftFailure | None:
-    """Запускает столько партий рецепта крафта за энергию, сколько нужно, чтобы
-    покрыть needed (с учётом уже идущих партий ТОГО ЖЕ рецепта), но не больше, чем
-    есть свободных преобразователей подходящего типа - по одной партии на свободный
-    слот, параллельно, а не одну за раз. Преобразователи достаются жадно, в порядке
-    обработки (graph.ingredient_first): если два разных ресурса ждут партий, а слотов
-    на всех не хватает, первый заберёт сколько ему нужно, второй подождёт.
-
-    Материальную цену (consumes) автокрафт сам не докрафчивает (осознанное
-    упрощение, см. CLAUDE.md) - партия стартует, только если материал уже в
-    наличии. Ошибка missing_energy_recipe_material - только если материала нет
-    даже на ОДНУ партию, свободный преобразователь есть, а ни одна партия этого
-    рецепта ещё не идёт (иначе ждать есть чего - просто стартуем, сколько смогли)."""
-    recipe_id = ENERGY_RECIPE_FOR_RESOURCE[resource_id]
-    energy_recipe = ENERGY_RECIPES[recipe_id]
-    machine = energy_recipe.get("machine")
-    running = sum(
-        1 for j in energy_jobs
-        if j["recipe_id"] == recipe_id and (machine is None or j.get("building_id") == machine)
-    )
-    per_batch = _guaranteed_amount(energy_recipe["produces"][resource_id])
-    if per_batch > 0:
-        deficit = needed - resources.get(resource_id, 0) - running * per_batch
-        batches = max(0, -(-deficit // per_batch))  # округление вверх
-    else:
-        # Нижняя граница диапазона 0 - сколько партий нужно, заранее не сосчитать;
-        # ведём по одной за раз, как раньше.
-        batches = 0 if running else 1
-    consumes = energy_recipe.get("consumes", {})
-    started = 0
-    while started < batches:
-        building_id = _pick_converter_building_with_free_slot(state, energy_jobs, machine)
-        if building_id is None:
-            break
-        if not all(resources.get(r, 0) >= amt for r, amt in consumes.items()):
-            if started == 0 and running == 0:
-                return AutocraftFailure(resource_id, "missing_energy_recipe_material")
-            break
-        for r, amt in consumes.items():
-            resources[r] -= amt
-        energy_jobs.append({"recipe_id": recipe_id, "progress": 0, "building_id": building_id})
-        started += 1
-    return None
+def _items_per_fire(cost: dict) -> float:
+    """Сколько ПРЕДМЕТОВ потребляет одна прокрутка - энергия не предмет, мощность
+    процессора на неё не тратится."""
+    return sum(v for r, v in cost.items() if r != ENERGY_RESOURCE_ID)
 
 
-def _commit_autocraft_plan(
-    state: GameState, graph: _AutocraftGraph, resolved_of: dict[str, str], fires_map: dict[str, float],
-    gain_per_fire_map: dict[str, float], total_needed: dict[str, float], resources: dict[str, int],
-    jobs: dict[str, dict], slots: dict[str, int], energy_jobs: list[dict], manual_jobs: dict[str, dict],
-) -> tuple[AutocraftFailure | None, dict[str, str]]:
-    """Второй проход по графу, ПО graph.ingredient_first КАК ЕСТЬ (сырьё раньше того,
-    кто его ест) - все гейты (не_открыт/технология/мощность/цикл) уже решены заранее в
-    _aggregate_autocraft_demand, здесь только то, что ЗАВИСИТ от статуса ингредиентов
-    или порядка обработки:
-    - "energy_pending": партии конкурируют за свободные преобразователи с другими
-      energy_pending resource_id - порядок обработки решает, кому какой достанется
-      (см. _start_energy_batches);
-    - "long_pending": партия многоходового действия стартует, только если все её
-      ингредиенты уже готовы и локацию не занял раньше другой ресурс этого же запроса;
-    - "action_pending": если хоть один ингредиент ещё не готов, этот рецепт тоже
-      откладывается целиком - его прокрутка не может случиться раньше, чем подвезут
-      сырьё. К этому моменту КАЖДЫЙ ингредиент уже обработан (ingredient_first),
-      поэтому статус известен точно;
-    - тот же порядок (сырьё раньше) даёт фоновым задачам ПОПАДАТЬ в jobs (dict, порядок
-      вставки = порядок обработки в _process_autocraft_jobs) в правильной
-      последовательности - глубокие (сырьевые) задачи первыми, чтобы успеть подвезти
-      сырьё вышестоящим задачам В ТОТ ЖЕ ход (см. CLAUDE.md, _process_autocraft_jobs).
-
-    Два разных "ещё не готово" в status_of:
-    - "in_progress" - ресурс подвезёт фоновая задача автокрафта (autocraft_jobs): она
-      заведена с полным fires_total и сама доделает всё до конца;
-    - "waiting" - ресурс идёт ПАРТИЯМИ (крафт за энергию, многоходовое действие) и
-      каждую следующую партию запускает только очередная повторная попытка
-      (_process_pending_actions). Рецепт поверх такого ингредиента НЕ заводит свою
-      фоновую задачу, а тоже ждёт ("waiting" заразен вверх по цепочке): задача
-      повисла бы навсегда - по ресурсу с задачей спрос дальше на ингредиенты не идёт
-      (см. existing_job в _aggregate_autocraft_demand), и следующую партию никто бы не
-      запустил. Без задачи повторная попытка каждый ход заново пускает спрос вниз.
-    Возвращает первую настоящую (не "in_progress"/"waiting") ошибку, если она где-то
-    встретилась - вызывающий должен ничего не коммитить в state в этом случае
-    (resources/jobs/energy_jobs здесь - рабочие копии). status_of - как resolved_of, но
-    "*_pending" уже разрешены в "ok"/"in_progress"/"waiting"."""
-    status_of: dict[str, str] = {}
-    for resource_id in graph.ingredient_first:
-        resolution = resolved_of.get(resource_id, "ok")
-        if resolution in ("ok", "existing_job"):
-            status_of[resource_id] = "ok" if resolution == "ok" else "in_progress"
-            continue
-        if resolution == "energy_wait":
-            # Как у фоновой задачи: энергия подтянется сама. Потребитель заводит свою
-            # задачу автокрафта и берёт энергию по ходам, сколько накопилось;
-            # многоходовая партия и само действие ждут повторной попытки.
-            status_of[resource_id] = "in_progress"
-            continue
-        if resolution == "long_running":
-            status_of[resource_id] = "waiting"
-            continue
-
-        if resolution == "long_pending":
-            status_of[resource_id] = "waiting"
-            action_id = graph.action_of[resource_id]
-            effective_cost, effective_gain = graph.stats_of[resource_id]
-            if any(status_of.get(ing_id) in ("waiting", "in_progress") for ing_id in effective_cost):
-                continue
-            if _busy_manual_job_in_location(manual_jobs, action_id) is not None:
-                continue
-            for ing_id, ing_amount in effective_cost.items():
-                resources[ing_id] -= ing_amount
-            manual_jobs[action_id] = _new_manual_job(
-                action_id, manual_action_duration(action_id, state), effective_cost, effective_gain, autocraft=True,
-            )
-            continue
-
-        if resolution == "energy_pending":
-            failure = _start_energy_batches(state, resource_id, total_needed[resource_id], resources, energy_jobs)
-            if failure is not None:
-                return failure, status_of
-            status_of[resource_id] = "waiting"  # партия за энергию всегда растянута на ходы, никогда мгновенно
-            continue
-
-        # resolution == "action_pending"
-        action_id = graph.action_of[resource_id]
-        effective_cost, _ = graph.stats_of[resource_id]
-        fires = fires_map[resource_id]
-        gain_per_fire = gain_per_fire_map[resource_id]
-
-        if any(status_of.get(ing_id) == "waiting" for ing_id in effective_cost):
-            status_of[resource_id] = "waiting"
-            continue
-        child_blocked = any(status_of.get(ing_id) == "in_progress" for ing_id in effective_cost)
-        needs_job = child_blocked or fires > autocraft_speed_capacity(state)
-
-        if needs_job:
-            if slots["used"] >= autocraft_slot_capacity(state):
-                return AutocraftFailure(resource_id, "no_free_slots"), status_of
-            jobs[resource_id] = {"action_id": action_id, "fires_total": fires, "fires_done": 0}
-            slots["used"] += 1
-            status_of[resource_id] = "in_progress"
-            continue
-
-        for ing_id, ing_amount in effective_cost.items():
-            resources[ing_id] -= ing_amount * fires
-        _add_resource(resources, resource_id, fires * gain_per_fire)
-        status_of[resource_id] = "ok"
-
-    return None, status_of
-
-
-def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure | None:
-    """Списывает cost с state.resources. При нехватке чего-либо сперва пытается
-    автоматически докрафтить недостающее из более простого сырья (рекурсивно по дереву
-    рецептов), если для ресурса открыт автокрафт и хватает мощности процессора. Три исхода:
-    - всё нашлось (мгновенно, в пределах скорости автокрафта за этот ход) -> cost
-      списывается, возвращается None;
-    - часть цепочки не влезает в скорость за один ход -> заводятся/продлеваются фоновые
-      задачи в state.autocraft_jobs (уже добытое мгновенно по пути ОСЕДАЕТ в ресурсах -
-      это реальный прогресс), cost верхнего действия НЕ списывается, возвращается
-      AutocraftFailure(..., "in_progress") - вызывающий должен поставить действие в
-      очередь (см. _pay_or_defer), а не считать его провалившимся;
-    - настоящая ошибка -> ничего не меняется (ни resources, ни autocraft_jobs, ни
-      energy_jobs), возвращается причина.
-
-    Реализация - два прохода по дереву рецептов ВСЕХ resource_id из cost СРАЗУ (а не по
-    отдельному дереву на каждый), а не наивная рекурсия "нужно - произвёл - тут же
-    потратил": _discover_autocraft_graph строит структуру (что из чего) один раз на
-    resource_id, _aggregate_autocraft_demand суммирует спрос на каждый ресурс от ВСЕХ
-    потребителей разом, _commit_autocraft_plan одним проходом заводит фоновые задачи/
-    мгновенно производит. Это принципиально важно для "ромбов" в дереве рецептов
-    (несколько рецептов делят один и тот же ресурс ниже по цепочке, скажем, "шестерня"
-    и "пластина" из одного "слитка") - наивная рекурсия production-and-consume-immediately
-    заставляла бы каждую ветку заново выводить с нуля весь путь до общего ресурса, потому
-    что к её очереди он уже был потрачен предыдущей веткой (тот же слиток был сделан и
-    тут же расходован на шестерню, для пластины его как бы и не было) - на самоподобном
-    дереве из N уровней "ромбов" это давало ЧИСТУЮ ЭКСПОНЕНТУ по числу вызовов (подтверждено
-    профилированием, 2026-09-10 - см. CLAUDE.md). Агрегация спроса ДО производства убирает
-    экспоненту полностью: каждый resource_id разбирается ровно один раз, сложность
-    пропорциональна размеру самого дерева рецептов (вершины + рёбра), а не числу путей до
-    общего ресурса. Побочный эффект (не баг, аккуратно сохранён specifically) - раньше
-    compute_power/autocraft_speed проверялись НЕЗАВИСИМО на fires каждой отдельной ветки,
-    так что несколько веток, СОВМЕСТНО делящих ресурс, могли в СУММЕ превысить лимит
-    процессора/скорости за один и тот же вызов, хотя каждая по отдельности укладывалась -
-    теперь проверка идёт на УЖЕ АГРЕГИРОВАННЫЙ fires, как и задумано лимитом."""
-    working_resources = dict(state.resources)
-    working_jobs = {rid: dict(job) for rid, job in state.autocraft_jobs.items()}
-    working_energy_jobs = [dict(job) for job in state.energy_jobs]
-    working_manual_jobs = dict(state.manual_jobs)  # автокрафт только ДОБАВЛЯЕТ задачи, свои не трогает
-    slots = {"used": len(working_jobs)}
+def _plan_order(
+    state: GameState, cost: dict[str, int], top: dict | None = None,
+) -> tuple[AutocraftFailure | None, dict | None]:
+    """Чистый расчёт заказа (state не меняется): дерево рецептов (_discover_autocraft_graph)
+    + суммарный спрос (_aggregate_autocraft_demand) -> шаги и то, что изъять со склада.
+    top - шаг самого заказанного рецепта (заказ «Рецепт ×N»): {"kind", "action_id",
+    "resource_id", "fires_total", "energy_per_fire"}; тогда cost - его ингредиенты на все
+    N прокруток (без энергии - её каждая прокрутка берёт сама). Возвращает (отказ, None)
+    или (None, plan): plan = {"steps", "take", "energy_reserve"}."""
     recipe = resource_recipe(state)
-
     graph = _discover_autocraft_graph(state, cost.keys(), recipe)
-    failures, total_needed, fires_map, gain_per_fire_map, resolved_of, energy_per_craft = _aggregate_autocraft_demand(
-        state, cost, graph, working_jobs, working_manual_jobs,
+    failures, total_needed, fires_map, gain_per_fire_map, resolved_of, energy_per_craft = (
+        _aggregate_autocraft_demand(state, cost, graph)
     )
     if failures:
-        # При нескольких одновременных настоящих ошибках сразу - та, что попала бы игроку
-        # от старого рекурсивного кода: он спускался по cost в порядке ключей и по
-        # ингредиентам в порядке рецепта, останавливаясь на ПЕРВОЙ найденной - то же самое
-        # даёт наименьший graph.preorder (порядок первого обнаружения при обходе).
         best_id = min(failures, key=lambda rid: graph.preorder[rid])
-        return failures[best_id]  # настоящая ошибка - state (ресурсы и все очереди задач) не трогаем
-    hard_failure, status_of = _commit_autocraft_plan(
-        state, graph, resolved_of, fires_map, gain_per_fire_map, total_needed,
-        working_resources, working_jobs, slots, working_energy_jobs, working_manual_jobs,
-    )
-    if hard_failure is not None:
-        return hard_failure  # настоящая ошибка - state (ресурсы и все очереди задач) не трогаем
+        return failures[best_id], None
 
-    queued: AutocraftFailure | None = None
-    for resource_id in cost:
-        if status_of.get(resource_id) in ("in_progress", "waiting"):
-            # energy_reserve - сколько энергии этому запросу нужно ЗА РАЗ: пока он ждёт
-            # её, преобразователи не трогают столько накопленного (см. energy_reserved).
-            queued = AutocraftFailure(
-                resource_id, "in_progress", extra={"energy_reserve": energy_per_craft} if energy_per_craft else {},
-            )
-            break
+    steps: list[dict] = []
+    for resource_id in graph.ingredient_first:
+        resolution = resolved_of.get(resource_id)
+        if resolution in ("craft", "long"):
+            steps.append({
+                "resource_id": resource_id, "kind": "action" if resolution == "craft" else "long",
+                "action_id": graph.action_of[resource_id],
+                "fires_total": fires_map[resource_id], "fires_done": 0,
+            })
+        elif resolution == "energy":
+            needed = total_needed[resource_id] - state.resources.get(resource_id, 0)
+            steps.append({
+                "resource_id": resource_id, "kind": "energy",
+                "recipe_id": ENERGY_RECIPE_FOR_RESOURCE[resource_id],
+                # у крафта за энергию считаем ЕДИНИЦЫ ресурса, а не партии: выход партии
+                # бывает диапазоном, партий запускается столько, сколько нужно по факту
+                "fires_total": needed, "fires_done": 0,
+            })
+    total_energy = total_needed.get(ENERGY_RESOURCE_ID, 0)
+    if top is not None:
+        steps.append({
+            "resource_id": top["resource_id"], "kind": top["kind"], "action_id": top["action_id"],
+            "fires_total": top["fires_total"], "fires_done": 0,
+        })
+        energy_per_craft = max(energy_per_craft, top["energy_per_fire"])
+        total_energy += top["energy_per_fire"] * top["fires_total"]
+        if top["energy_per_fire"] > 0 and total_energy > state.resources.get(ENERGY_RESOURCE_ID, 0):
+            failure = _energy_wait_failure(state, energy_per_craft)
+            if failure is not None:
+                return failure, None
 
-    if queued is not None:
-        state.resources = working_resources
-        state.autocraft_jobs = working_jobs
-        state.energy_jobs = working_energy_jobs
-        state.manual_jobs = working_manual_jobs
-        return queued
+    if steps:
+        # Мощность процессора - "мозг заказов": потолок РАЗМЕРА одного заказа, в
+        # предметах, которые съедят все его прокрутки (энергия не считается).
+        size = 0
+        for step in steps:
+            if step["kind"] == "energy":
+                recipe_def = ENERGY_RECIPES[step["recipe_id"]]
+                per_batch = _guaranteed_amount(recipe_def["produces"][step["resource_id"]]) or 1
+                size += _items_per_fire(recipe_def.get("consumes", {})) * -(-step["fires_total"] // per_batch)
+            else:
+                size += _items_per_fire(effective_manual_action_stats(step["action_id"], state)[0]) * step["fires_total"]
+        capacity = compute_capacity(state)
+        if capacity <= 0:
+            return AutocraftFailure(steps[-1]["resource_id"], "no_processor"), None
+        if size > capacity:
+            return AutocraftFailure(
+                steps[-1]["resource_id"], "insufficient_compute",
+                extra={"size": _format_amount(size), "capacity": _format_amount(capacity)},
+            ), None
 
-    for resource_id, amount in cost.items():
-        working_resources[resource_id] -= amount
-    state.resources = working_resources
-    state.autocraft_jobs = working_jobs
-    state.energy_jobs = working_energy_jobs
-    state.manual_jobs = working_manual_jobs
-    return None
+    take = {}
+    for resource_id, needed in total_needed.items():
+        if resource_id == ENERGY_RESOURCE_ID or needed <= 0:
+            continue
+        amount = min(needed, state.resources.get(resource_id, 0))
+        if amount > 0:
+            take[resource_id] = amount
+    return None, {
+        "steps": steps, "take": take,
+        "energy_reserve": energy_per_craft if total_energy > 0 else 0,
+    }
+
+
+def _place_order(
+    state: GameState, kind: str, target_id, label: str, cost: dict[str, int],
+    extra: dict | None = None, final_energy: float = 0, top: dict | None = None,
+) -> tuple[AutocraftFailure | None, dict | None]:
+    """Оформляет заказ: план (_plan_order), проверка свободного слота заказов и ИЗЪЯТИЕ
+    со склада всего нужного в резерв заказа (order["reserved"]) - с этого момента это
+    сырьё физически принадлежит заказу, никакой другой процесс (клик, другой заказ,
+    автоматизатор, потребление построек) его не перехватит. Склад показывает только
+    то, что осталось. kind/target_id/extra - что выполнить по готовности (тот же набор,
+    что у _ORDER_RETRY), либо kind="recipe" - заказ «рецепт ×N» (top), результат
+    которого просто выдаётся на склад. final_energy - энергия, которую возьмёт само
+    действие при выполнении (её заказ ждёт перед финалом)."""
+    failure, plan = _plan_order(state, cost, top)
+    if failure is not None:
+        return failure, None
+    if plan["steps"]:
+        busy = sum(1 for o in state.orders if o["steps"])
+        slots = autocraft_slot_capacity(state)
+        if busy >= slots:
+            return AutocraftFailure(plan["steps"][-1]["resource_id"], "no_free_slots", extra={"slots": slots}), None
+    reserved: dict[str, float] = {}
+    for resource_id, amount in plan["take"].items():
+        state.resources[resource_id] -= amount
+        reserved[resource_id] = amount
+    order = {
+        "id": state.next_order_id, "kind": kind, "target_id": target_id, "label": label,
+        "reserved": reserved, "steps": plan["steps"],
+        "energy_reserve": max(plan["energy_reserve"], final_energy),
+        "final_energy": final_energy,
+        "status": None, "waits_energy": False,
+    }
+    if extra:
+        order.update(extra)
+    state.next_order_id += 1
+    state.orders.append(order)
+    return None, order
+
+
+def order_recipe(state: GameState, action_id: str, qty: int) -> ActionResult:
+    """Заказ «рецепт ×N» (кнопка «Заказать» в карточке рецепта): автокрафт сделает
+    недостающие ингредиенты и сам рецепт N раз, результат - на склад. Ход не тратит -
+    работа идёт в advance_turn (_process_orders). Отказывает сразу, если рецепт не
+    открыт, его механизм не автоматизирован, или не хватает сырья, которое автокрафт
+    делать не умеет; энергию заказ ждёт."""
+    if action_id not in MANUAL_ACTIONS:
+        return ActionResult(False, "Такого рецепта нет.")
+    action = MANUAL_ACTIONS[action_id]
+    qty = max(1, int(qty))
+    if not is_manual_action_unlocked(action_id, state):
+        return ActionResult(False, f"«{action['name']}» ещё не открыт.")
+    if not action["cost"] or not is_manual_action_deterministic(action_id):
+        return ActionResult(False, f"«{action['name']}» заказать нельзя - у него случайный результат или нет цены.")
+    failure, top = _recipe_order_top(state, action_id, qty)
+    if failure is None:
+        cost, _ = effective_manual_action_stats(action_id, state)
+        ingredients = {r: v * qty for r, v in cost.items() if r != ENERGY_RESOURCE_ID}
+        label = f"«{action['name']}» ×{qty}" if qty > 1 else f"«{action['name']}»"
+        failure, order = _place_order(state, "recipe", action_id, label, ingredients, extra={"qty": qty}, top=top)
+        if order is not None:
+            return ActionResult(True, f"Заказ оформлен: {label}.", pending=True)
+    return ActionResult(False, f"Нельзя заказать «{action['name']}»: {describe_autocraft_failure(failure)}.")
+
+
+def _recipe_order_top(state: GameState, action_id: str, qty: int) -> tuple[AutocraftFailure | None, dict | None]:
+    """Шаг самого заказанного рецепта (см. _plan_order: top) или отказ, если его
+    механизм не автоматизирован/нет процессора."""
+    action = MANUAL_ACTIONS[action_id]
+    gain = effective_manual_action_stats(action_id, state)[1]
+    resource_id = next(iter(gain))
+    if location_autocraft_capacity(state, action.get("location")) == 0:
+        return AutocraftFailure(resource_id, "not_automated", extra=_automation_hint(action.get("location"))), None
+    if compute_capacity(state) <= 0:
+        return AutocraftFailure(resource_id, "no_processor"), None
+    cost = effective_manual_action_stats(action_id, state)[0]
+    return None, {
+        "kind": "long" if manual_action_duration(action_id, state) > 1 else "action",
+        "action_id": action_id, "resource_id": resource_id, "fires_total": qty,
+        "energy_per_fire": cost.get(ENERGY_RESOURCE_ID, 0),
+    }
+
+
+def check_order(state: GameState, action_id: str, qty: int) -> AutocraftFailure | None:
+    """Можно ли прямо сейчас заказать рецепт ×qty - тот же расчёт, что order_recipe,
+    без изменений state (для карточки рецепта в UI)."""
+    if not is_manual_action_unlocked(action_id, state):
+        return AutocraftFailure(next(iter(MANUAL_ACTIONS[action_id]["gain"])), "tech_locked")
+    failure, top = _recipe_order_top(state, action_id, qty)
+    if failure is not None:
+        return failure
+    cost, _ = effective_manual_action_stats(action_id, state)
+    ingredients = {r: v * qty for r, v in cost.items() if r != ENERGY_RESOURCE_ID}
+    failure, plan = _plan_order(state, ingredients, top)
+    if failure is None and plan["steps"] and sum(1 for o in state.orders if o["steps"]) >= autocraft_slot_capacity(state):
+        return AutocraftFailure(top["resource_id"], "no_free_slots", extra={"slots": autocraft_slot_capacity(state)})
+    return failure
 
 
 def _direct_shortfall(state: GameState, cost: dict[str, int]) -> dict[str, int | float]:
@@ -1581,26 +1529,26 @@ def _format_shortfall(missing: dict[str, int | float]) -> str:
 
 
 def autocraft_eta_turns(state: GameState, fires: int | float, action_id: str | None = None) -> int | None:
-    """Через сколько ходов завершатся fires прокруток автокрафт-рецепта при ТЕКУЩЕЙ
-    скорости (autocraft_speed_capacity) - None, если fires укладывается в один ход
-    (мгновенно: фоновая задача вообще не понадобится, см. _ensure_available:
-    needs_job = fires > autocraft_speed_capacity(state)). То же округление вверх,
-    что и в autocraft_jobs_view для уже идущих задач - здесь используется ДО того,
-    как игрок согласится на действие (см. autocraft_preview), чтобы окно
-    подтверждения могло заранее предупредить "это растянется на N ходов".
-    action_id - рецепт этих прокруток: у многоходового действия партии идут строго
-    по одной (одна задача на действие), так что ходов = fires * длительность, от
-    скорости автокрафта это не зависит."""
-    if fires <= 0:
+    """Через сколько ходов автокрафт сделает fires прокруток рецепта action_id: сборщики
+    - мгновенно в пределах их лимита на ход (длительность рецепта не важна), иначе
+    «Автоматизация» механизма - как игрок (1 крафт за ход, многоходовой рецепт -
+    fires * длительность). None - уложится в ход заказа (или скорость не ограничена)."""
+    if fires <= 0 or action_id is None:
         return None
-    if action_id is not None:
-        duration = manual_action_duration(action_id, state)
-        if duration > 1:
-            return int(fires) * duration
-    speed = autocraft_speed_capacity(state)
-    if fires <= speed:
+    location = MANUAL_ACTIONS[action_id].get("location")
+    assemblers = location_assembler_capacity(state, location)
+    if assemblers is None:
         return None
-    return -(-fires // speed)  # округление вверх
+    duration = manual_action_duration(action_id, state)
+    mechanism = 1 if mechanism_automated(state, location) else 0
+    if assemblers > 0:
+        per_turn = assemblers + (mechanism if duration <= 1 else 0)
+        return None if fires <= per_turn else -(-fires // per_turn)
+    if not mechanism:
+        return None
+    if duration > 1:
+        return int(fires) * duration
+    return None if fires <= 1 else int(-(-fires // 1))
 
 
 def _preview_node(
@@ -1672,7 +1620,7 @@ def autocraft_preview(state: GameState, cost: dict[str, int]) -> dict | None:
     подтверждения) откажет отдельно, со своим обычным сообщением - эта функция
     только про "сколько и чего", не про "получится ли" (та же философия, что
     уже была у _raw_shortfall)."""
-    if not (state.autocraft_enabled and compute_capacity(state) > 0):
+    if compute_capacity(state) <= 0:
         return None
     if all(state.resources.get(r, 0) >= amount for r, amount in cost.items()):
         return None
@@ -1687,62 +1635,46 @@ def _pay_or_defer(
     retry_extra: dict | None = None,
 ) -> ActionResult | None:
     """Общий хвост для действий с ценой. Три исхода:
-    - None - оплата прошла мгновенно, вызывающий продолжает применять эффект действия сейчас;
-    - ActionResult(True, ...) - не хватило скорости автокрафта за один ход, действие
-      поставлено в очередь (state.pending_actions) и само завершится, когда фоновые
-      задачи докрафтят нужное (см. _process_pending_actions в advance_turn);
-    - ActionResult(False, ...) - настоящая ошибка, действие не выполнено и не поставлено в очередь.
+    - None - всего хватает, cost списан, вызывающий продолжает применять эффект сейчас;
+    - ActionResult(True, pending=True) - не хватает, но автокрафт это сделает (или не
+      хватает только энергии, и она притечёт): оформлен ЗАКАЗ (state.orders) - всё нужное
+      изъято со склада в его резерв, действие выполнится само по готовности
+      (_process_orders). Повторный клик по тому же действию, пока заказ идёт, нового
+      не оформляет;
+    - ActionResult(False, ...) - настоящая ошибка, ничего не изменилось.
 
-    retry_extra - необязательные ДОПОЛНИТЕЛЬНЫЕ поля, которые нужно запомнить в
-    state.pending_actions вместе с kind/target_id/label, чтобы retry (см.
-    _PENDING_RETRY/_process_pending_actions) мог повторить действие ТОЧНО с теми же
-    параметрами, что были при первой попытке - например, "scale" у ручного действия
-    с выбранным игроком масштабом (см. do_manual_action): без этого отложенное
-    действие при повторной попытке молча откатилось бы на масштаб по умолчанию."""
-    failure = ensure_and_pay(state, cost)
-    if failure is None:
+    retry_extra - доп. поля для повторного выполнения (например, "scale" ручного
+    действия, см. do_manual_action), иначе действие по готовности откатилось бы на
+    параметры по умолчанию."""
+    if all(state.resources.get(r, 0) >= amount for r, amount in cost.items()):
+        for r, amount in cost.items():
+            state.resources[r] -= amount
         return None
-    if failure.reason == "in_progress":
-        waits_energy = failure.resource_id == ENERGY_RESOURCE_ID
-        _enqueue_pending(
-            state, kind, target_id, action_desc, retry_extra,
-            waits_energy=waits_energy, energy_reserve=failure.extra.get("energy_reserve", 0) if waits_energy else 0,
-        )
-        if waits_energy:
+    for order in state.orders:
+        if order["kind"] == kind and order["target_id"] == target_id:
+            return ActionResult(True, f"{action_desc}: уже заказано, ждёт выполнения.", pending=True)
+    failure, order = _place_order(
+        state, kind, target_id, action_desc, cost, extra=retry_extra,
+        final_energy=cost.get(ENERGY_RESOURCE_ID, 0),
+    )
+    if order is not None:
+        if not order["steps"]:
+            order["waits_energy"] = True
             return ActionResult(True, _energy_wait_message(state, cost, action_desc), pending=True)
         return ActionResult(
-            True, f"Автокрафт для {action_desc} запущен в фоне - действие завершится само, когда ресурсов хватит.",
+            True, f"Заказ оформлен: {action_desc} - недостающее сделает автокрафт, действие выполнится само.",
             pending=True,
         )
-    if failure.reason in ("no_processor", "autocraft_disabled"):
-        # Ни процессора нет, ни игрок сам выключил галочку "Автокрафт" - в обоих
-        # случаях сообщение должно звучать в точности как обычная нехватка при
-        # ручном крафте, без единого намёка на автокрафт/процессор/память (см.
-        # AutocraftFailure). Недостачу при этом считаем ПРЯМО по cost - без
-        # автокрафта промежуточных ресурсов не бывает, всё несётся руками.
-        shortfall = _direct_shortfall(state, cost)
-        if set(shortfall) == {ENERGY_RESOURCE_ID}:
-            # Не хватает ТОЛЬКО энергии - она притечёт сама (прямое пожелание: ручное
-            # действие ждёт её так же, как автокрафт, а не отказывает). Повторная
-            # попытка (_process_pending_actions) идёт внутри хода РАНЬШЕ
-            # преобразователей, так что они не перехватят накопленное.
-            energy_failure = _energy_wait_failure(state, cost[ENERGY_RESOURCE_ID])
-            if energy_failure is None:
-                _enqueue_pending(
-                    state, kind, target_id, action_desc, retry_extra,
-                    waits_energy=True, energy_reserve=cost[ENERGY_RESOURCE_ID],
-                )
-                return ActionResult(True, _energy_wait_message(state, cost, action_desc), pending=True)
-            return ActionResult(False, f"Не хватает ресурсов на {action_desc}: {describe_autocraft_failure(energy_failure)}.")
+    if failure.reason == "no_processor":
+        # Автокрафта в игре ещё нет - звучит как обычная нехватка при ручном крафте.
         message = f"Не хватает ресурсов на {action_desc}."
+        shortfall = _direct_shortfall(state, cost)
         if shortfall:
             message += f" Не хватает: {_format_shortfall(shortfall)}."
         return ActionResult(False, message)
     message = f"Не хватает ресурсов на {action_desc}: {describe_autocraft_failure(failure)}."
-    # Автокрафт задействован (есть процессор, галочка включена) - показываем
-    # недостачу в БАЗОВЫХ ресурсах (см. _raw_shortfall), а не в том промежуточном
-    # ресурсе, на котором конкретно споткнулась цепочка. Энергию не перечисляем,
-    # если застряли не на ней: её автокрафт дождался бы сам.
+    # Недостача в БАЗОВЫХ ресурсах (см. _raw_shortfall), а не в промежуточном ресурсе,
+    # на котором споткнулась цепочка. Энергию не перечисляем, если застряли не на ней.
     shortfall = _raw_shortfall(state, cost)
     if failure.resource_id != ENERGY_RESOURCE_ID:
         shortfall.pop(ENERGY_RESOURCE_ID, None)
@@ -1754,45 +1686,10 @@ def _pay_or_defer(
 def _energy_wait_message(state: GameState, cost: dict[str, int], action_desc: str) -> str:
     need = cost.get(ENERGY_RESOURCE_ID)
     have = state.resources.get(ENERGY_RESOURCE_ID, 0)
-    if need is None or need <= have:
-        # Энергию ждёт не само действие, а рецепт по цепочке автокрафта.
-        return f"{action_desc} ждёт энергию для автокрафта - выполнится само, когда её накопится достаточно."
     return (
-        f"{action_desc} ждёт энергию (нужно {_format_amount(need)}, есть {_format_amount(have)}) - "
+        f"{action_desc} ждёт энергию (нужно {_format_amount(need or 0)}, есть {_format_amount(have)}) - "
         f"выполнится само, когда её накопится достаточно."
     )
-
-
-def _enqueue_pending(
-    state: GameState, kind: str, target_id: str | None, label: str, extra: dict | None = None,
-    waits_energy: bool = False, energy_reserve: float = 0,
-) -> None:
-    """waits_energy - действие ждёт притока энергии (см. _energy_wait_failure), а не
-    фоновых задач автокрафта: интерфейс показывает такие отдельно и без процессора.
-    energy_reserve - сколько энергии ему нужно за раз (см. energy_reserved)."""
-    for pending in state.pending_actions:
-        if pending["kind"] == kind and pending["target_id"] == target_id:
-            # Причина ожидания могла смениться (слитки доделаны - теперь ждёт энергию).
-            pending["waits_energy"] = waits_energy
-            pending["energy_reserve"] = energy_reserve
-            return  # уже в очереди - не дублируем
-    entry = {
-        "kind": kind, "target_id": target_id, "label": label,
-        "waits_energy": waits_energy, "energy_reserve": energy_reserve,
-    }
-    if extra:
-        entry.update(extra)
-    state.pending_actions.append(entry)
-
-
-def cancel_pending_action(state: GameState, index: int) -> ActionResult:
-    """Снимает отложенное действие из очереди (state.pending_actions) - ход не
-    тратит. Возвращать нечего: пока действие ждёт, его цена ещё не списана.
-    Фоновые задачи автокрафта, заведённые ради него, остаются (у них своя отмена)."""
-    if not (0 <= index < len(state.pending_actions)):
-        return ActionResult(False, "Такого ожидающего действия нет.")
-    pending = state.pending_actions.pop(index)
-    return ActionResult(True, f"Ожидание отменено: {pending['label']}.")
 
 
 def _matching_effects(building_id: str, techs: set[str]) -> list[dict]:
@@ -5661,16 +5558,6 @@ def toggle_pinned_recipe(state: GameState, action_id: str) -> ActionResult:
     return ActionResult(True, f"Закреплено: {name}.")
 
 
-def toggle_autocraft(state: GameState) -> ActionResult:
-    """Галочка "Автокрафт" в UI (видна игроку, только пока compute_capacity(state) > 0 -
-    см. tools/web_ui.py:build_view). Не расходует ход - как и toggle_pin, это чистая
-    настройка, а не игровое действие."""
-    state.autocraft_enabled = not state.autocraft_enabled
-    if state.autocraft_enabled:
-        return ActionResult(True, "Автокрафт включён.")
-    return ActionResult(True, "Автокрафт выключен - рецепты теперь только руками.")
-
-
 def _busy_manual_job_in_location(manual_jobs: dict[str, dict], action_id: str) -> str | None:
     """action_id многоходовой задачи, которая сейчас занимает локацию действия
     action_id (это может быть и оно само) - None, если локация свободна. Правило
@@ -5686,6 +5573,7 @@ def _busy_manual_job_in_location(manual_jobs: dict[str, dict], action_id: str) -
 
 def _new_manual_job(
     action_id: str, duration: int, cost: dict, gain: dict, autocraft: bool = False,
+    order_id: int | None = None, order_resource: str | None = None,
 ) -> dict:
     """Запись state.manual_jobs[action_id] - cost уже списан вызывающим. autocraft -
     задачу запустил автокрафт, а не игрок: по завершении она не засчитывается в
@@ -5700,6 +5588,10 @@ def _new_manual_job(
     }
     if autocraft:
         job["autocraft"] = True
+    if order_id is not None:
+        # Партия заказа: по завершении результат идёт в резерв заказа, не на склад.
+        job["order_id"] = order_id
+        job["order_resource"] = order_resource
     return job
 
 
@@ -7015,20 +6907,12 @@ def _process_reactors(state: GameState, report: ProductionReport, daytime: bool)
 
 
 def energy_reserved(state: GameState) -> float:
-    """Сколько накопленной энергии НЕ отдавать преобразователям: её копят те, кто
-    ждёт притока, - отложенные действия (energy_reserve, самый большой разовый
-    платёж их плана) и фоновые задачи автокрафта (энергия на одну прокрутку).
-    Иначе преобразователь, который тратит энергию последним в ходу, каждый ход
-    съедал бы то, что не дотянуло до платежа, и ожидание не кончилось бы, пока
-    он сам не доделает рецепт (прямое пожелание: преобразователь берёт только
-    излишки и не тормозит остальные процессы)."""
-    reserved = 0.0
-    for pending in state.pending_actions:
-        if pending.get("waits_energy"):
-            reserved += pending.get("energy_reserve", 0)
-    for job in state.autocraft_jobs.values():
-        reserved += effective_manual_action_stats(job["action_id"], state)[0].get(ENERGY_RESOURCE_ID, 0)
-    return reserved
+    """Сколько накопленной энергии НЕ отдавать преобразователям: её копят заказы,
+    которым нужна энергия (order["energy_reserve"] - самый большой разовый платёж их
+    плана). Иначе преобразователь, который тратит энергию последним в ходу, каждый ход
+    съедал бы то, что не дотянуло до платежа, и ожидание не кончилось бы (прямое
+    пожелание: преобразователь берёт только излишки и не тормозит остальные процессы)."""
+    return sum(order.get("energy_reserve", 0) for order in state.orders)
 
 
 def _process_energy_jobs(state: GameState, report: ProductionReport) -> None:
@@ -7098,7 +6982,7 @@ def _process_energy_jobs(state: GameState, report: ProductionReport) -> None:
             if job["progress"] >= recipe["threshold"]:
                 # produces рецепта может быть диапазоном (см. _is_range_amount) -
                 # бросается отдельно для каждого завершившегося job'а.
-                _gain(state.resources, _roll_range_amounts(recipe.get("produces", {})))
+                _deliver_job_output(state, job, _roll_range_amounts(recipe.get("produces", {})))
                 report.crafted[job["recipe_id"]] = report.crafted.get(job["recipe_id"], 0) + 1
             else:
                 remaining_jobs.append(job)
@@ -7106,52 +6990,259 @@ def _process_energy_jobs(state: GameState, report: ProductionReport) -> None:
     state.energy_jobs = remaining_jobs
 
 
-def _process_autocraft_jobs(state: GameState, report: ProductionReport) -> None:
-    """Каждый ход фоновые автокрафт-задачи (state.autocraft_jobs) вместе выполняют до
-    autocraft_speed_capacity(state) прокруток - общий бюджет на ВСЕ задачи разом, как и с
-    вычислительной мощностью. Порядок задач в словаре - порядок обработки: задачи глубже
-    в цепочке заводятся раньше (см. _ensure_available), поэтому обрабатываются первыми и
-    успевают подвезти сырьё "вышестоящим" задачам в этот же ход. Прокрутка ограничена ещё
-    и реально доступным сейчас сырьём - если его не хватает, задача просто простаивает
-    этот ход (как обычная постройка без ресурсов), а не падает с ошибкой. Так же
-    простаивает, пока у рецепта нет работающей постройки-механизма (requires_building
-    сломан/снесён уже после того, как задача встала в очередь) - и продолжит сама
-    после ремонта."""
-    budget = autocraft_speed_capacity(state)
-    for resource_id, job in list(state.autocraft_jobs.items()):
-        if budget <= 0:
+def _deliver_job_output(state: GameState, job: dict, produced: dict) -> None:
+    """Результат партии (многоходового действия или крафта за энергию): партия заказа
+    (job["order_id"]) кладёт его в резерв заказа и двигает его шаг, остальные - на склад.
+    Шаг многоходового действия считает партии, шаг крафта за энергию - единицы ресурса."""
+    order = _find_order(state, job.get("order_id")) if job.get("order_id") is not None else None
+    if order is None:
+        _gain(state.resources, produced)
+        return
+    _gain(order["reserved"], produced)
+    for step in order["steps"]:
+        if step["resource_id"] == job.get("order_resource") and step["fires_done"] < step["fires_total"]:
+            step["fires_done"] += 1 if step["kind"] == "long" else produced.get(step["resource_id"], 0)
             break
-        if not _action_building_ok(MANUAL_ACTIONS[job["action_id"]], state):
+
+
+def _pay_from_order(state: GameState, order: dict, cost: dict, times: int) -> None:
+    """Списывает cost*times: предметы - из резерва заказа, энергию - со склада."""
+    for ing_id, amount in cost.items():
+        pool = state.resources if ing_id == ENERGY_RESOURCE_ID else order["reserved"]
+        pool[ing_id] = pool.get(ing_id, 0) - amount * times
+        if pool[ing_id] < 0:
+            pool[ing_id] = 0  # только дрейф float у дробной энергии
+
+
+def _affordable_times(state: GameState, order: dict, cost: dict, limit) -> int:
+    """Сколько раз (не больше limit) заказ может оплатить cost прямо сейчас."""
+    times = limit
+    for ing_id, amount in cost.items():
+        if amount <= 0:
             continue
-        # Эффективные cost/gain (см. effective_manual_action_stats) - ТЕ ЖЕ числа,
-        # что использовались при заведении задачи в _ensure_available, а не сырой
-        # MANUAL_ACTIONS[...] - иначе улучшение постройки, купленное ПОСЛЕ того, как
-        # задача уже встала в очередь, задним числом поменяло бы её бухгалтерию.
-        cost, gain = effective_manual_action_stats(job["action_id"], state)
-        take = min(budget, job["fires_total"] - job["fires_done"])
-        for ing_id, amount in cost.items():
-            if amount <= 0:
+        pool = state.resources if ing_id == ENERGY_RESOURCE_ID else order["reserved"]
+        have = pool.get(ing_id, 0)
+        if RESOURCE_FRACTIONAL.get(ing_id, False):
+            have += 1e-9  # дрейф float у дробных (энергия): 1.0 // 0.1 == 9.0
+        times = min(times, int(have // amount))
+    return max(0, int(times))
+
+
+def _short_of_energy(state: GameState, order: dict, cost: dict) -> bool:
+    """Упирается ли оплата ОДНОЙ прокрутки именно в энергию (а не в предметы)."""
+    items_ok = all(order["reserved"].get(r, 0) >= a for r, a in cost.items() if r != ENERGY_RESOURCE_ID)
+    return items_ok and state.resources.get(ENERGY_RESOURCE_ID, 0) < cost.get(ENERGY_RESOURCE_ID, 0)
+
+
+def _advance_order_step(state: GameState, order: dict, step: dict, budgets: dict) -> tuple[str | None, bool]:
+    """Двигает один шаг заказа в этом ходу. Возвращает (причина простоя для игрока или
+    None, простой из-за энергии). Ингредиенты берутся из резерва заказа, энергия - со
+    склада; результат - в резерв. Сначала работают сборщики локации (мгновенно, при
+    любой длительности рецепта, в пределах их лимита на ход), затем - «Автоматизация»
+    механизма (как игрок: 1 крафт за ход, многоходовой рецепт - партией своей
+    длительности). budgets - остатки лимитов на этот ход: (локация, "asm"/"mech")."""
+    if step["kind"] == "energy":
+        return _advance_energy_step(state, order, step, budgets)
+
+    action_id = step["action_id"]
+    action = MANUAL_ACTIONS[action_id]
+    location = action.get("location")
+    if not is_manual_action_unlocked(action_id, state):
+        building = action_mechanism_building(action)
+        name = BUILDINGS[building]["name"] if building in BUILDINGS else action["name"]
+        return f"механизм «{name}» не работает", False
+    asm_key, mech_key = (location, "asm"), (location, "mech")
+    if asm_key not in budgets:
+        budgets[asm_key] = location_assembler_capacity(state, location)
+        budgets[mech_key] = 1 if mechanism_automated(state, location) else 0
+    if location_autocraft_capacity(state, location) == 0:
+        return f"нет автоматизации: «{LOCATIONS.get(location, {}).get('name', location)}»", False
+    cost, gain = effective_manual_action_stats(action_id, state)
+    remaining = step["fires_total"] - step["fires_done"]
+
+    # 1) Сборщики: мгновенно, длительность рецепта не важна.
+    assemblers = budgets[asm_key]
+    if assemblers != 0 and remaining > 0:
+        limit = remaining if assemblers is None else min(remaining, assemblers)
+        times = _affordable_times(state, order, cost, limit)
+        if times > 0:
+            _pay_from_order(state, order, cost, times)
+            for out_id, amount in gain.items():
+                _add_resource(order["reserved"], out_id, amount * times)
+            step["fires_done"] += times
+            remaining -= times
+            if assemblers is not None:
+                budgets[asm_key] = assemblers - times
+        elif _short_of_energy(state, order, cost):
+            return "ждёт энергию", True
+    if remaining <= 0 or budgets[mech_key] <= 0:
+        return None, False  # готово, либо лимит на этот ход исчерпан
+
+    # 2) «Автоматизация» механизма: как игрок у механизма.
+    if step["kind"] == "long":
+        job = state.manual_jobs.get(action_id)
+        if job is not None and job.get("order_id") == order["id"]:
+            return None, False  # партия заказа уже идёт
+        busy = _busy_manual_job_in_location(state.manual_jobs, action_id)
+        if busy is not None:
+            return f"механизм занят: «{MANUAL_ACTIONS[busy]['name']}»", False
+        if _affordable_times(state, order, cost, 1) < 1:
+            return ("ждёт энергию", True) if _short_of_energy(state, order, cost) else (None, False)
+        _pay_from_order(state, order, cost, 1)
+        state.manual_jobs[action_id] = _new_manual_job(
+            action_id, manual_action_duration(action_id, state), cost, gain,
+            autocraft=True, order_id=order["id"], order_resource=step["resource_id"],
+        )
+        budgets[mech_key] -= 1
+        return None, False
+    if _affordable_times(state, order, cost, 1) < 1:
+        return ("ждёт энергию", True) if _short_of_energy(state, order, cost) else (None, False)
+    _pay_from_order(state, order, cost, 1)
+    for out_id, amount in gain.items():
+        _add_resource(order["reserved"], out_id, amount)
+    step["fires_done"] += 1
+    budgets[mech_key] -= 1
+    return None, False
+
+
+def _advance_energy_step(state: GameState, order: dict, step: dict, budgets: dict) -> tuple[str | None, bool]:
+    """Шаг «крафт за энергию». Сборщик локации преобразователя - мгновенно: платит
+    порог энергии рецепта разом со склада и выдаёт результат в этот же ход (в пределах
+    своего лимита). Иначе - партии в слотах автоматизированных преобразователей, как
+    игрок (энергия копится по ходам, см. _process_energy_jobs)."""
+    recipe = ENERGY_RECIPES[step["recipe_id"]]
+    machine = recipe.get("machine")
+    consumes = recipe.get("consumes", {})
+    per_batch = _guaranteed_amount(recipe["produces"][step["resource_id"]])
+    asm_key = (CONVERTER_LOCATION_ID, "asm")
+    if asm_key not in budgets:
+        budgets[asm_key] = location_assembler_capacity(state, CONVERTER_LOCATION_ID)
+    batch_cost = dict(consumes)
+    batch_cost[ENERGY_RESOURCE_ID] = batch_cost.get(ENERGY_RESOURCE_ID, 0) + recipe["threshold"]
+    batches_this_call = 0
+    while step["fires_done"] < step["fires_total"] and budgets[asm_key] != 0:
+        if per_batch <= 0 and batches_this_call >= 1:
+            break  # выход партии не гарантирован - не больше одной за раз
+        if _affordable_times(state, order, batch_cost, 1) < 1:
+            if _short_of_energy(state, order, batch_cost):
+                return "ждёт энергию", True
+            return None, False
+        _pay_from_order(state, order, batch_cost, 1)
+        produced = _roll_range_amounts(recipe.get("produces", {}))
+        _gain(order["reserved"], produced)
+        step["fires_done"] += produced.get(step["resource_id"], 0)
+        batches_this_call += 1
+        if budgets[asm_key] is not None:
+            budgets[asm_key] -= 1
+    if step["fires_done"] >= step["fires_total"]:
+        return None, False
+
+    running = [
+        j for j in state.energy_jobs
+        if j.get("order_id") == order["id"] and j.get("order_resource") == step["resource_id"]
+    ]
+    remaining = step["fires_total"] - step["fires_done"] - len(running) * per_batch
+    while remaining > 0 and (per_batch > 0 or not running):
+        building_id = _pick_converter_building_with_free_slot(state, state.energy_jobs, machine, automated_only=True)
+        if building_id is None:
+            if not automated_converter_types(state, machine) and location_assembler_capacity(state, CONVERTER_LOCATION_ID) == 0:
+                return "нет автоматизации преобразователя", False
+            return None, False  # слоты заняты или лимит сборщиков исчерпан - очередь
+        if _affordable_times(state, order, consumes, 1) < 1:
+            return None, False  # ингредиенты ещё делаются нижними шагами
+        _pay_from_order(state, order, consumes, 1)
+        job = {"recipe_id": step["recipe_id"], "progress": 0, "building_id": building_id,
+               "order_id": order["id"], "order_resource": step["resource_id"]}
+        state.energy_jobs.append(job)
+        running.append(job)
+        if per_batch <= 0:
+            break
+        remaining -= per_batch
+    return None, False
+
+
+def _process_orders(state: GameState, report: ProductionReport, budgets: dict) -> None:
+    """Каждый ход двигает заказы (state.orders) по порядку оформления: шаги - сырьё
+    раньше потребителя, так что сделанное нижним шагом тут же идёт верхнему. budgets -
+    лимит мгновенных крафтов каждой локации НА ЭТОТ ХОД (общий на все заказы и на оба
+    прохода в advance_turn). Когда все шаги готовы и партии доиграли - финал
+    (_finalize_order). У каждого заказа запоминается причина простоя (order["status"]),
+    чтобы он никогда не висел молча."""
+    for order in list(state.orders):
+        if order not in state.orders:
+            continue
+        status, waits_energy = None, False
+        for step in order["steps"]:
+            if step["fires_done"] >= step["fires_total"]:
                 continue
-            have = state.resources.get(ing_id, 0)
-            if RESOURCE_FRACTIONAL.get(ing_id, False):
-                have += 1e-9  # дрейф float у дробных (энергия): 1.0 // 0.1 == 9.0
-            take = min(take, have // amount)
-        # int - прокрутки целые, иначе дробная энергия в делении протекла бы float-ом
-        # в целочисленные ресурсы (1.0 металла вместо 1).
-        take = max(0, int(take))
-        if take <= 0:
-            continue
-        for ing_id, amount in cost.items():
-            state.resources[ing_id] -= amount * take
-            if state.resources[ing_id] < 0:
-                state.resources[ing_id] = 0  # только тот же дрейф float, см. выше
-        for out_id, amount in gain.items():
-            _add_resource(state.resources, out_id, amount * take)
-        job["fires_done"] += take
-        budget -= take
-        if job["fires_done"] >= job["fires_total"]:
-            del state.autocraft_jobs[resource_id]
-            report.autocraft_completed.append(resource_id)
+            reason, energy = _advance_order_step(state, order, step, budgets)
+            if reason and status is None:
+                status, waits_energy = reason, energy
+        running = any(j.get("order_id") == order["id"] for j in state.manual_jobs.values()) or any(
+            j.get("order_id") == order["id"] for j in state.energy_jobs
+        )
+        order["status"], order["waits_energy"] = status, waits_energy
+        if not running and all(st["fires_done"] >= st["fires_total"] for st in order["steps"]):
+            _finalize_order(state, order, report)
+
+
+def _finalize_order(state: GameState, order: dict, report: ProductionReport) -> None:
+    """Все шаги готовы: заказ «рецепт ×N» выдаёт резерв (результат и остатки) на склад;
+    заказ действия дожидается своей энергии, возвращает резерв на склад и выполняет
+    действие (_ORDER_RETRY). Не получилось (действие стало невозможным) - резерв
+    забирается обратно, заказ остаётся с причиной в статусе и пробует снова каждый ход
+    (игрок видит причину и может отменить)."""
+    if order["kind"] == "recipe":
+        state.orders.remove(order)
+        _gain(state.resources, order["reserved"])
+        report.pending_finished.append(order["label"])
+        return
+    if state.resources.get(ENERGY_RESOURCE_ID, 0) < order.get("final_energy", 0):
+        order["status"], order["waits_energy"] = "ждёт энергию", True
+        return
+    index = state.orders.index(order)
+    state.orders.remove(order)
+    reserved = order["reserved"]
+    _gain(state.resources, reserved)
+    result = _ORDER_RETRY[order["kind"]](state, order)
+    if result.ok and not result.pending:
+        report.pending_finished.append(order["label"])
+        return
+    if result.ok:
+        return  # действие оформило себе новый заказ (например, цена выросла)
+    back = {}
+    for resource_id, amount in reserved.items():
+        amount = min(amount, state.resources.get(resource_id, 0))
+        if amount > 0:
+            state.resources[resource_id] -= amount
+            back[resource_id] = amount
+    order["reserved"] = back
+    order["status"], order["waits_energy"] = result.message, False
+    state.orders.insert(index, order)
+
+
+def orders_view(state: GameState) -> list[dict]:
+    """Заказы для UI (панель «Заказы»): шаги с прогрессом, что в резерве, причина
+    простоя, ждёт ли энергию."""
+    view = []
+    for order in state.orders:
+        steps = []
+        for step in order["steps"]:
+            running = any(
+                j.get("order_id") == order["id"] and j.get("order_resource") == step["resource_id"]
+                for j in list(state.manual_jobs.values()) + state.energy_jobs
+            )
+            steps.append({
+                "resource_id": step["resource_id"], "kind": step["kind"],
+                "done": step["fires_done"], "total": step["fires_total"], "running": running,
+            })
+        view.append({
+            "id": order["id"], "kind": order["kind"], "label": order["label"],
+            "status": order.get("status"), "waits_energy": bool(order.get("waits_energy")),
+            "reserved": {r: a for r, a in order["reserved"].items() if a > 0},
+            "steps": steps,
+        })
+    return view
 
 
 def _process_manual_jobs(state: GameState, report: ProductionReport) -> None:
@@ -7169,7 +7260,7 @@ def _process_manual_jobs(state: GameState, report: ProductionReport) -> None:
         if job["gain_chance"]:
             gain = _roll_chance_amounts(gain, job["gain_chance"])
         gain = _roll_range_amounts(gain)
-        _gain(state.resources, gain)
+        _deliver_job_output(state, job, gain)
         if job["spawn_species"]:
             spawn_creature(state, _roll_wild_genotype(job["spawn_species"]), identified=False)
         if not job.get("autocraft"):  # партия автокрафта - не "игрок выполнил действие"
@@ -7221,7 +7312,9 @@ def cancel_manual_job(state: GameState, action_id: str) -> ActionResult:
     if action_id not in state.manual_jobs:
         return ActionResult(False, "Такой задачи уже нет.")
     job = state.manual_jobs.pop(action_id)
-    _gain(state.resources, job["cost"])
+    # Партия заказа возвращает цену в резерв заказа (иначе он ждал бы её вечно).
+    order = _find_order(state, job.get("order_id")) if job.get("order_id") is not None else None
+    _gain(order["reserved"] if order is not None else state.resources, job["cost"])
     return ActionResult(True, f"«{MANUAL_ACTIONS[action_id]['name']}» отменено, затраты возвращены.")
 
 
@@ -7229,7 +7322,7 @@ def cancel_manual_job(state: GameState, action_id: str) -> ActionResult:
 # есть доступ к retry_extra-полям, запомненным _enqueue_pending (например, "scale"
 # у ручного действия, см. do_manual_action) - без этого повторная попытка молча
 # откатилась бы на параметры по умолчанию, теряя исходный выбор игрока.
-_PENDING_RETRY = {
+_ORDER_RETRY = {
     "manual": lambda state, pending: do_manual_action(state, pending["target_id"], pending.get("scale")),
     "build": lambda state, pending: build(state, pending["target_id"]),
     "tech": lambda state, pending: research(state, pending["target_id"]),
@@ -7245,22 +7338,6 @@ _PENDING_RETRY = {
     "synthesize": lambda state, pending: synthesize_creature(state, pending["chosen_alleles"]),
     "summon_boss": lambda state, pending: summon_boss(state, pending["target_id"]),
 }
-
-
-def _process_pending_actions(state: GameState, report: ProductionReport) -> None:
-    """Пытается заново провести каждое отложенное действие (заведённое _pay_or_defer,
-    пока не хватало скорости автокрафта). Если к этому ходу фоновые задачи уже подвезли
-    всё нужное, действие само завершится (эффект применится, как будто игрок только что
-    успешно его провёл) - иначе просто остаётся в очереди ещё на ход."""
-    still_pending = []
-    for pending in state.pending_actions:
-        retry = _PENDING_RETRY[pending["kind"]]
-        result = retry(state, pending)
-        if result.ok and not result.pending:
-            report.pending_finished.append(pending["label"])
-        else:
-            still_pending.append(pending)
-    state.pending_actions = still_pending
 
 
 def _process_combat(state: GameState, report: ProductionReport) -> None:
@@ -7454,19 +7531,26 @@ def advance_turn(state: GameState) -> ProductionReport:
     _process_habitat(state, report)
     _process_soul_collectors(state, report, daytime)
     _process_reactors(state, report, daytime)
-    _process_autocraft_jobs(state, report)
+    # Лимит мгновенных крафтов каждой локации на этот ход - общий на все проходы.
+    order_budgets: dict = {}
+    # Заказы - ДО тика многоходовых действий: партия, которую заказ запускает на
+    # механизме, тикает уже в этот ход, как у клика игрока (3 партии по 3 хода = 9).
+    _process_orders(state, report, order_budgets)
     _process_manual_jobs(state, report)
     _process_ritual_jobs(state, report)
     _process_research(state, report)
     process_automation_rules(state, report, daytime)
-    _process_pending_actions(state, report)
+    # Второй проход - до преобразователей: подхватить доделанные партии и заказы,
+    # оформленные автоматизатором в этот ход.
+    if state.orders:
+        _process_orders(state, report, order_budgets)
     # Преобразователи - ПОСЛЕДНИЕ потребители энергии в ходу (прямое пожелание):
-    # берут только остаток после построек, автокрафта, отложенных действий и
-    # автоматизатора, крафт за энергию не должен тормозить остальные процессы.
+    # берут только остаток после построек, заказов и автоматизатора, крафт за
+    # энергию не должен тормозить остальные процессы.
     _process_energy_jobs(state, report)
-    # Второй проход: подхватить то, что преобразователи доделали в этот же ход.
-    if state.pending_actions:
-        _process_pending_actions(state, report)
+    # Третий проход: подхватить то, что преобразователи доделали в этот же ход.
+    if state.orders:
+        _process_orders(state, report, order_budgets)
 
     cap = energy_capacity(state)
     if state.resources.get(ENERGY_RESOURCE_ID, 0) > cap:

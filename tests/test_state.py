@@ -22,7 +22,10 @@ class StateRoundTripTests(unittest.TestCase):
             active_mine_field={"size": 2, "cells": [{"resource": "ore", "hp": 1, "hp_max": 2, "broken": False, "revealed": True}]},
             energy_jobs=[{"recipe_id": "metal_from_energy", "progress": 40}],
             save_name="максимум",
-            autocraft_enabled=False,
+            orders=[{"id": 4, "kind": "recipe", "target_id": "craft_mid", "label": "«x» ×2",
+                     "reserved": {"raw_a": 8}, "steps": [], "energy_reserve": 0, "final_energy": 0,
+                     "status": None, "waits_energy": False, "qty": 2}],
+            next_order_id=5,
             construction_progress={"furnace": 2},
             building_upgrades={"sawmill": ["sawmill_scale_2"]},
             action_priority={"craft_mid": 7},
@@ -62,7 +65,8 @@ class StateRoundTripTests(unittest.TestCase):
         )
         self.assertEqual(restored.energy_jobs, [{"recipe_id": "metal_from_energy", "progress": 40}])
         self.assertEqual(restored.save_name, "максимум")
-        self.assertFalse(restored.autocraft_enabled)
+        self.assertEqual(restored.orders[0]["reserved"], {"raw_a": 8})
+        self.assertEqual(restored.next_order_id, 5)
         self.assertEqual(restored.construction_progress, {"furnace": 2})
         self.assertEqual(restored.building_upgrades, {"sawmill": ["sawmill_scale_2"]})
         self.assertEqual(restored.action_priority, {"craft_mid": 7})
@@ -118,8 +122,9 @@ class StateRoundTripTests(unittest.TestCase):
         self.assertEqual(restored.tool_tiers, {})
         self.assertEqual(restored.energy_jobs, [])
         self.assertIsNone(restored.save_name)
-        # По умолчанию True - старые сохранения без этого поля не меняют поведение молча.
-        self.assertTrue(restored.autocraft_enabled)
+        # Старые сохранения: заказов нет, нумерация с 1 (autocraft_jobs/pending_actions
+        # прежнего автокрафта просто отбрасываются - в них ничего не было зарезервировано).
+        self.assertEqual((restored.orders, restored.next_order_id), ([], 1))
         self.assertEqual(restored.construction_progress, {})
         self.assertEqual(restored.building_upgrades, {})
         self.assertEqual(restored.action_priority, {})

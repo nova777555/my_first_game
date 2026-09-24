@@ -1,19 +1,21 @@
 """
-Энергия в цене рецепта и ожидание её притока.
+Энергия в цене рецепта и ожидание её притока (на заказах автокрафта).
 
-- Автокрафт не отказывает из-за нехватки энергии: потребители уходят в фоновые
-  задачи, которые каждый ход берут столько прокруток, на сколько хватает
-  накопленного, а само действие - в очередь (engine._energy_wait_failure,
+- Заказ не отклоняется из-за нехватки энергии: его шаги каждый ход делают столько
+  прокруток, на сколько хватает накопленного (engine._energy_wait_failure,
   _aggregate_autocraft_demand "energy_wait").
-- Ручной клик, которому не хватает ТОЛЬКО энергии, тоже ждёт (и без автокрафта).
+- Ручной клик, которому не хватает ТОЛЬКО энергии, тоже ждёт (заказ без шагов,
+  процессор ему не нужен).
 - Ждать бессмысленно - сразу отказ: нет ни одного источника энергии или один
   платёж больше ёмкости хранилищ.
-- Преобразователи тратят энергию ПОСЛЕДНИМИ в ходу - только остаток.
+- Преобразователи тратят энергию ПОСЛЕДНИМИ в ходу и не трогают то, что копят
+  заказы (engine.energy_reserved).
 - Сетка: энергия в cost сверх узора (валидатор), пачка «×N» останавливается на
   итерации, которая ушла ждать.
 
 Мини-контент добавляется поверх фикстуры в setUp (копии словарей, cleanup
-patched_*_content возвращает исходные).
+patched_*_content возвращает исходные). Мгновенные рецепты - в механизме e_loc за
+безлимитным сборщиком, многоходовой - в e_loc2 за «Автоматизацией».
 
 Запуск: python -m unittest tests.test_energy_wait -v
 """
@@ -51,18 +53,25 @@ EXTRA_BUILDINGS = {
     "e_fuel_gen": _building("Тест-топливный генератор", produces={"energy": 10}, consumes={"raw_b": 1}),
     "e_sun": _building("Тест-солнце", produces={"energy": 10}, active_period="day"),
     "e_bank": _building("Тест-банк энергии", energy_storage=50),
+    # Процессор и безлимитный сборщик механизма e_loc - мгновенные рецепты.
     "e_hub": _building(
-        "Тест-хаб", unlocks_autocraft=["e_ingot", "e_core", "e_slow"],
-        compute_power=1000, autocraft_speed=50, autocraft_slots=5,
+        "Тест-хаб", compute_power=1000, autocraft_slots=5,
+        autocraft_assembler={"location": "e_loc", "per_turn": None},
     ),
     "e_mech": _building("Тест-механизм", upgrades=[{
         "id": "e_insulation", "name": "Изоляция", "description": "-50% энергии рецептов механизма.",
         "type": "energy_efficiency", "value": 0.5, "requires_tech": None, "cost": {},
     }]),
+    # Механизм многоходового рецепта: «Автоматизация» - как игрок, со своей длительностью.
+    "e_mech2": _building("Тест-медленный механизм", upgrades=[{
+        "id": "e2_auto", "name": "Автоматизация", "description": "Автокрафт рецептов механизма.",
+        "type": "autocraft", "value": 1, "requires_tech": None, "cost": {},
+    }]),
 }
 
 EXTRA_LOCATIONS = {
     "e_loc": {"name": "Тест-механизм", "requires_tech": None, "requires_building": "e_mech"},
+    "e_loc2": {"name": "Тест-медленный механизм", "requires_tech": None, "requires_building": "e_mech2"},
 }
 
 
@@ -79,7 +88,7 @@ EXTRA_ACTIONS = {
     "spark_click": _action("Тест: искра", "yard", {"energy": 7}, {"e_spark": 1}),
     "spark_with_raw": _action("Тест: искра с сырьём", "yard", {"energy": 7, "raw_a": 3}, {"e_spark": 1}),
     "big_energy": _action("Тест: большой", "yard", {"energy": 60}, {"e_big": 1}),
-    "slow_ingot": _action("Тест: медленный", "yard", {"raw_a": 1, "energy": 10}, {"e_slow": 1}, duration_turns=3),
+    "slow_ingot": _action("Тест: медленный", "e_loc2", {"raw_a": 1, "energy": 10}, {"e_slow": 1}, duration_turns=3),
     "use_slow": _action("Тест: из медленного", "yard", {"e_slow": 1}, {"e_spark": 1}),
 }
 
@@ -97,6 +106,11 @@ def run_turns(s: GameState, n: int) -> None:
         engine.advance_turn(s)
 
 
+def order(s: GameState, cost: dict):
+    """Заказ «выдать cost на склад» (вид recipe) - как в tests/test_orders.py."""
+    return engine._place_order(s, "recipe", "_test", "тест", cost)
+
+
 class EnergyWaitEngineTests(unittest.TestCase):
     def setUp(self):
         patch = fixtures.patched_engine_content()
@@ -105,28 +119,28 @@ class EnergyWaitEngineTests(unittest.TestCase):
         _install(engine)
 
     def state(self, **kw):
-        buildings = {"e_gen": 1, "e_bank": 1, "e_hub": 1, "e_mech": 1}
+        buildings = {"e_gen": 1, "e_bank": 1, "e_hub": 1, "e_mech": 1, "e_mech2": 1}
         buildings.update(kw.pop("buildings", {}))
-        return GameState(buildings=buildings, **kw)
+        return GameState(buildings=buildings, building_upgrades={"e_mech2": ["e2_auto"]}, **kw)
 
-    # --- автокрафт ждёт энергию ---
+    # --- заказ ждёт энергию ---
 
-    def test_autocraft_waits_for_energy_instead_of_failing(self):
+    def test_order_waits_for_energy_instead_of_failing(self):
         s = self.state(resources={"raw_a": 10, "energy": 5})
-        failure = engine.ensure_and_pay(s, {"e_ingot": 3})
-        self.assertEqual(failure.reason, "in_progress")
-        self.assertEqual(s.autocraft_jobs["e_ingot"]["fires_total"], 3)
-        self.assertEqual(s.resources["raw_a"], 10)  # сырьё берёт сама задача, по ходам
+        failure, placed = order(s, {"e_ingot": 3})
+        self.assertIsNone(failure)
+        self.assertEqual(placed["steps"][0]["fires_total"], 3)
+        self.assertEqual(s.resources["raw_a"], 7)  # сырьё сразу изъято в резерв заказа
 
-    def test_background_job_takes_as_many_fires_as_energy_allows_each_turn(self):
+    def test_each_turn_crafts_as_much_as_the_energy_allows(self):
         s = self.state(resources={"raw_a": 10, "energy": 5})
-        engine.ensure_and_pay(s, {"e_ingot": 3})
+        _, placed = order(s, {"e_ingot": 3})
         run_turns(s, 1)  # 5 + 10 = 15 -> одна прокрутка, остаток 5
-        self.assertEqual(s.resources.get("e_ingot"), 1)
+        self.assertEqual(placed["steps"][0]["fires_done"], 1)
         self.assertEqual(s.resources["energy"], 5)
         run_turns(s, 2)
         self.assertEqual(s.resources.get("e_ingot"), 3)
-        self.assertNotIn("e_ingot", s.autocraft_jobs)
+        self.assertEqual(s.orders, [])
         self.assertIsInstance(s.resources["e_ingot"], int)
 
     def test_action_on_top_of_energy_chain_completes_by_itself(self):
@@ -134,19 +148,18 @@ class EnergyWaitEngineTests(unittest.TestCase):
         s = self.state(resources={"raw_a": 10, "energy": 0})
         result = engine.do_manual_action(s, "make_core")
         self.assertTrue(result.ok and result.pending, result.message)
-        for turn in range(1, 10):
+        for _ in range(10):
             engine.advance_turn(s)
             if s.resources.get("e_core"):
                 break
         self.assertEqual(s.resources.get("e_core"), 1)
-        self.assertEqual(s.pending_actions, [])
+        self.assertEqual(s.orders, [])
         self.assertEqual(s.resources["raw_a"], 8)
 
-    def test_whole_request_may_exceed_storage_if_each_craft_fits(self):
-        # 10 слитков = 100 энергии при ёмкости 50 - руками по частям это возможно,
-        # значит и автокрафт не должен отказывать.
+    def test_whole_order_may_exceed_storage_if_each_craft_fits(self):
+        # 10 слитков = 100 энергии при ёмкости 50 - руками по частям это возможно.
         s = self.state(resources={"raw_a": 20, "energy": 0})
-        self.assertEqual(engine.ensure_and_pay(s, {"e_ingot": 10}).reason, "in_progress")
+        self.assertIsNone(order(s, {"e_ingot": 10})[0])
         run_turns(s, 10)
         self.assertEqual(s.resources.get("e_ingot"), 10)
 
@@ -155,38 +168,39 @@ class EnergyWaitEngineTests(unittest.TestCase):
         result = engine.do_manual_action(s, "use_slow")
         self.assertTrue(result.pending, result.message)
         self.assertEqual(s.manual_jobs, {})  # на партию (10 энергии) пока не хватает
-        engine.advance_turn(s)  # +10 -> повторная попытка запускает партию
+        engine.advance_turn(s)  # +10 -> заказ запускает партию
         self.assertIn("slow_ingot", s.manual_jobs)
-        run_turns(s, 4)
+        run_turns(s, 3)
         self.assertEqual(s.resources.get("e_spark"), 1)
-        self.assertEqual(s.pending_actions, [])
+        self.assertEqual(s.orders, [])
 
     def test_mechanism_energy_efficiency_speeds_up_the_wait(self):
         s = self.state(resources={"raw_a": 10, "energy": 0})
         engine.purchase_building_upgrade(s, "e_mech", "e_insulation")
         self.assertEqual(engine.effective_manual_action_stats("make_ingot", s)[0]["energy"], 5)
-        engine.ensure_and_pay(s, {"e_ingot": 4})
+        _, placed = order(s, {"e_ingot": 4})
         run_turns(s, 1)  # 10 энергии -> две прокрутки по 5
-        self.assertEqual(s.resources.get("e_ingot"), 2)
+        self.assertEqual(placed["steps"][0]["fires_done"], 2)
 
     def test_fractional_energy_per_fire(self):
         actions = {**EXTRA_ACTIONS, "make_ingot": _action("Тест: слиток", "e_loc", {"raw_a": 1, "energy": 2.5}, {"e_ingot": 1})}
         engine.MANUAL_ACTIONS = {**engine.MANUAL_ACTIONS, **actions}
         s = self.state(resources={"raw_a": 10, "energy": 0})
-        self.assertEqual(engine.ensure_and_pay(s, {"e_ingot": 9}).reason, "in_progress")
+        _, placed = order(s, {"e_ingot": 9})
         run_turns(s, 1)  # 10 / 2.5 = ровно 4 прокрутки, без дрейфа float
-        self.assertEqual(s.resources.get("e_ingot"), 4)
-        self.assertIsInstance(s.resources["e_ingot"], int)
+        self.assertEqual(placed["steps"][0]["fires_done"], 4)
+        self.assertEqual(placed["reserved"]["e_ingot"], 4)
+        self.assertIsInstance(placed["reserved"]["e_ingot"], int)
         self.assertGreaterEqual(s.resources["energy"], 0)
 
     # --- когда ждать бессмысленно ---
 
     def test_no_energy_source_fails_fast(self):
         s = self.state(resources={"raw_a": 10, "energy": 0}, buildings={"e_gen": 0})
-        failure = engine.ensure_and_pay(s, {"e_ingot": 1})
-        self.assertEqual(failure.reason, "no_energy_source")
+        failure, placed = order(s, {"e_ingot": 1})
+        self.assertEqual((failure.reason, placed), ("no_energy_source", None))
         self.assertIn("источника энергии", engine.describe_autocraft_failure(failure))
-        self.assertEqual(s.autocraft_jobs, {})
+        self.assertEqual(s.resources["raw_a"], 10)
 
     def test_disabled_generator_is_not_a_source(self):
         s = self.state(resources={"energy": 0, "raw_b": 5}, buildings={"e_gen": 0, "e_fuel_gen": 1})
@@ -203,66 +217,63 @@ class EnergyWaitEngineTests(unittest.TestCase):
 
     def test_single_payment_over_storage_fails_fast(self):
         s = self.state(resources={"energy": 0})
-        failure = engine.ensure_and_pay(s, {"energy": 60})
+        failure, _ = order(s, {"energy": 60})
         self.assertEqual(failure.reason, "energy_over_capacity")
         self.assertIn("вмещают только 50", engine.describe_autocraft_failure(failure))
         result = engine.do_manual_action(s, "big_energy")
         self.assertFalse(result.ok)
         self.assertIn("вмещают только 50", result.message)
-        self.assertEqual(s.pending_actions, [])
+        self.assertEqual(s.orders, [])
 
     def test_per_fire_energy_over_storage_fails_fast_in_a_chain(self):
         actions = {**EXTRA_ACTIONS, "make_ingot": _action("Тест: слиток", "e_loc", {"raw_a": 1, "energy": 70}, {"e_ingot": 1})}
         engine.MANUAL_ACTIONS = {**engine.MANUAL_ACTIONS, **actions}
         s = self.state(resources={"raw_a": 10, "energy": 0})
-        failure = engine.ensure_and_pay(s, {"e_ingot": 1})
-        self.assertEqual(failure.reason, "energy_over_capacity")
+        self.assertEqual(order(s, {"e_ingot": 1})[0].reason, "energy_over_capacity")
 
-    # --- ручной клик без автокрафта ---
+    # --- ручной клик ---
 
-    def test_manual_click_waits_for_energy_without_autocraft(self):
+    def test_manual_click_waits_for_energy_without_a_processor(self):
         s = self.state(resources={"energy": 3}, buildings={"e_hub": 0})
         result = engine.do_manual_action(s, "spark_click")
         self.assertTrue(result.ok and result.pending, result.message)
         self.assertIn("ждёт энергию", result.message)
-        self.assertTrue(s.pending_actions[0]["waits_energy"])
+        self.assertTrue(s.orders[0]["waits_energy"])
+        self.assertEqual(s.orders[0]["steps"], [])  # слот заказов такому не нужен
         engine.advance_turn(s)  # 3 + 10 = 13 >= 7
         self.assertEqual(s.resources.get("e_spark"), 1)
         self.assertEqual(s.resources["energy"], 6)
-        self.assertEqual(s.pending_actions, [])
+        self.assertEqual(s.orders, [])
+
+    def test_waiting_click_keeps_its_other_materials_in_reserve(self):
+        s = self.state(resources={"energy": 0, "raw_a": 3}, buildings={"e_hub": 0})
+        self.assertTrue(engine.do_manual_action(s, "spark_with_raw").pending)
+        self.assertEqual(s.resources["raw_a"], 0)  # никто их не перехватит, пока ждём энергию
+        engine.advance_turn(s)
+        self.assertEqual(s.resources.get("e_spark"), 1)
 
     def test_manual_click_still_fails_when_something_else_is_short(self):
         s = self.state(resources={"energy": 3, "raw_a": 1}, buildings={"e_hub": 0})
         result = engine.do_manual_action(s, "spark_with_raw")
         self.assertFalse(result.ok)
-        self.assertEqual(s.pending_actions, [])
+        self.assertEqual(s.orders, [])
 
-    def test_manual_click_with_autocraft_disabled_waits_too(self):
-        s = self.state(resources={"energy": 0})
-        s.autocraft_enabled = False
-        result = engine.do_manual_action(s, "spark_click")
-        self.assertTrue(result.pending, result.message)
-
-    def test_cancel_pending_action(self):
+    def test_cancel_a_waiting_click(self):
         s = self.state(resources={"energy": 0}, buildings={"e_hub": 0})
         engine.do_manual_action(s, "spark_click")
-        self.assertFalse(engine.cancel_pending_action(s, 5).ok)
-        result = engine.cancel_pending_action(s, 0)
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.pending_actions, [])
+        self.assertTrue(engine.cancel_order(s, s.orders[0]["id"]).ok)
+        self.assertEqual(s.orders, [])
         engine.advance_turn(s)
         self.assertIsNone(s.resources.get("e_spark"))
 
     # --- преобразователь берёт только остаток ---
 
-    def test_converter_gets_only_what_autocraft_left(self):
+    def test_converter_gets_only_what_orders_left(self):
         s = self.state(resources={"raw_a": 10, "energy": 0}, buildings={"energy_converter": 1})
-        s.resources["energy"] = 10
         self.assertTrue(engine.start_energy_recipe(s, "make_raw_b").ok)
-        s.resources["energy"] = 0
-        engine.ensure_and_pay(s, {"e_ingot": 2})
+        _, placed = order(s, {"e_ingot": 2})
         engine.advance_turn(s)  # +10: всё забирает прокрутка слитка
-        self.assertEqual(s.resources.get("e_ingot"), 1)
+        self.assertEqual(placed["steps"][0]["fires_done"], 1)
         self.assertEqual(s.energy_jobs[0]["progress"], 0)
 
     def test_waiting_manual_click_beats_the_converter(self):
@@ -273,8 +284,8 @@ class EnergyWaitEngineTests(unittest.TestCase):
         self.assertEqual(s.resources.get("e_spark"), 1)
         self.assertEqual(s.energy_jobs[0]["progress"], 3)
 
-    def test_converter_does_not_eat_what_a_waiting_action_accumulates(self):
-        # Действию нужно 25 за раз при +10/ход; безлимитный преобразователь без
+    def test_converter_does_not_eat_what_a_waiting_click_accumulates(self):
+        # Клику нужно 25 за раз при +10/ход; безлимитный преобразователь без
         # резерва съедал бы каждый ход всё, что не дотянуло до 25.
         engine.MANUAL_ACTIONS = {**engine.MANUAL_ACTIONS, "spark_25": _action("Тест: 25", "yard", {"energy": 25}, {"e_spark": 1})}
         s = self.state(resources={"energy": 0}, buildings={"e_hub": 0, "mega_converter": 1})
@@ -289,14 +300,14 @@ class EnergyWaitEngineTests(unittest.TestCase):
         self.assertEqual(s.energy_jobs[0]["progress"], 5)
         self.assertEqual(engine.energy_reserved(s), 0)
 
-    def test_converter_does_not_starve_a_background_job(self):
+    def test_converter_does_not_starve_an_order(self):
         # Прокрутке слитка нужно 10, приток 6 - без резерва за прокрутку
-        # преобразователь забирал бы все 6 каждый ход, и задача не сдвинулась бы.
+        # преобразователь забирал бы все 6 каждый ход, и заказ не сдвинулся бы.
         s = self.state(resources={"raw_a": 10, "energy": 0}, buildings={"e_gen": 0, "e_fuel_gen": 1, "mega_converter": 1})
         s.resources["raw_b"] = 100
         engine.BUILDINGS["e_fuel_gen"] = {**engine.BUILDINGS["e_fuel_gen"], "produces": {"energy": 6}}
         self.assertTrue(engine.start_energy_recipe(s, "make_raw_b").ok)
-        engine.ensure_and_pay(s, {"e_ingot": 1})
+        order(s, {"e_ingot": 1})
         run_turns(s, 2)  # 6 -> 12 >= 10
         self.assertEqual(s.resources.get("e_ingot"), 1)
 
@@ -310,12 +321,13 @@ class EnergyWaitEngineTests(unittest.TestCase):
         self.assertTrue(energy["energy_wait"])
         self.assertEqual(energy["turns"], 2)  # 20 энергии при +10/ход
 
-    def test_jobs_view_flags_jobs_waiting_for_energy(self):
-        s = self.state(resources={"raw_a": 5, "energy": 0})
-        engine.ensure_and_pay(s, {"e_ingot": 3})
-        (job,) = engine.autocraft_jobs_view(s)
-        self.assertTrue(job["waits_energy"])
-        self.assertEqual(job["eta_turns"], 3)
+    def test_orders_view_flags_orders_waiting_for_energy(self):
+        s = self.state(resources={"raw_a": 5, "energy": 0}, buildings={"e_gen": 0, "e_sun": 1})
+        order(s, {"e_ingot": 3})
+        engine._process_orders(s, engine.ProductionReport(), {})
+        (view,) = engine.orders_view(s)
+        self.assertTrue(view["waits_energy"])
+        self.assertEqual(view["status"], "ждёт энергию")
 
 
 class EnergyWaitWebUiTests(unittest.TestCase):
@@ -343,16 +355,16 @@ class EnergyWaitWebUiTests(unittest.TestCase):
         self.assertTrue(out["waiting"])
         self.assertEqual(out["times_done"], 1)
         self.assertIn("1 из 3", out["message"])
-        self.assertEqual(len(s.pending_actions), 1)
+        self.assertEqual(len(s.orders), 1)
         engine.advance_turn(s)  # 20 + 10 = 30 >= 25
         self.assertEqual(s.resources.get("grid_energy_output"), 2)
 
-    def test_view_exposes_pending_actions_with_reason(self):
+    def test_view_exposes_waiting_orders(self):
         s = GameState(resources={"energy": 0}, buildings={"e_gen": 1, "e_bank": 1})
         engine.do_manual_action(s, "spark_click")
-        (entry,) = self.web_ui.pending_actions_view(s)
-        self.assertEqual(entry["index"], 0)
+        (entry,) = self.web_ui.autocraft_view(s)["orders"]
         self.assertTrue(entry["waits_energy"])
+        self.assertEqual(entry["steps"], [])
 
     def test_preview_view_summary_marks_energy_wait(self):
         s = GameState(resources={"raw_a": 5, "energy": 0}, buildings={"e_gen": 1, "e_bank": 1, "e_hub": 1, "e_mech": 1})

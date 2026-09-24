@@ -20,6 +20,19 @@ from game import engine  # noqa: E402
 from game.state import HISTORY_MAX_ENTRIES, GameState  # noqa: E402
 
 
+def _order_now(state, cost):
+    """Заказ под cost с немедленной отработкой шагов (как ход) - вместо прежнего
+    мгновенного ensure_and_pay: None при успехе (результат выдан на склад и оплачен
+    cost), иначе отказ."""
+    failure, order = engine._place_order(state, "recipe", "_test", "тест", cost)
+    if failure is not None:
+        return failure
+    engine._process_orders(state, engine.ProductionReport(), {})
+    for resource_id, amount in cost.items():
+        state.resources[resource_id] -= amount
+    return None
+
+
 class FixtureTestCase(unittest.TestCase):
     """Подменяет game.engine на фикстурный контент на время каждого теста."""
 
@@ -35,18 +48,6 @@ class AutocraftTests(FixtureTestCase):
         result = engine.do_manual_action(s, "gather_a")
         self.assertTrue(result.ok)
         self.assertEqual(s.resources["raw_a"], 13)
-
-    def test_autocraft_backfills_missing_intermediate(self):
-        # craft_final стоит mid:2, raw_b:1 - полуфабриката в наличии нет вообще.
-        # "automation_hub" открывает автокрафт mid и даёт достаточно вычислительной
-        # мощности (без него автокрафт был бы заблокирован по умолчанию - см. ниже).
-        s = GameState(resources={"raw_a": 100, "raw_b": 100}, buildings={"automation_hub": 1})
-        result = engine.do_manual_action(s, "craft_final")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.resources["final"], 1)
-        self.assertEqual(s.resources["mid"], 0)  # весь ушёл в изделие
-        self.assertEqual(s.resources["raw_a"], 100 - 2 * 4)  # 2 полуфабриката по 4 сырья A
-        self.assertEqual(s.resources["raw_b"], 100 - 1)  # прямая цена изделия
 
     def test_autocraft_fails_cleanly_without_raw_materials(self):
         s = GameState(resources={"raw_a": 5, "raw_b": 100}, buildings={"automation_hub": 1})
@@ -75,16 +76,13 @@ class AutocraftTests(FixtureTestCase):
 
     def test_autocraft_does_not_backfill_an_action_flagged_excluded_from_autocraft(self):
         # excluded_from_autocraft делает "final" неотличимым для автокрафта от ресурса
-        # без рецепта вообще, даже когда mid/raw_b в достатке и craft_final полностью
-        # детерминировано и разблокировано (прямое пожелание: некоторые действия нельзя
-        # доверять автоматике - например, убийство босса).
+        # без рецепта - заказ отклоняется сразу, ничего не изъято.
+        s = GameState(resources={"raw_a": 100, "raw_b": 100}, buildings={"automation_hub": 1})
         engine.MANUAL_ACTIONS["craft_final"]["excluded_from_autocraft"] = True
         self.addCleanup(lambda: engine.MANUAL_ACTIONS["craft_final"].pop("excluded_from_autocraft", None))
-        s = GameState(resources={"mid": 100, "raw_b": 100}, buildings={"automation_hub": 1})
-        before = dict(s.resources)
-        failure = engine.ensure_and_pay(s, {"final": 1})
-        self.assertIsNotNone(failure)
-        self.assertEqual(s.resources, before)
+        failure, order = engine._place_order(s, "recipe", "x", "тест", {"final": 1})
+        self.assertEqual((failure.reason, order), ("no_recipe", None))
+        self.assertEqual(s.resources["raw_a"], 100)
 
     def test_locked_action_requires_tech(self):
         s = GameState(resources={"raw_b": 10})
@@ -108,29 +106,6 @@ class AutocraftTests(FixtureTestCase):
         s = GameState(buildings={"gen": 1}, broken={"gen": 1})  # единственная копия сломана
         self.assertFalse(engine.is_manual_action_unlocked("locked_by_building", s))
 
-    def test_autocraft_locked_by_default_without_unlocking_building(self):
-        # bare_processor даёт compute_power, но НЕ разблокирует mid - изолирует
-        # проверку not_unlocked от нового no_processor (см. следующий тест), который
-        # иначе перехватил бы это первым при полном отсутствии процессоров в игре.
-        s = GameState(resources={"raw_a": 100, "raw_b": 100}, buildings={"bare_processor": 1})
-        failure = engine.ensure_and_pay(s, {"mid": 2})
-        self.assertEqual(failure, engine.AutocraftFailure("mid", "not_unlocked"))
-        self.assertEqual(s.resources, {"raw_a": 100, "raw_b": 100})  # ничего не потрачено
-
-    def test_autocraft_returns_plain_failure_without_any_processor_building(self):
-        # Пока в игре нет НИ ОДНОЙ постройки с compute_power, автокрафт как система
-        # ещё не "появился" - нехватка mid должна выглядеть как обычная нехватка
-        # ресурсов, а не намекать на процессор/автокрафт, даже если бы automation_hub
-        # разблокировал mid технически (тут его вообще нет в buildings).
-        s = GameState(resources={"raw_a": 100, "raw_b": 100})
-        failure = engine.ensure_and_pay(s, {"mid": 2})
-        self.assertEqual(failure, engine.AutocraftFailure("mid", "no_processor"))
-        self.assertEqual(s.resources, {"raw_a": 100, "raw_b": 100})  # ничего не потрачено
-
-        message = engine.describe_autocraft_failure(failure)
-        self.assertNotIn("«mid»", message)
-        self.assertNotIn("Полуфабрикат", message)
-
     def test_manual_action_failure_message_is_plain_without_any_processor(self):
         # craft_final стоит mid:2, raw_b:1 - без единого процессора в игре сообщение
         # должно звучать ровно как обычная нехватка при ручном крафте (см.
@@ -150,41 +125,6 @@ class AutocraftTests(FixtureTestCase):
         self.assertIn("автокрафт", result.message)
         self.assertIn("Полуфабрикат", result.message)
 
-    def test_toggle_autocraft_flips_flag_and_reports_state(self):
-        s = GameState()
-        self.assertTrue(s.autocraft_enabled)
-
-        off = engine.toggle_autocraft(s)
-        self.assertTrue(off.ok)
-        self.assertFalse(s.autocraft_enabled)
-        self.assertIn("выключен", off.message)
-
-        on = engine.toggle_autocraft(s)
-        self.assertTrue(on.ok)
-        self.assertTrue(s.autocraft_enabled)
-        self.assertIn("включён", on.message)
-
-    def test_autocraft_disabled_by_checkbox_returns_plain_failure_despite_processor(self):
-        # automation_hub разблокирует mid и даёт с избытком мощности - без галочки
-        # это не должно иметь значения: выключенный автокрафт делает рецепт только
-        # руками, с той же голой формулировкой, что при полном отсутствии процессора.
-        s = GameState(resources={"raw_a": 100, "raw_b": 100}, buildings={"automation_hub": 1})
-        s.autocraft_enabled = False
-        failure = engine.ensure_and_pay(s, {"mid": 2})
-        self.assertEqual(failure, engine.AutocraftFailure("mid", "autocraft_disabled"))
-        self.assertEqual(s.resources, {"raw_a": 100, "raw_b": 100})  # ничего не потрачено, ни один raw_a не ушёл
-
-        message = engine.describe_autocraft_failure(failure)
-        self.assertNotIn("«mid»", message)
-        self.assertNotIn("Полуфабрикат", message)
-
-    def test_manual_action_message_is_plain_when_autocraft_disabled_via_checkbox(self):
-        s = GameState(resources={"raw_b": 100}, buildings={"automation_hub": 1})
-        s.autocraft_enabled = False
-        result = engine.do_manual_action(s, "craft_final")
-        self.assertFalse(result.ok)
-        self.assertEqual(result.message, "Не хватает ресурсов на «Собрать изделие». Не хватает: Полуфабрикат 2.")
-
     def test_manual_action_failure_lists_all_missing_resources_directly_without_processor(self):
         # Без единого процессора недостача считается ПРЯМО по cost действия - оба
         # недостающих ресурса (mid и raw_b), без анализа рецептов.
@@ -195,65 +135,6 @@ class AutocraftTests(FixtureTestCase):
             result.message,
             "Не хватает ресурсов на «Собрать изделие». Не хватает: Полуфабрикат 2, Сырьё B 1.",
         )
-
-    def test_manual_action_failure_lists_base_resources_when_autocraft_active(self):
-        # С automation_hub автокрафт задействован - craft_final стоит mid:2, raw_b:1.
-        # mid делается из raw_a (craft_mid: raw_a:4 -> mid:1, значит 2 mid = 8 raw_a).
-        # Сообщение должно называть БАЗОВЫЕ ресурсы (raw_a, raw_b), а не промежуточный
-        # mid - и учитывать ОБЕ ветки cost, а не только ту, на которой споткнулась
-        # первая настоящая ошибка автокрафта (тут это "raw_a" - "no_recipe").
-        s = GameState(resources={}, buildings={"automation_hub": 1})
-        result = engine.do_manual_action(s, "craft_final")
-        self.assertFalse(result.ok)
-        self.assertEqual(
-            result.message,
-            "Не хватает ресурсов на «Собрать изделие»: «Сырьё A» - сырьё, автокрафтить его не из чего. "
-            "Не хватает сырья: Сырьё A 8, Сырьё B 1.",
-        )
-
-    def test_autocraft_resumes_once_checkbox_is_switched_back_on(self):
-        s = GameState(resources={"raw_a": 100}, buildings={"automation_hub": 1})
-        s.autocraft_enabled = False
-        self.assertEqual(engine.ensure_and_pay(s, {"mid": 2}).reason, "autocraft_disabled")
-
-        s.autocraft_enabled = True
-        failure = engine.ensure_and_pay(s, {"mid": 2})
-        self.assertIsNone(failure)
-        self.assertEqual(s.resources["raw_a"], 100 - 2 * 4)
-
-    def test_autocraft_blocked_when_processor_power_too_low(self):
-        # automation_hub даёт compute_power=15. Мощность на одну прокрутку = сумма
-        # количеств потребляемых предметов рецепта craft_mid (raw_a:4) = 4, а не
-        # голая "1 прокрутка = 1 мощность": на 20 mid нужно 20 прокруток * 4 = 80 -
-        # не хватает мощности, при том что и сырья, и разблокировки достаточно.
-        s = GameState(resources={"raw_a": 1000, "raw_b": 1000}, buildings={"automation_hub": 1})
-        failure = engine.ensure_and_pay(s, {"mid": 20})
-        self.assertEqual(failure, engine.AutocraftFailure("mid", "insufficient_compute"))
-
-    def test_autocraft_succeeds_when_unlocked_and_powerful_enough(self):
-        # 2 прокрутки craft_mid (raw_a:4 каждая) = 8 условных единиц мощности,
-        # что укладывается в compute_power=15 automation_hub.
-        s = GameState(resources={"raw_a": 100}, buildings={"automation_hub": 1})
-        failure = engine.ensure_and_pay(s, {"mid": 2})
-        self.assertIsNone(failure)
-        self.assertEqual(s.resources["raw_a"], 100 - 2 * 4)
-        self.assertEqual(s.resources.get("mid", 0), 0)  # mid скрафтили и сразу же потратили как cost
-
-    def test_autocraft_compute_cost_scales_with_recipe_ingredient_count(self):
-        # Регрессия под новую формулу мощности ("Мощность = количеству потребляемых
-        # предметов"): по старой формуле (1 прокрутка = 1 единица мощности) 3
-        # прокрутки уложились бы в compute_power=15 automation_hub. По новой -
-        # каждая прокрутка craft_mid стоит sum(cost.values())=4, то есть нужно
-        # 3*4=12 <= 15 - это ещё проходит. increment до 4 прокруток -> 16 > 15 -
-        # уже не проходит, хотя "прокруток" всего на одну больше.
-        s = GameState(resources={"raw_a": 1000}, buildings={"automation_hub": 1})
-        ok_failure = engine.ensure_and_pay(s, {"mid": 3})
-        self.assertIsNone(ok_failure)
-
-        s2 = GameState(resources={"raw_a": 1000}, buildings={"automation_hub": 1})
-        blocked_failure = engine.ensure_and_pay(s2, {"mid": 4})
-        self.assertEqual(blocked_failure, engine.AutocraftFailure("mid", "insufficient_compute"))
-
 
 class AutocraftReconvergentGraphTests(unittest.TestCase):
     """_discover_autocraft_graph/_aggregate_autocraft_demand/_commit_autocraft_plan -
@@ -290,11 +171,11 @@ class AutocraftReconvergentGraphTests(unittest.TestCase):
             resources[a] = a
             resources[b] = b
             manual_actions[f"make_{a}"] = {
-                "id": f"make_{a}", "name": a, "location": None, "requires_tech": None,
+                "id": f"make_{a}", "name": a, "location": "lat", "requires_tech": None,
                 "cost": {prev_a: 1, prev_b: 1}, "gain": {a: 1}, "priority": 0,
             }
             manual_actions[f"make_{b}"] = {
-                "id": f"make_{b}", "name": b, "location": None, "requires_tech": None,
+                "id": f"make_{b}", "name": b, "location": "lat", "requires_tech": None,
                 "cost": {prev_a: 1, prev_b: 1}, "gain": {b: 1}, "priority": 0,
             }
             prev_a, prev_b = a, b
@@ -302,8 +183,9 @@ class AutocraftReconvergentGraphTests(unittest.TestCase):
             "processor": {
                 "id": "processor", "name": "CPU", "requires_tech": None, "cost": {},
                 "produces": {}, "consumes": {}, "breakdown_chance": 0.0,
-                "compute_power": 10 ** 9, "autocraft_speed": 10 ** 9, "autocraft_slots": 10 ** 6,
-                "unlocks_autocraft": list(resources.keys()),
+                "compute_power": 10 ** 9, "autocraft_slots": 10 ** 6,
+                # безлимитный сборщик локации рецептов решётки - весь заказ за ход
+                "autocraft_assembler": {"location": "lat", "per_turn": None},
             },
         }
         self._patch(
@@ -317,7 +199,7 @@ class AutocraftReconvergentGraphTests(unittest.TestCase):
         s = GameState(buildings={"processor": 1}, resources={"raw": 10 ** 9})
         import time
         start = time.perf_counter()
-        failure = self.engine.ensure_and_pay(s, {f"a{depth}": 1})
+        failure = _order_now(s, {f"a{depth}": 1})
         elapsed = time.perf_counter() - start
         self.assertIsNone(failure)
         self.assertEqual(s.resources.get(f"a{depth}", 0), 0)  # скрафтили и сразу списали как cost - см. ensure_and_pay
@@ -332,12 +214,12 @@ class AutocraftReconvergentGraphTests(unittest.TestCase):
         # чем один {a3} - ни больше (двойной счёт), ни меньше (недосчитанный спрос).
         self._diamond_content(3)
         s_a = GameState(buildings={"processor": 1}, resources={"raw": 10 ** 6})
-        self.assertIsNone(self.engine.ensure_and_pay(s_a, {"a3": 1}))
+        self.assertIsNone(_order_now(s_a, {"a3": 1}))
         cost_a_alone = 10 ** 6 - s_a.resources["raw"]
         self.assertGreater(cost_a_alone, 0)
 
         s_both = GameState(buildings={"processor": 1}, resources={"raw": 10 ** 6})
-        self.assertIsNone(self.engine.ensure_and_pay(s_both, {"a3": 1, "b3": 1}))
+        self.assertIsNone(_order_now(s_both, {"a3": 1, "b3": 1}))
         cost_both = 10 ** 6 - s_both.resources["raw"]
 
         self.assertEqual(cost_both, 2 * cost_a_alone)
@@ -348,22 +230,22 @@ class AutocraftReconvergentGraphTests(unittest.TestCase):
         self._patch(
             RESOURCE_NAMES={"x": "x", "y": "y"}, RESOURCE_FRACTIONAL={"x": False, "y": False},
             MANUAL_ACTIONS={
-                "make_x": {"id": "make_x", "name": "x", "location": None, "requires_tech": None,
+                "make_x": {"id": "make_x", "name": "x", "location": "lat", "requires_tech": None,
                            "cost": {"y": 1}, "gain": {"x": 1}, "priority": 0},
-                "make_y": {"id": "make_y", "name": "y", "location": None, "requires_tech": None,
+                "make_y": {"id": "make_y", "name": "y", "location": "lat", "requires_tech": None,
                            "cost": {"x": 1}, "gain": {"y": 1}, "priority": 0},
             },
             BUILDINGS={
                 "processor": {
                     "id": "processor", "name": "CPU", "requires_tech": None, "cost": {},
                     "produces": {}, "consumes": {}, "breakdown_chance": 0.0,
-                    "compute_power": 1000, "autocraft_speed": 1000, "autocraft_slots": 100,
-                    "unlocks_autocraft": ["x", "y"],
+                    "compute_power": 1000, "autocraft_slots": 100,
+                    "autocraft_assembler": {"location": "lat", "per_turn": None},
                 },
             },
         )
         s = GameState(buildings={"processor": 1}, resources={})
-        failure = self.engine.ensure_and_pay(s, {"x": 1})
+        failure = _order_now(s, {"x": 1})
         self.assertEqual(failure, self.engine.AutocraftFailure("x", "no_recipe"))
         self.assertEqual(s.resources, {})
 
@@ -384,11 +266,6 @@ class AutocraftPreviewTests(FixtureTestCase):
         # "появился" (compute_capacity == 0) - показывать окно "сколько спишется
         # через докрафт" бессмысленно, действие просто провалится как обычно.
         s = GameState(resources={})
-        self.assertIsNone(engine.autocraft_preview(s, {"mid": 2}))
-
-    def test_none_when_autocraft_disabled_by_checkbox(self):
-        s = GameState(resources={}, buildings={"automation_hub": 1})
-        s.autocraft_enabled = False
         self.assertIsNone(engine.autocraft_preview(s, {"mid": 2}))
 
     def test_tree_expands_intermediate_and_leaf_resources_with_fires(self):
@@ -449,15 +326,11 @@ class AutocraftPreviewTests(FixtureTestCase):
         self.assertIsNone(mid_node["turns"])
 
     def test_turns_estimates_multi_turn_docraft_when_fires_exceed_speed(self):
-        # trickle_hub: скорость автокрафта = 1(база) + 2 = 3/ход. Нужно 10 прокруток
-        # craft_slow_mid (по 1 slow_mid за раз) - не влезает в один ход (10 > 3),
-        # значит растянется на ceil(10/3) = 4 хода.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        preview = engine.autocraft_preview(s, {"slow_mid": 10})
-        slow_mid_node = preview["nodes"][0]
-        self.assertEqual(slow_mid_node["fires"], 10)
-        self.assertEqual(slow_mid_node["turns"], 4)
-
+        # trickle_hub - сборщик мастерской на 2 крафта за ход: 5 полуфабрикатов - 3 хода.
+        s = GameState(resources={"raw_a": 100}, buildings={"trickle_hub": 1})
+        preview = engine.autocraft_preview(s, {"mid": 5})
+        (node,) = preview["nodes"]
+        self.assertEqual((node["fires"], node["turns"]), (5, 3))
 
 class ResolveActionCostTests(FixtureTestCase):
     """engine.resolve_action_cost - цена действия ЛЮБОГО типа, без выполнения -
@@ -507,277 +380,6 @@ class ResolveActionCostTests(FixtureTestCase):
     def test_unknown_action_type_returns_none(self):
         s = GameState()
         self.assertIsNone(engine.resolve_action_cost(s, "skip", None))
-
-
-class AutocraftSpeedAndSlotsTests(FixtureTestCase):
-    """trickle_hub: compute_power=10000 (никогда не мешает), autocraft_speed=2 (+1 базовый
-    = 3 суммарно) - специально низкая, чтобы запросы purposely не влезали в один ход.
-    slot_hub: даёт +1 слот автокрафта (база - 1), max_count=1."""
-
-    def test_small_request_resolves_instantly_even_with_low_speed(self):
-        # 2 прокрутки craft_slow_mid влезают в скорость (3), автокрафт не нужен - мгновенно.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        failure = engine.ensure_and_pay(s, {"slow_mid": 2})
-        self.assertIsNone(failure)
-        self.assertEqual(s.resources["slow_mid"], 0)  # скрафтили и сразу списали как cost
-        self.assertEqual(s.autocraft_jobs, {})
-
-    def test_large_request_becomes_background_job(self):
-        # 10 прокруток не влезают в скорость 3 - должна завестись фоновая задача,
-        # а не мгновенный результат, хотя мощности (compute) и сырья с избытком.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        failure = engine.ensure_and_pay(s, {"slow_mid": 10})
-        self.assertEqual(failure, engine.AutocraftFailure("slow_mid", "in_progress"))
-        self.assertIn("slow_mid", s.autocraft_jobs)
-        self.assertEqual(s.autocraft_jobs["slow_mid"]["fires_total"], 10)
-        self.assertEqual(s.autocraft_jobs["slow_mid"]["fires_done"], 0)
-        self.assertEqual(s.resources.get("slow_mid", 0), 0)  # ещё ничего не докрафтилось
-
-    def test_job_progresses_across_turns_and_completes(self):
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        engine.ensure_and_pay(s, {"slow_mid": 10})
-
-        engine.advance_turn(s)  # скорость 3: 3/10
-        self.assertEqual(s.autocraft_jobs["slow_mid"]["fires_done"], 3)
-        self.assertEqual(s.resources["slow_mid"], 3)
-        self.assertEqual(s.resources["slow_raw"], 997)
-
-        engine.advance_turn(s)  # 6/10
-        engine.advance_turn(s)  # 9/10
-        self.assertIn("slow_mid", s.autocraft_jobs)
-        report = engine.advance_turn(s)  # 10/10 - завершилось (доехал остаток в 1 прокрутку)
-        self.assertNotIn("slow_mid", s.autocraft_jobs)
-        self.assertEqual(s.resources["slow_mid"], 10)
-        self.assertIn("slow_mid", report.autocraft_completed)
-
-    def test_chain_needs_a_slot_per_resource_and_fails_without_enough(self):
-        # slow_final <- slow_mid - оба одновременно не влезают в скорость при amount=10,
-        # значит нужно 2 слота одновременно. Без slot_hub слотов только 1 (база) - вся
-        # цепочка должна провалиться целиком (атомарно), не создав ни одной задачи.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        failure = engine.ensure_and_pay(s, {"slow_final": 10})
-        self.assertEqual(failure, engine.AutocraftFailure("slow_final", "no_free_slots"))
-        self.assertEqual(s.autocraft_jobs, {})  # ничего не закоммитилось - всё или ничего
-        self.assertEqual(s.resources["slow_raw"], 1000)
-
-    def test_chain_succeeds_with_extra_slot_building(self):
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1, "slot_hub": 1})
-        failure = engine.ensure_and_pay(s, {"slow_final": 10})
-        self.assertEqual(failure, engine.AutocraftFailure("slow_final", "in_progress"))
-        self.assertEqual(set(s.autocraft_jobs.keys()), {"slow_mid", "slow_final"})
-
-    def test_pending_manual_action_finishes_on_its_own_once_job_completes(self):
-        # assemble_gadget стоит slow_mid:10 - не влезает в скорость, значит запускается
-        # фоновая задача, а само действие "встаёт в очередь" вместо мгновенного провала/успеха.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        result = engine.do_manual_action(s, "assemble_gadget")
-        self.assertTrue(result.ok, result.message)
-        self.assertIn("запущен", result.message)
-        self.assertEqual(len(s.pending_actions), 1)
-        self.assertEqual(s.resources.get("gadget", 0), 0)
-
-        # повторная попытка того же действия, пока оно уже в очереди, не плодит дубликат
-        engine.do_manual_action(s, "assemble_gadget")
-        self.assertEqual(len(s.pending_actions), 1)
-
-        # ceil(10 / 3) = 4 хода - ровно на них и рассчитываем: пока задача на slow_mid
-        # активна, ВЕСЬ его выпуск идёт только через неё (см. _ensure_available), без
-        # мгновенных "довесков" в обход задачи, поэтому число ходов детерминировано.
-        finished_labels = []
-        for _ in range(4):
-            report = engine.advance_turn(s)
-            finished_labels += report.pending_finished
-        self.assertEqual(s.resources["gadget"], 1)
-        self.assertEqual(s.pending_actions, [])
-        self.assertIn("«Собрать гаджет»", finished_labels)
-
-    def test_no_surplus_production_once_deficit_shrinks_below_speed(self):
-        # Регрессия: раньше, когда остаток дефицита ресурса становился меньше скорости
-        # ДО того, как фоновая задача сама доделает весь fires_total, повторная проверка
-        # (например, ретрай отложенного действия) могла мгновенно докрафтить "хвост"
-        # отдельно от задачи - а задача потом доделывала СВОЙ полный объём поверх, и в
-        # сумме получалось на пару единиц больше, чем реально требовалось. Теперь, пока
-        # задача на ресурс активна, весь его выпуск идёт только через неё - остаток
-        # должен сойтись ровно, без лишнего slow_mid на складе после завершения.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        engine.do_manual_action(s, "assemble_gadget")  # slow_mid:10, не влезает в скорость 3
-
-        for _ in range(4):
-            engine.advance_turn(s)
-
-        self.assertEqual(s.resources["gadget"], 1)
-        self.assertEqual(s.resources.get("slow_mid", 0), 0)  # ни одной лишней штуки
-        self.assertEqual(s.autocraft_jobs, {})
-
-    def test_cancel_autocraft_job_frees_slot_without_touching_already_done_fires(self):
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        engine.ensure_and_pay(s, {"slow_mid": 10})
-        engine.advance_turn(s)  # 3/10 сделано, slow_mid уже +3 на складе
-        self.assertEqual(s.resources["slow_mid"], 3)
-
-        result = engine.cancel_autocraft_job(s, "slow_mid")
-        self.assertTrue(result.ok, result.message)
-        self.assertNotIn("slow_mid", s.autocraft_jobs)  # слот сразу свободен
-        # Уже сделанные 3 прокрутки - честная сделка прошлых ходов, их не отменяем.
-        self.assertEqual(s.resources["slow_mid"], 3)
-        self.assertEqual(s.resources["slow_raw"], 997)
-
-    def test_cancel_unknown_autocraft_job_fails_cleanly(self):
-        s = GameState()
-        result = engine.cancel_autocraft_job(s, "slow_mid")
-        self.assertFalse(result.ok)
-
-    def test_max_count_blocks_building_more_than_the_limit(self):
-        s = GameState(resources={"raw_a": 100})
-        first = engine.build(s, "slot_hub")
-        self.assertTrue(first.ok, first.message)
-        self.assertEqual(s.buildings["slot_hub"], 1)
-
-        second = engine.build(s, "slot_hub")
-        self.assertFalse(second.ok)
-        self.assertIn("Нельзя построить больше 1", second.message)
-        self.assertEqual(s.buildings["slot_hub"], 1)
-
-    def test_autocraft_jobs_view_reports_progress_and_eta(self):
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        engine.ensure_and_pay(s, {"slow_mid": 10})
-        jobs = engine.autocraft_jobs_view(s)
-        self.assertEqual(len(jobs), 1)
-        job = jobs[0]
-        self.assertEqual(job["resource_id"], "slow_mid")
-        self.assertEqual(job["fires_done"], 0)
-        self.assertEqual(job["fires_total"], 10)
-        self.assertEqual(job["eta_turns"], 4)  # ceil(10 / 3)
-
-    def test_chained_jobs_sharing_a_resource_balance_exactly(self):
-        # slow_final <- slow_mid: задача на slow_final ПОТРЕБЛЯЕТ ровно тот же ресурс,
-        # который ПРОИЗВОДИТ задача на slow_mid - оба активны одновременно (нужен
-        # slot_hub на 2 слота). Проверяем, что при передаче ресурса между двумя
-        # одновременно работающими фоновыми задачами ничего не теряется и не дублируется.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1, "slot_hub": 1})
-        engine.ensure_and_pay(s, {"slow_final": 10})
-        self.assertEqual(set(s.autocraft_jobs.keys()), {"slow_mid", "slow_final"})
-
-        for _ in range(20):
-            if not s.autocraft_jobs:
-                break
-            engine.advance_turn(s)
-
-        self.assertEqual(s.autocraft_jobs, {})
-        self.assertEqual(s.resources["slow_final"], 10)
-        self.assertEqual(s.resources.get("slow_mid", 0), 0)  # всё произведённое ушло в slow_final
-        self.assertEqual(s.resources["slow_raw"], 990)  # ровно 10 прокруток craft_slow_mid по 1 slow_raw
-
-    def test_two_independent_jobs_share_a_scarce_ingredient_without_errors(self):
-        # slow_mid и other_mid - НЕ связаны друг с другом цепочкой, но оба потребляют
-        # slow_raw, которого специально мало (20 - ровно на оба запроса по 10, без запаса).
-        # Проверяем: не уходит в минус, ничего не удваивается, оба доходят до конца.
-        s = GameState(resources={"slow_raw": 20}, buildings={"trickle_hub": 1, "slot_hub": 1})
-        f1 = engine.ensure_and_pay(s, {"slow_mid": 10})
-        f2 = engine.ensure_and_pay(s, {"other_mid": 10})
-        self.assertEqual(f1, engine.AutocraftFailure("slow_mid", "in_progress"))
-        self.assertEqual(f2, engine.AutocraftFailure("other_mid", "in_progress"))
-
-        for _ in range(20):
-            if not s.autocraft_jobs:
-                break
-            engine.advance_turn(s)
-            self.assertGreaterEqual(s.resources["slow_raw"], 0)  # никогда не в минус
-
-        self.assertEqual(s.autocraft_jobs, {})
-        self.assertEqual(s.resources["slow_mid"], 10)
-        self.assertEqual(s.resources["other_mid"], 10)
-        self.assertEqual(s.resources["slow_raw"], 0)  # 20 - 10 - 10, ровно, без остатка и без перерасхода
-
-    def test_two_pending_actions_on_the_same_job_balance_exactly(self):
-        # assemble_gadget (slow_mid:10) поставлен в очередь первым, assemble_widget
-        # (slow_mid:6) - вторым, пока задача на slow_mid уже идёт. Виджет может
-        # обогнать гаджета (ему нужно меньше - он вправе взять то, что уже готово,
-        # не дожидаясь, пока накопится под более дорогой заказ) - это осознанное
-        # поведение, а не баг, но суммарный расход ресурсов должен сойтись ТОЧНО.
-        s = GameState(resources={"slow_raw": 1000}, buildings={"trickle_hub": 1})
-        engine.do_manual_action(s, "assemble_gadget")
-        engine.do_manual_action(s, "assemble_widget")
-        self.assertEqual(len(s.pending_actions), 2)
-
-        for _ in range(20):
-            if not s.pending_actions:
-                break
-            engine.advance_turn(s)
-
-        self.assertEqual(s.pending_actions, [])
-        self.assertEqual(s.resources["gadget"], 1)
-        self.assertEqual(s.resources["widget"], 1)
-        self.assertEqual(s.resources.get("slow_mid", 0), 0)  # ничего не осталось про запас
-        self.assertEqual(s.resources["slow_raw"], 1000 - 16)  # ровно 10 + 6, без лишнего
-
-
-class AutocraftBuildingRequirementTests(FixtureTestCase):
-    """Автокрафт проверяет requires_building рецепта (как клик игрока), но НЕ
-    requires_tool_tiers. mechanism_a_action: requires_building="mechanism_a",
-    raw_a:2 -> mech_output:3."""
-
-    def setUp(self):
-        super().setUp()
-        import copy
-        engine.BUILDINGS = copy.deepcopy(engine.BUILDINGS)  # cleanup вернёт исходные значения
-        for hub in ("automation_hub", "trickle_hub"):
-            engine.BUILDINGS[hub]["unlocks_autocraft"].append("mech_output")
-
-    def test_fails_without_the_mechanism_and_names_it(self):
-        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
-        failure = engine.ensure_and_pay(s, {"mech_output": 3})
-        self.assertEqual((failure.reason, failure.building_id), ("building_missing", "mechanism_a"))
-        self.assertIn("Механизм А", engine.describe_autocraft_failure(failure))
-        self.assertEqual(s.resources["raw_a"], 10)  # ничего не списано
-
-    def test_works_with_a_working_mechanism(self):
-        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1, "mechanism_a": 1})
-        self.assertIsNone(engine.ensure_and_pay(s, {"mech_output": 3}))
-        self.assertEqual(s.resources["raw_a"], 8)
-
-    def test_broken_mechanism_does_not_count(self):
-        s = GameState(
-            resources={"raw_a": 10}, buildings={"automation_hub": 1, "mechanism_a": 1}, broken={"mechanism_a": 1},
-        )
-        self.assertEqual(engine.ensure_and_pay(s, {"mech_output": 3}).reason, "building_missing")
-
-    def test_applies_to_multi_turn_recipes_too(self):
-        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
-        engine.set_action_priority(s, "mechanism_a_delayed_action", 10)
-        self.assertEqual(engine.ensure_and_pay(s, {"mech_output": 3}).reason, "building_missing")
-        self.assertEqual(s.manual_jobs, {})
-
-    def test_message_reaches_the_player(self):
-        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
-        result = engine._pay_or_defer(s, {"mech_output": 3}, "тест", "manual", None)
-        self.assertFalse(result.ok)
-        self.assertIn("нужна работающая постройка «Механизм А»", result.message)
-
-    def test_background_job_idles_while_the_mechanism_is_broken(self):
-        # trickle_hub - медленный (несколько прокруток/ход): 30 штук (10 прокруток) уходят
-        # в фоновую задачу. Пока механизм сломан, задача стоит; после ремонта продолжает сама.
-        s = GameState(resources={"raw_a": 100}, buildings={"trickle_hub": 1, "mechanism_a": 1})
-        speed = engine.autocraft_speed_capacity(s)
-        self.assertLess(speed, 10)
-        self.assertEqual(engine.ensure_and_pay(s, {"mech_output": 30}).reason, "in_progress")
-        self.assertIn("mech_output", s.autocraft_jobs)
-
-        s.broken["mechanism_a"] = 1
-        engine.advance_turn(s)
-        self.assertEqual(s.autocraft_jobs["mech_output"]["fires_done"], 0)
-
-        s.broken.pop("mechanism_a")
-        engine.advance_turn(s)
-        self.assertEqual(s.autocraft_jobs["mech_output"]["fires_done"], speed)
-
-    def test_tool_tier_requirement_is_still_ignored(self):
-        import copy
-        engine.MANUAL_ACTIONS = copy.deepcopy(engine.MANUAL_ACTIONS)
-        engine.MANUAL_ACTIONS["mechanism_a_action"]["requires_tool_tiers"] = {"pickaxe": [99]}
-        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1, "mechanism_a": 1})
-        self.assertFalse(engine.is_manual_action_unlocked("mechanism_a_action", s))  # игроку - закрыто
-        self.assertIsNone(engine.ensure_and_pay(s, {"mech_output": 3}))  # автокрафту - нет
 
 
 class ManualJobTests(FixtureTestCase):
@@ -1042,71 +644,40 @@ class EnergyCraftTests(FixtureTestCase):
         self.assertFalse(result.ok)
 
     def test_autocraft_runs_two_energy_recipes_sequentially_with_a_single_converter(self):
-        # assemble_capacitor (raw_b + catalyst -> capacitor) - оба ингредиента НЕ
-        # имеют обычного рецепта (RESOURCE_RECIPE), только крафт за энергию (см.
-        # ENERGY_RECIPE_FOR_RESOURCE в engine.py). С ОДНИМ преобразователем (capacity=1)
-        # второй рецепт не может начаться, пока не закончится первый - проверяем, что
-        # в любой момент времени активна НЕ БОЛЕЕ ОДНОЙ задачи разом.
-        s = GameState(resources={"raw_a": 10})
-        for building_id in ("automation_hub", "energy_converter"):
-            result = engine.build(s, building_id)
-            self.assertTrue(result.ok, result.message)
-
+        # assemble_capacitor (raw_b + catalyst -> capacitor) - оба ингредиента делаются
+        # только крафтом за энергию. С ОДНИМ автоматизированным преобразователем второй
+        # рецепт ждёт, пока закончится первый - не больше одной партии разом.
+        s = GameState(
+            buildings={"automation_hub": 1, "energy_converter": 1},
+            building_upgrades={"energy_converter": ["conv_auto"]},
+        )
         result = engine.do_manual_action(s, "assemble_capacitor")
-        self.assertTrue(result.ok)
-        self.assertTrue(result.pending)
-        self.assertEqual(s.resources.get("capacitor", 0), 0)
-        self.assertEqual(len(s.pending_actions), 1)
-        # Ровно ОДИН крафт запущен сейчас же - второй ингредиент просто ждёт своей
-        # очереди, а не встаёт вторым заданием поверх занятого единственного слота.
-        self.assertEqual(len(s.energy_jobs), 1)
-        self.assertEqual(s.energy_jobs[0]["recipe_id"], "make_raw_b")
-        # Ни у одного из двух ресурсов нет СВОЕЙ фоновой автокрафт-задачи/слота -
-        # они копятся через крафт за энергию, отдельный слот автокрафта им не нужен.
-        self.assertEqual(s.autocraft_jobs, {})
-
-        turns_seen_two_jobs_at_once = False
-        for _ in range(10):
-            if s.resources.get("capacitor", 0):
-                break
+        self.assertTrue(result.ok and result.pending, result.message)
+        self.assertEqual(len(s.orders), 1)
+        for _ in range(12):
             s.resources["energy"] = 100
             engine.advance_turn(s)
-            if len(s.energy_jobs) > 1:
-                turns_seen_two_jobs_at_once = True
-
-        self.assertEqual(s.resources.get("capacitor", 0), 1)
-        self.assertFalse(turns_seen_two_jobs_at_once)
-        self.assertEqual(s.resources.get("raw_b", 0), 0)
-        self.assertEqual(s.resources.get("catalyst", 0), 0)
-        self.assertEqual(s.pending_actions, [])
+            self.assertLessEqual(len(s.energy_jobs), 1)
+            if s.resources.get("capacitor", 0):
+                break
+        self.assertEqual(s.resources.get("capacitor"), 1)
+        self.assertEqual(s.orders, [])
 
     def test_autocraft_runs_two_energy_recipes_in_parallel_with_two_converters(self):
-        # Тот же сценарий, что и последовательный тест выше, но со ВТОРЫМ
-        # преобразователем - оба ингредиента должны запуститься ОДНОВРЕМЕННО, в
-        # рамках ОДНОГО и того же вызова автокрафта, а не по очереди через ходы.
-        s = GameState(resources={"raw_a": 10})
-        for building_id in ("automation_hub", "energy_converter", "energy_converter"):
-            result = engine.build(s, building_id)
-            self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.buildings["energy_converter"], 2)
-
-        result = engine.do_manual_action(s, "assemble_capacitor")
-        self.assertTrue(result.ok)
-        self.assertTrue(result.pending)
-        self.assertEqual(len(s.energy_jobs), 2)
-        self.assertEqual(
-            {j["recipe_id"] for j in s.energy_jobs},
-            {"make_raw_b", "make_catalyst"},
+        # Со ВТОРЫМ автоматизированным преобразователем оба ингредиента идут разом.
+        s = GameState(
+            buildings={"automation_hub": 1, "energy_converter": 2},
+            building_upgrades={"energy_converter": ["conv_auto"]},
         )
-
+        self.assertTrue(engine.do_manual_action(s, "assemble_capacitor").pending)
+        engine.advance_turn(s)
+        self.assertEqual({j["recipe_id"] for j in s.energy_jobs}, {"make_raw_b", "make_catalyst"})
         for _ in range(10):
             if s.resources.get("capacitor", 0):
                 break
             s.resources["energy"] = 100
             engine.advance_turn(s)
-
-        self.assertEqual(s.resources.get("capacitor", 0), 1)
-        self.assertEqual(s.pending_actions, [])
+        self.assertEqual(s.resources.get("capacitor"), 1)
 
     def test_amplifier_building_locked_without_a_working_converter(self):
         # requires_building - тот же generic-гейт, что и у ручных действий
@@ -1272,32 +843,31 @@ class EnergyMachineTypesTests(FixtureTestCase):
         self.assertFalse(result.ok)
 
     def test_autocraft_starts_energy_recipe_only_in_its_required_machine_type(self):
-        # upgraded_matter нужен как сырьё - у его рецепта machine=matter_generator,
-        # значит автокрафт обязан запустить его ИМЕННО там, а не в свободном
-        # energy_converter, даже с тем же самым свободным слотом под рукой.
+        # У upgrade_matter machine=matter_generator - заказ запускает его ИМЕННО там,
+        # даже при свободном автоматизированном energy_converter; материал (consumes)
+        # изымается в резерв заказа сразу и тратится при запуске партии.
         s = GameState(
             resources={"raw_a": 100},
             buildings={"automation_hub": 1, "energy_converter": 1, "matter_generator": 1},
+            building_upgrades={"energy_converter": ["conv_auto"], "matter_generator": ["matter_auto"]},
         )
-        failure = engine.ensure_and_pay(s, {"upgraded_matter": 1})
-        self.assertIsNotNone(failure)
-        self.assertEqual(failure.reason, "in_progress")
-        self.assertEqual(len(s.energy_jobs), 1)
-        self.assertEqual(s.energy_jobs[0]["recipe_id"], "upgrade_matter")
-        self.assertEqual(s.energy_jobs[0]["building_id"], "matter_generator")
-        self.assertEqual(s.resources["raw_a"], 100 - 5)  # consumes списан автокрафтом при запуске
+        failure, order = engine._place_order(s, "recipe", "x", "тест", {"upgraded_matter": 1})
+        self.assertIsNone(failure)
+        self.assertEqual(s.resources["raw_a"], 100 - 5)
+        engine._process_orders(s, engine.ProductionReport(), {})
+        self.assertEqual([(j["recipe_id"], j["building_id"]) for j in s.energy_jobs], [("upgrade_matter", "matter_generator")])
 
     def test_autocraft_refuses_to_start_energy_recipe_without_its_material(self):
-        # По прямому пожеланию - автокрафт НЕ докрафчивает материал энергорецепта
-        # рекурсивно сам (заведомое упрощение первой версии), просто ждёт, пока
-        # материал появится в наличии целиком.
-        s = GameState(resources={"raw_a": 2}, buildings={"automation_hub": 1, "matter_generator": 1})  # нужно 5
-        failure = engine.ensure_and_pay(s, {"upgraded_matter": 1})
-        self.assertIsNotNone(failure)
-        self.assertEqual(failure.reason, "missing_energy_recipe_material")
+        # Материал энергорецепта - обычный ингредиент заказа: не хватает, а сделать его
+        # не из чего (raw_a - сырьё) - отказ сразу, ничего не изъято и не запущено.
+        s = GameState(
+            resources={"raw_a": 2}, buildings={"automation_hub": 1, "matter_generator": 1},
+            building_upgrades={"matter_generator": ["matter_auto"]},
+        )
+        failure, order = engine._place_order(s, "recipe", "x", "тест", {"upgraded_matter": 1})
+        self.assertEqual((failure.reason, order), ("no_recipe", None))
         self.assertEqual(s.energy_jobs, [])
         self.assertEqual(s.resources["raw_a"], 2)
-
 
 class BuildResearchRepairTests(FixtureTestCase):
     def test_build_deep_autocraft_chain(self):
@@ -1305,9 +875,10 @@ class BuildResearchRepairTests(FixtureTestCase):
             resources={"raw_a": 500, "raw_b": 500}, techs={"tech1"}, buildings={"automation_hub": 1},
         )
         result = engine.build(s, "factory")  # cost: mid 3 - полуфабрикатов 0
-        self.assertTrue(result.ok, result.message)
+        self.assertTrue(result.ok and result.pending, result.message)
+        self.assertEqual(s.resources["raw_a"], 500 - 3 * 4)  # сырьё сразу в резерве заказа
+        engine.advance_turn(s)
         self.assertEqual(s.buildings["factory"], 1)
-        self.assertEqual(s.resources["raw_a"], 500 - 3 * 4)
 
     def test_multi_stage_building_requires_paying_each_stage_in_order(self):
         # furnace: 3 этапа (raw_a:2 / raw_b:1 / raw_a:1+raw_b:1) - постройка не
@@ -1385,35 +956,19 @@ class BuildResearchRepairTests(FixtureTestCase):
         self.assertIn("«Обжиговая печь»", result.message)
 
     def test_multi_stage_building_cannot_skip_a_stage_even_via_background_autocraft(self):
-        # reactor: этап 1 стоит slow_mid:10, что не влезает в скорость автокрафта
-        # trickle_hub (3/ход) - платёж уходит в фоновую задачу. Пока она не
-        # завершилась, у постройки нет никакого способа "перепрыгнуть" сразу на
-        # этап 2 - это не отдельная постройка, а один и тот же building_id с одним
-        # счётчиком прогресса, а build() всегда работает только с ТЕКУЩИМ этапом.
+        # reactor: этап 1 стоит slow_mid:10, а сборщик trickle_hub делает 2 за ход -
+        # заказ идёт 5 ходов. Пока он не готов, этап 1 не засчитан и перепрыгнуть
+        # на этап 2 нельзя - build() работает только с ТЕКУЩИМ этапом.
         s = GameState(resources={"slow_raw": 1000, "raw_a": 100}, buildings={"trickle_hub": 1})
         result = engine.build(s, "reactor")
-        self.assertTrue(result.ok, result.message)
-        self.assertTrue(result.pending)  # ушло в очередь - мгновенно оплатить весь этап не вышло
-        self.assertNotIn("reactor", s.buildings)
-        self.assertNotIn("reactor", s.construction_progress)  # прогресс НЕ продвинулся, пока этап не оплачен целиком
-        self.assertIn("slow_mid", s.autocraft_jobs)
-
-        for _ in range(3):  # ceil(10/3)=4 хода нужно всего - на 3-м ещё не готово
+        self.assertTrue(result.ok and result.pending, result.message)
+        self.assertNotIn("reactor", s.construction_progress)
+        for _ in range(4):
             engine.advance_turn(s)
-        self.assertNotIn("reactor", s.buildings)
         self.assertNotIn("reactor", s.construction_progress)
-
-        engine.advance_turn(s)  # 4-й ход - фоновая задача докрафтила остаток, отложенное действие завершает этап 1
-        self.assertEqual(s.construction_progress.get("reactor"), 1)  # только теперь этап 1 засчитан
+        engine.advance_turn(s)  # 5-й ход - 10 полуфабрикатов готовы, заказ оплачивает этап 1
+        self.assertEqual(s.construction_progress.get("reactor"), 1)
         self.assertNotIn("reactor", s.buildings)
-
-        # Только сейчас можно оплатить этап 2 - и именно его, не какой-то другой
-        stage = engine.current_construction_stage("reactor", s)
-        self.assertEqual(stage["number"], 2)
-        result2 = engine.build(s, "reactor")
-        self.assertTrue(result2.ok, result2.message)
-        self.assertEqual(s.buildings["reactor"], 1)
-        self.assertNotIn("reactor", s.construction_progress)
 
     def test_research_requires_prerequisites(self):
         s = GameState(resources={"mid": 10}, solved_hypotheses={"tech2"})
@@ -1861,23 +1416,15 @@ class ResourceStorageTests(FixtureTestCase):
         self.assertEqual(s.resources["raw_a"], 10_000_000)
 
     def test_autocraft_ignores_storage_capacity_of_an_intermediate_resource(self):
-        # "Склад не влияет на автокрафт" (см. CLAUDE.md) - временно даём
-        # промежуточному ресурсу "mid" крошечную вместимость (cap=1), заведомо
-        # меньшую, чем 2 штуки, которые craft_final запросит через автокрафт
-        # (craft_final.cost = {"mid": 2, ...}). Если бы cap хоть как-то проверялся
-        # внутри _ensure_available, докрафт 2 mid уже споткнулся бы здесь.
+        # "Склад не влияет на автокрафт" (см. CLAUDE.md): промежуточные 2 mid живут в
+        # резерве заказа, а не на складе, - крошечная вместимость mid им не мешает.
         s = GameState(resources={"raw_a": 100, "raw_b": 100}, buildings={"automation_hub": 1})
         with mock.patch.dict(engine.RESOURCE_STORAGE, {"mid": {"base_capacity": 1, "tiers": []}}):
             result = engine.do_manual_action(s, "craft_final")
-        self.assertTrue(result.ok, result.message)
+            self.assertTrue(result.pending, result.message)
+            engine.advance_turn(s)
         self.assertEqual(s.resources["final"], 1)
-        # Докрафченные 2 mid были тут же полностью потрачены на craft_final (cost
-        # mid:2) в рамках ОДНОГО и того же вызова ensure_and_pay - обрезка склада
-        # им ни разу не помешала, потому что промежуточный результат никогда не
-        # проверяется против storage_capacity, только настоящий state.resources в
-        # конце хода (advance_turn).
         self.assertEqual(s.resources.get("mid", 0), 0)
-
 
 class TechEffectTests(FixtureTestCase):
     def test_wildcard_effect_reduces_breakdown_for_all_buildings(self):
@@ -2259,12 +1806,12 @@ class BuildingUpgradesTests(FixtureTestCase):
         self.assertEqual(s.resources.get("raw_b", 0), 4)  # 2 база x2
 
     def test_pending_retry_dispatches_building_upgrade_with_composite_target_id(self):
-        # _PENDING_RETRY принимает ВЕСЬ pending-словарь (не голый target_id) - см.
+        # _ORDER_RETRY принимает ВЕСЬ заказ (не голый target_id) - см.
         # CLAUDE.md про "Ползунок масштаба ручного действия": retry-лямбдам нужен
         # доступ к дополнительным полям вроде "scale" у ручных действий.
         s = GameState(resources={"raw_a": 5}, buildings={"upgradable_factory": 1})
         pending = {"kind": "building_upgrade", "target_id": "upgradable_factory:uf_scale", "label": "x"}
-        result = engine._PENDING_RETRY["building_upgrade"](s, pending)
+        result = engine._ORDER_RETRY["building_upgrade"](s, pending)
         self.assertTrue(result.ok)
         self.assertTrue(engine.is_building_upgrade_purchased(s, "upgradable_factory", "uf_scale"))
 
@@ -2426,16 +1973,14 @@ class MechanismScaleSliderTests(FixtureTestCase):
         self.assertEqual(s.resources["raw_a"], before - 4)  # база, не x3
 
     def test_pending_manual_action_retry_preserves_the_chosen_scale(self):
-        # Отложенное действие (см. _pay_or_defer/_enqueue_pending) обязано при
-        # повторной попытке использовать ТОТ ЖЕ масштаб, что выбрал игрок при
-        # первом клике - а не молча откатиться на масштаб по умолчанию.
+        # Выполнение заказа по готовности (_ORDER_RETRY) обязано взять ТОТ ЖЕ масштаб,
+        # что выбрал игрок при клике, а не откатиться на масштаб по умолчанию.
         s = GameState(resources={"raw_a": 100}, buildings={"mechanism_a": 1})
         engine.purchase_building_upgrade(s, "mechanism_a", "mech_a_scale")  # cap=2
-        engine._enqueue_pending(s, "manual", "mechanism_a_action", "«тест»", {"scale": 1})
-        result = engine._PENDING_RETRY["manual"](s, s.pending_actions[0])
+        order = {"kind": "manual", "target_id": "mechanism_a_action", "label": "«тест»", "scale": 1}
+        result = engine._ORDER_RETRY["manual"](s, order)
         self.assertTrue(result.ok, result.message)
         self.assertEqual(s.resources["mech_output"], 3)  # x1 (сохранённый выбор), не x2
-
 
 class FractionalResourceRoundingTests(FixtureTestCase):
     def test_integer_resource_consumption_rounds_up(self):
@@ -2524,16 +2069,12 @@ class ChanceBasedActionTests(FixtureTestCase):
         self.assertNotIn("risky_output", recipe)
 
     def test_autocraft_reports_shortage_instead_of_crafting_a_probabilistic_resource(self):
-        # lucky_output нужен как ингредиент craft-действия (через фикстурный cost),
-        # но у него нет гарантированного рецепта - автокрафт должен вести себя так,
-        # будто это обычное сырьё без рецепта: "не хватает", а не попытка докрафтить.
+        # У lucky_output нет гарантированного рецепта - для автокрафта это сырьё:
+        # заказ отклоняется, ничего не изъято.
         s = GameState(resources={"raw_a": 100}, buildings={"automation_hub": 1})
-        failure = engine.ensure_and_pay(s, {"lucky_output": 10})
-        self.assertIsNotNone(failure)
-        self.assertEqual(failure.reason, "no_recipe")
-        # Ничего не должно было списаться/докрафтиться по пути.
+        failure, order = engine._place_order(s, "recipe", "x", "тест", {"lucky_output": 10})
+        self.assertEqual((failure.reason, order), ("no_recipe", None))
         self.assertEqual(s.resources.get("raw_a"), 100)
-        self.assertNotIn("lucky_output", s.autocraft_jobs)
 
     def test_gain_chance_success_grants_the_resource(self):
         s = GameState(resources={"raw_a": 10})
