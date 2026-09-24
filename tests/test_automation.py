@@ -369,9 +369,11 @@ class EnergyRecipeAutomationTests(FixtureTestCase):
     def test_rule_respects_machine_restriction(self):
         # upgrade_matter привязан к matter_generator (machine) - должен занять
         # именно его, даже если energy_converter тоже свободен.
+        # Энергии меньше порога (20): преобразователи тратят энергию ПОСЛЕДНИМИ в ходу,
+        # и при полном запасе партия успела бы и начаться, и закончиться за этот ход.
         s = GameState(
             buildings={"automator": 1, "energy_converter": 1, "matter_generator": 1},
-            resources={"energy": 100, "raw_a": 20},
+            resources={"energy": 10, "raw_a": 20},
         )
         engine.add_automation_rule(s, "automator", "energy_recipe", "upgrade_matter", [])
         engine.advance_turn(s)
@@ -391,8 +393,8 @@ class EnergyRecipeAutomationTests(FixtureTestCase):
 
     def test_recipe_material_consumes_cost_is_paid_on_start(self):
         s = GameState(
-            buildings={"automator": 1, "matter_generator": 1}, resources={"energy": 100, "raw_a": 5},
-        )
+            buildings={"automator": 1, "matter_generator": 1}, resources={"energy": 10, "raw_a": 5},
+        )  # энергии меньше порога - партия не успеет закончиться в этот же ход
         engine.add_automation_rule(s, "automator", "energy_recipe", "upgrade_matter", [])
         engine.advance_turn(s)
         self.assertEqual(len(s.energy_jobs), 1)

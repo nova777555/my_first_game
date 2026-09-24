@@ -387,10 +387,16 @@ class AutocraftFailure:
     _ensure_available: автокрафт САМ запускает нужный рецепт в свободном
     энергетическом преобразователе (если он есть), а если все заняты - просто ждёт
     своей очереди, без отдельной фоновой задачи/слота автокрафта.
-    building_id - только для "building_missing": какой постройки не хватает рецепту."""
+    building_id - только для "building_missing": какой постройки не хватает рецепту.
+    Энергия (ENERGY_RESOURCE_ID) - не сырьё "без рецепта": её нехватка не ошибка,
+    автокрафт её ЖДЁТ (см. _energy_wait_failure). Настоящих ошибок у неё две:
+    "no_energy_source" (ждать неоткуда) и "energy_over_capacity" (за один крафт нужно
+    больше, чем вмещают хранилища - не накопить никогда; extra = {"per_craft",
+    "capacity"} для текста)."""
     resource_id: str
-    reason: str  # "no_processor" | "autocraft_disabled" | "no_recipe" | "not_unlocked" | "tech_locked" | "building_missing" | "insufficient_compute" | "no_free_slots" | "in_progress" | "missing_energy_recipe_material"
+    reason: str  # "no_processor" | "autocraft_disabled" | "no_recipe" | "not_unlocked" | "tech_locked" | "building_missing" | "insufficient_compute" | "no_free_slots" | "in_progress" | "missing_energy_recipe_material" | "no_energy_source" | "energy_over_capacity"
     building_id: str | None = None
+    extra: dict = field(default_factory=dict)
 
 
 _AUTOCRAFT_REASON_TEXT = {
@@ -404,6 +410,8 @@ _AUTOCRAFT_REASON_TEXT = {
     "no_free_slots": "не хватает свободных слотов автокрафта, чтобы начать докрафт «{name}» в фоне",
     "in_progress": "«{name}» уже докрафтывается в фоне",
     "missing_energy_recipe_material": "для «{name}» не хватает сырья на крафт за энергию - автокрафт не докрафчивает его сам",
+    "no_energy_source": "нет ни одного работающего источника энергии - ждать её притока неоткуда",
+    "energy_over_capacity": "за один крафт нужно {per_craft} энергии, а хранилища вмещают только {capacity} - столько не накопить",
 }
 
 
@@ -411,7 +419,7 @@ def describe_autocraft_failure(failure: AutocraftFailure) -> str:
     name = RESOURCE_NAMES.get(failure.resource_id, failure.resource_id)
     template = _AUTOCRAFT_REASON_TEXT[failure.reason]
     building = BUILDINGS[failure.building_id]["name"] if failure.building_id in BUILDINGS else failure.building_id
-    return template.format(name=name, building=building)
+    return template.format(name=name, building=building, **failure.extra)
 
 
 def _add_resource(resources: dict[str, int], resource_id: str, amount: int) -> None:
@@ -896,16 +904,41 @@ def autocraft_jobs_view(state: GameState) -> list[dict]:
     ресурс, сколько прокруток сделано/нужно всего и через сколько ходов доделается
     при ТЕКУЩЕЙ скорости (None - никогда, если скорость сейчас нулевая)."""
     speed = autocraft_speed_capacity(state)
+    energy_have = state.resources.get(ENERGY_RESOURCE_ID, 0)
     jobs = []
     for resource_id, job in state.autocraft_jobs.items():
         remaining = job["fires_total"] - job["fires_done"]
+        eta = None if speed <= 0 else -(-remaining // speed)
+        # Рецепт с энергией в цене идёт не быстрее, чем она притекает (задача берёт
+        # за ход столько прокруток, на сколько хватает накопленного).
+        per_fire_energy = effective_manual_action_stats(job["action_id"], state)[0].get(ENERGY_RESOURCE_ID, 0)
+        waits_energy = per_fire_energy > energy_have
+        if per_fire_energy > 0 and eta is not None:
+            energy_eta = energy_wait_eta_turns(state, remaining * per_fire_energy - energy_have)
+            eta = None if energy_eta is None and waits_energy else max(eta, energy_eta or 0)
         jobs.append({
             "resource_id": resource_id,
             "fires_done": job["fires_done"],
             "fires_total": job["fires_total"],
-            "eta_turns": None if speed <= 0 else -(-remaining // speed),
+            "eta_turns": eta,
+            "waits_energy": waits_energy,
         })
     return jobs
+
+
+def energy_wait_eta_turns(state: GameState, deficit: float) -> int | None:
+    """Через сколько ходов накопится ещё deficit энергии при ТЕКУЩЕМ чистом притоке
+    (генерация минус потребление построек в этот ход, см. energy_breakdown) - оценка
+    для игрока, не обещание: ночью солнце не светит, преобразователи и автокрафт
+    тоже тянут из того же пула. None - притока сейчас нет (ждать можно, но сколько -
+    не сказать); 0 - уже хватает."""
+    if deficit <= 0:
+        return 0
+    _, generation, consumption = energy_breakdown(state)
+    net = generation - consumption
+    if net <= 0:
+        return None
+    return math.ceil(deficit / net)
 
 
 def cancel_autocraft_job(state: GameState, resource_id: str) -> ActionResult:
@@ -1009,7 +1042,7 @@ def _discover_autocraft_graph(state: GameState, resource_ids, recipe: dict[str, 
 def _aggregate_autocraft_demand(
     state: GameState, cost: dict[str, int], graph: _AutocraftGraph, jobs: dict[str, dict],
     manual_jobs: dict[str, dict],
-) -> tuple[dict[str, AutocraftFailure], dict[str, float], dict[str, float], dict[str, float], dict[str, str]]:
+) -> tuple[dict[str, AutocraftFailure], dict[str, float], dict[str, float], dict[str, float], dict[str, str], float]:
     """Считает СУММАРНЫЙ спрос на каждый resource_id (от исходного cost плюс от ВСЕХ
     рецептов дерева, которым он нужен как ингредиент), и одновременно решает всё, что
     решаемо БЕЗ знания статуса ингредиентов - открыт ли рецепт/технология/хватает ли
@@ -1052,6 +1085,11 @@ def _aggregate_autocraft_demand(
     gain_per_fire_map: dict[str, float] = {}
     resolved_of: dict[str, str] = {}
     failures: dict[str, AutocraftFailure] = {}
+    # Самый большой РАЗОВЫЙ платёж энергией в этом запросе - на одну прокрутку,
+    # одну многоходовую партию или само действие (его обязано вместить хранилище,
+    # см. _energy_wait_failure). Энергия - лист графа, обход доходит до неё ПОСЛЕ
+    # всех её потребителей, так что к тому моменту максимум уже известен целиком.
+    energy_per_craft = cost.get(ENERGY_RESOURCE_ID, 0)
     for resource_id in reversed(graph.ingredient_first):
         needed = total_needed.get(resource_id, 0)
         have = state.resources.get(resource_id, 0)
@@ -1066,6 +1104,17 @@ def _aggregate_autocraft_demand(
             continue
 
         kind = graph.kind_of[resource_id]
+        if kind == "none" and resource_id == ENERGY_RESOURCE_ID:
+            # Энергию не крафтят, она ПРИТЕКАЕТ сама (генераторы) - нехватку ждём, а не
+            # отказываем: потребители уходят в фоновые задачи, которые каждый ход берут
+            # столько прокруток, на сколько хватает накопленного (_process_autocraft_jobs),
+            # а само действие - в очередь (_pay_or_defer). Ровно как игрок руками.
+            failure = _energy_wait_failure(state, energy_per_craft)
+            if failure is not None:
+                failures[resource_id] = failure
+            else:
+                resolved_of[resource_id] = "energy_wait"
+            continue
         if kind == "none":
             failures[resource_id] = AutocraftFailure(resource_id, "no_recipe")  # сырьё без рецепта (или цикл)
             continue
@@ -1106,7 +1155,9 @@ def _aggregate_autocraft_demand(
         # прокрутку (сложный рецепт "дороже" простого) - жёсткий потолок на размер
         # запроса (не на скорость): если суммарной мощности не хватает даже
         # теоретически, ждать бессмысленно, фоновая задача тут не поможет.
-        compute_per_fire = sum(effective_cost.values())
+        # Энергия - не предмет: её рецепт ждёт притоком (см. _energy_wait_failure),
+        # мощность процессора на неё не тратится.
+        compute_per_fire = sum(v for r, v in effective_cost.items() if r != ENERGY_RESOURCE_ID)
         if fires * compute_per_fire > compute_capacity(state):
             failures[resource_id] = AutocraftFailure(resource_id, "insufficient_compute")
             continue
@@ -1130,6 +1181,7 @@ def _aggregate_autocraft_demand(
             resolved_of[resource_id] = "long_pending"
             for ing_id, ing_amount in effective_cost.items():
                 total_needed[ing_id] = total_needed.get(ing_id, 0) + ing_amount
+            energy_per_craft = max(energy_per_craft, effective_cost.get(ENERGY_RESOURCE_ID, 0))
             continue
 
         # Пока по ресурсу уже идёт фоновая задача, ВЕСЬ его дальнейший выпуск идёт
@@ -1150,7 +1202,60 @@ def _aggregate_autocraft_demand(
         resolved_of[resource_id] = "action_pending"
         for ing_id, ing_amount in effective_cost.items():
             total_needed[ing_id] = total_needed.get(ing_id, 0) + ing_amount * fires
-    return failures, total_needed, fires_map, gain_per_fire_map, resolved_of
+        energy_per_craft = max(energy_per_craft, effective_cost.get(ENERGY_RESOURCE_ID, 0))
+    return failures, total_needed, fires_map, gain_per_fire_map, resolved_of, energy_per_craft
+
+
+def has_energy_source(state: GameState) -> bool:
+    """Есть ли хоть что-то, от чего энергия МОЖЕТ прибыть сама: работающая (и не
+    выключенная ползунком целиком) постройка с энергией в produces - время суток НЕ
+    учитывается (солнечная панель ночью всё равно источник, утром даст), построенный
+    реактор, вставленная душа или заселённая особь, чей рецепт/вид даёт энергию.
+    Нужна автокрафту, чтобы не ждать энергию вечно (см. _energy_wait_failure)."""
+    for building_id in state.buildings:
+        if working_count(state, building_id) <= 0:
+            continue
+        if BUILDINGS[building_id].get("reactor"):
+            return True
+        if building_active_count(state, building_id) <= 0:
+            continue
+        produces, _ = effective_building_stats(building_id, state.techs, state.building_upgrades)
+        amount = produces.get(ENERGY_RESOURCE_ID, 0)
+        if (amount["max"] if _is_range_amount(amount) else amount) > 0:
+            return True
+    for souls in state.soul_slots.values():
+        for soul_id in souls:
+            if ENERGY_RESOURCE_ID in SOUL_RECIPES.get(soul_id, {}).get("produces", {}):
+                return True
+    for creature in state.creatures.values():
+        if creature.get("farm_instance_id") is None:
+            continue
+        species = SPECIES.get(creature_phenotype(creature)["species_id"], {})
+        if ENERGY_RESOURCE_ID in species.get("produces", {}):
+            return True
+    return False
+
+
+def _energy_wait_failure(state: GameState, energy_per_craft: float) -> AutocraftFailure | None:
+    """None - энергии не хватает, но её можно дождаться. Иначе - почему ждать
+    бессмысленно: неоткуда взяться (has_energy_source) или ОДИН платёж больше, чем
+    вмещают все хранилища (energy_capacity) - после хода запас обрезается до ёмкости,
+    так что столько за раз не накопится никогда, ни руками, ни автокрафтом."""
+    if not has_energy_source(state):
+        return AutocraftFailure(ENERGY_RESOURCE_ID, "no_energy_source")
+    capacity = energy_capacity(state)
+    if energy_per_craft > capacity:
+        return AutocraftFailure(
+            ENERGY_RESOURCE_ID, "energy_over_capacity",
+            extra={"per_craft": _format_amount(energy_per_craft), "capacity": _format_amount(capacity)},
+        )
+    return None
+
+
+def _format_amount(value: float) -> int | float:
+    """Число для текста игроку: целое без ".0", дробное - до сотых."""
+    value = round(value, 2)
+    return int(value) if value == int(value) else value
 
 
 def _guaranteed_amount(value) -> float:
@@ -1251,6 +1356,12 @@ def _commit_autocraft_plan(
         if resolution in ("ok", "existing_job"):
             status_of[resource_id] = "ok" if resolution == "ok" else "in_progress"
             continue
+        if resolution == "energy_wait":
+            # Как у фоновой задачи: энергия подтянется сама. Потребитель заводит свою
+            # задачу автокрафта и берёт энергию по ходам, сколько накопилось;
+            # многоходовая партия и само действие ждут повторной попытки.
+            status_of[resource_id] = "in_progress"
+            continue
         if resolution == "long_running":
             status_of[resource_id] = "waiting"
             continue
@@ -1347,7 +1458,7 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
     recipe = resource_recipe(state)
 
     graph = _discover_autocraft_graph(state, cost.keys(), recipe)
-    failures, total_needed, fires_map, gain_per_fire_map, resolved_of = _aggregate_autocraft_demand(
+    failures, total_needed, fires_map, gain_per_fire_map, resolved_of, energy_per_craft = _aggregate_autocraft_demand(
         state, cost, graph, working_jobs, working_manual_jobs,
     )
     if failures:
@@ -1367,7 +1478,11 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
     queued: AutocraftFailure | None = None
     for resource_id in cost:
         if status_of.get(resource_id) in ("in_progress", "waiting"):
-            queued = AutocraftFailure(resource_id, "in_progress")
+            # energy_reserve - сколько энергии этому запросу нужно ЗА РАЗ: пока он ждёт
+            # её, преобразователи не трогают столько накопленного (см. energy_reserved).
+            queued = AutocraftFailure(
+                resource_id, "in_progress", extra={"energy_reserve": energy_per_craft} if energy_per_craft else {},
+            )
             break
 
     if queued is not None:
@@ -1511,6 +1626,12 @@ def _preview_node(
     if deficit <= 0 or resource_id in visiting:
         return node
     action_id = recipe.get(resource_id)
+    if action_id is None and resource_id == ENERGY_RESOURCE_ID:
+        # Энергию автокрафт не делает, а ждёт (см. _energy_wait_failure) - сколько
+        # примерно ходов копить недостающее при текущем притоке.
+        node["energy_wait"] = True
+        node["turns"] = energy_wait_eta_turns(state, deficit)
+        return node
     if action_id is None:
         return node  # сырьё (или ресурс только из крафта за энергию) - дальше раскладывать некуда
     effective_cost, effective_gain = effective_manual_action_stats(action_id, state)
@@ -1582,7 +1703,13 @@ def _pay_or_defer(
     if failure is None:
         return None
     if failure.reason == "in_progress":
-        _enqueue_pending(state, kind, target_id, action_desc, retry_extra)
+        waits_energy = failure.resource_id == ENERGY_RESOURCE_ID
+        _enqueue_pending(
+            state, kind, target_id, action_desc, retry_extra,
+            waits_energy=waits_energy, energy_reserve=failure.extra.get("energy_reserve", 0) if waits_energy else 0,
+        )
+        if waits_energy:
+            return ActionResult(True, _energy_wait_message(state, cost, action_desc), pending=True)
         return ActionResult(
             True, f"Автокрафт для {action_desc} запущен в фоне - действие завершится само, когда ресурсов хватит.",
             pending=True,
@@ -1593,31 +1720,79 @@ def _pay_or_defer(
         # ручном крафте, без единого намёка на автокрафт/процессор/память (см.
         # AutocraftFailure). Недостачу при этом считаем ПРЯМО по cost - без
         # автокрафта промежуточных ресурсов не бывает, всё несётся руками.
-        message = f"Не хватает ресурсов на {action_desc}."
         shortfall = _direct_shortfall(state, cost)
+        if set(shortfall) == {ENERGY_RESOURCE_ID}:
+            # Не хватает ТОЛЬКО энергии - она притечёт сама (прямое пожелание: ручное
+            # действие ждёт её так же, как автокрафт, а не отказывает). Повторная
+            # попытка (_process_pending_actions) идёт внутри хода РАНЬШЕ
+            # преобразователей, так что они не перехватят накопленное.
+            energy_failure = _energy_wait_failure(state, cost[ENERGY_RESOURCE_ID])
+            if energy_failure is None:
+                _enqueue_pending(
+                    state, kind, target_id, action_desc, retry_extra,
+                    waits_energy=True, energy_reserve=cost[ENERGY_RESOURCE_ID],
+                )
+                return ActionResult(True, _energy_wait_message(state, cost, action_desc), pending=True)
+            return ActionResult(False, f"Не хватает ресурсов на {action_desc}: {describe_autocraft_failure(energy_failure)}.")
+        message = f"Не хватает ресурсов на {action_desc}."
         if shortfall:
             message += f" Не хватает: {_format_shortfall(shortfall)}."
         return ActionResult(False, message)
     message = f"Не хватает ресурсов на {action_desc}: {describe_autocraft_failure(failure)}."
     # Автокрафт задействован (есть процессор, галочка включена) - показываем
     # недостачу в БАЗОВЫХ ресурсах (см. _raw_shortfall), а не в том промежуточном
-    # ресурсе, на котором конкретно споткнулась цепочка.
+    # ресурсе, на котором конкретно споткнулась цепочка. Энергию не перечисляем,
+    # если застряли не на ней: её автокрафт дождался бы сам.
     shortfall = _raw_shortfall(state, cost)
+    if failure.resource_id != ENERGY_RESOURCE_ID:
+        shortfall.pop(ENERGY_RESOURCE_ID, None)
     if shortfall:
         message += f" Не хватает сырья: {_format_shortfall(shortfall)}."
     return ActionResult(False, message)
 
 
+def _energy_wait_message(state: GameState, cost: dict[str, int], action_desc: str) -> str:
+    need = cost.get(ENERGY_RESOURCE_ID)
+    have = state.resources.get(ENERGY_RESOURCE_ID, 0)
+    if need is None or need <= have:
+        # Энергию ждёт не само действие, а рецепт по цепочке автокрафта.
+        return f"{action_desc} ждёт энергию для автокрафта - выполнится само, когда её накопится достаточно."
+    return (
+        f"{action_desc} ждёт энергию (нужно {_format_amount(need)}, есть {_format_amount(have)}) - "
+        f"выполнится само, когда её накопится достаточно."
+    )
+
+
 def _enqueue_pending(
     state: GameState, kind: str, target_id: str | None, label: str, extra: dict | None = None,
+    waits_energy: bool = False, energy_reserve: float = 0,
 ) -> None:
+    """waits_energy - действие ждёт притока энергии (см. _energy_wait_failure), а не
+    фоновых задач автокрафта: интерфейс показывает такие отдельно и без процессора.
+    energy_reserve - сколько энергии ему нужно за раз (см. energy_reserved)."""
     for pending in state.pending_actions:
         if pending["kind"] == kind and pending["target_id"] == target_id:
+            # Причина ожидания могла смениться (слитки доделаны - теперь ждёт энергию).
+            pending["waits_energy"] = waits_energy
+            pending["energy_reserve"] = energy_reserve
             return  # уже в очереди - не дублируем
-    entry = {"kind": kind, "target_id": target_id, "label": label}
+    entry = {
+        "kind": kind, "target_id": target_id, "label": label,
+        "waits_energy": waits_energy, "energy_reserve": energy_reserve,
+    }
     if extra:
         entry.update(extra)
     state.pending_actions.append(entry)
+
+
+def cancel_pending_action(state: GameState, index: int) -> ActionResult:
+    """Снимает отложенное действие из очереди (state.pending_actions) - ход не
+    тратит. Возвращать нечего: пока действие ждёт, его цена ещё не списана.
+    Фоновые задачи автокрафта, заведённые ради него, остаются (у них своя отмена)."""
+    if not (0 <= index < len(state.pending_actions)):
+        return ActionResult(False, "Такого ожидающего действия нет.")
+    pending = state.pending_actions.pop(index)
+    return ActionResult(True, f"Ожидание отменено: {pending['label']}.")
 
 
 def _matching_effects(building_id: str, techs: set[str]) -> list[dict]:
@@ -6839,6 +7014,23 @@ def _process_reactors(state: GameState, report: ProductionReport, daytime: bool)
             _add_resource(state.resources, ENERGY_RESOURCE_ID, total_output)
 
 
+def energy_reserved(state: GameState) -> float:
+    """Сколько накопленной энергии НЕ отдавать преобразователям: её копят те, кто
+    ждёт притока, - отложенные действия (energy_reserve, самый большой разовый
+    платёж их плана) и фоновые задачи автокрафта (энергия на одну прокрутку).
+    Иначе преобразователь, который тратит энергию последним в ходу, каждый ход
+    съедал бы то, что не дотянуло до платежа, и ожидание не кончилось бы, пока
+    он сам не доделает рецепт (прямое пожелание: преобразователь берёт только
+    излишки и не тормозит остальные процессы)."""
+    reserved = 0.0
+    for pending in state.pending_actions:
+        if pending.get("waits_energy"):
+            reserved += pending.get("energy_reserve", 0)
+    for job in state.autocraft_jobs.values():
+        reserved += effective_manual_action_stats(job["action_id"], state)[0].get(ENERGY_RESOURCE_ID, 0)
+    return reserved
+
+
 def _process_energy_jobs(state: GameState, report: ProductionReport) -> None:
     """Каждый работающий крафт за энергию (state.energy_jobs) тянет из ОБЩЕГО пула
     энергии СВОЙ ЛИЧНЫЙ лимит за ход (energy_converter_max_energy_per_turn - лимит
@@ -6885,7 +7077,10 @@ def _process_energy_jobs(state: GameState, report: ProductionReport) -> None:
         by_type.keys(), key=lambda bid: (-energy_priority(state, bid), building_order.get(bid, 0)),
     )
 
-    available = state.resources.get(ENERGY_RESOURCE_ID, 0)
+    stock = state.resources.get(ENERGY_RESOURCE_ID, 0)
+    # То, что копят ожидающие энергию (energy_reserved), преобразователям не отдаём.
+    reserved = min(stock, energy_reserved(state))
+    available = stock - reserved
     remaining_jobs = []
     for building_id in ordered_types:
         per_job_cap = energy_converter_max_energy_per_turn(state, building_id)
@@ -6907,7 +7102,7 @@ def _process_energy_jobs(state: GameState, report: ProductionReport) -> None:
                 report.crafted[job["recipe_id"]] = report.crafted.get(job["recipe_id"], 0) + 1
             else:
                 remaining_jobs.append(job)
-    state.resources[ENERGY_RESOURCE_ID] = available
+    state.resources[ENERGY_RESOURCE_ID] = available + reserved
     state.energy_jobs = remaining_jobs
 
 
@@ -6937,12 +7132,19 @@ def _process_autocraft_jobs(state: GameState, report: ProductionReport) -> None:
         for ing_id, amount in cost.items():
             if amount <= 0:
                 continue
-            take = min(take, state.resources.get(ing_id, 0) // amount)
-        take = max(0, take)
+            have = state.resources.get(ing_id, 0)
+            if RESOURCE_FRACTIONAL.get(ing_id, False):
+                have += 1e-9  # дрейф float у дробных (энергия): 1.0 // 0.1 == 9.0
+            take = min(take, have // amount)
+        # int - прокрутки целые, иначе дробная энергия в делении протекла бы float-ом
+        # в целочисленные ресурсы (1.0 металла вместо 1).
+        take = max(0, int(take))
         if take <= 0:
             continue
         for ing_id, amount in cost.items():
             state.resources[ing_id] -= amount * take
+            if state.resources[ing_id] < 0:
+                state.resources[ing_id] = 0  # только тот же дрейф float, см. выше
         for out_id, amount in gain.items():
             _add_resource(state.resources, out_id, amount * take)
         job["fires_done"] += take
@@ -7122,16 +7324,19 @@ def advance_turn(state: GameState) -> ProductionReport:
     см. докстринг самой функции), суммарный выход идёт в тот же общий пул
     энергии этого хода, что и обычные генераторы.
 
-    Третьим проходом, уже после этих трёх, идут активные крафты за энергию
-    (_process_energy_jobs, см. state.energy_jobs - список запущенных в энергетических
-    преобразователях рецептов) - им достаётся то, что осталось после построек с
-    обычным consumes.energy, чтобы "накопление про запас" не отбирало энергию у
-    построек с жёсткой потребностью.
+    Дальше - фоновые автокрафт-задачи (_process_autocraft_jobs, см. state.autocraft_jobs),
+    многоходовые действия, ритуалы, исследования, автоматизатор и отложенные действия
+    (_process_pending_actions, см. state.pending_actions): задачи продвигаются в
+    пределах autocraft_speed_capacity, а действия, которые их дождались, сами
+    завершаются в этот же ход, без участия игрока.
 
-    Дальше - фоновые автокрафт-задачи (_process_autocraft_jobs, см. state.autocraft_jobs)
-    и отложенные из-за них действия (_process_pending_actions, см. state.pending_actions):
-    задачи продвигаются в пределах autocraft_speed_capacity, а действия, которые их
-    дождались, сами завершаются в этот же ход, без участия игрока.
+    ПОСЛЕДНИМИ из потребителей энергии идут крафты за энергию (_process_energy_jobs, см.
+    state.energy_jobs - рецепты в преобразователях): им достаётся только ОСТАТОК после
+    построек, автокрафта, отложенных действий и автоматизатора (прямое пожелание -
+    крафт за энергию не должен тормозить остальные процессы). Сразу за ними -
+    ВТОРОЙ проход отложенных действий: то, что ждало доделанную в этот ход партию
+    преобразователя, завершается в этот же ход, а не следующим (иначе цепочка через
+    преобразователь теряла бы ход на каждом звене).
 
     В конце запас энергии обрезается до ёмкости построенных хранилищ (energy_capacity) -
     без них она равна 0, и всё, что не потратили за ход, на следующий не переносится.
@@ -7249,13 +7454,19 @@ def advance_turn(state: GameState) -> ProductionReport:
     _process_habitat(state, report)
     _process_soul_collectors(state, report, daytime)
     _process_reactors(state, report, daytime)
-    _process_energy_jobs(state, report)
     _process_autocraft_jobs(state, report)
     _process_manual_jobs(state, report)
     _process_ritual_jobs(state, report)
     _process_research(state, report)
     process_automation_rules(state, report, daytime)
     _process_pending_actions(state, report)
+    # Преобразователи - ПОСЛЕДНИЕ потребители энергии в ходу (прямое пожелание):
+    # берут только остаток после построек, автокрафта, отложенных действий и
+    # автоматизатора, крафт за энергию не должен тормозить остальные процессы.
+    _process_energy_jobs(state, report)
+    # Второй проход: подхватить то, что преобразователи доделали в этот же ход.
+    if state.pending_actions:
+        _process_pending_actions(state, report)
 
     cap = energy_capacity(state)
     if state.resources.get(ENERGY_RESOURCE_ID, 0) > cap:
