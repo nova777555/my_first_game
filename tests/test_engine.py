@@ -712,6 +712,74 @@ class AutocraftSpeedAndSlotsTests(FixtureTestCase):
         self.assertEqual(s.resources["slow_raw"], 1000 - 16)  # ровно 10 + 6, без лишнего
 
 
+class AutocraftBuildingRequirementTests(FixtureTestCase):
+    """Автокрафт проверяет requires_building рецепта (как клик игрока), но НЕ
+    requires_tool_tiers. mechanism_a_action: requires_building="mechanism_a",
+    raw_a:2 -> mech_output:3."""
+
+    def setUp(self):
+        super().setUp()
+        import copy
+        engine.BUILDINGS = copy.deepcopy(engine.BUILDINGS)  # cleanup вернёт исходные значения
+        for hub in ("automation_hub", "trickle_hub"):
+            engine.BUILDINGS[hub]["unlocks_autocraft"].append("mech_output")
+
+    def test_fails_without_the_mechanism_and_names_it(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        failure = engine.ensure_and_pay(s, {"mech_output": 3})
+        self.assertEqual((failure.reason, failure.building_id), ("building_missing", "mechanism_a"))
+        self.assertIn("Механизм А", engine.describe_autocraft_failure(failure))
+        self.assertEqual(s.resources["raw_a"], 10)  # ничего не списано
+
+    def test_works_with_a_working_mechanism(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1, "mechanism_a": 1})
+        self.assertIsNone(engine.ensure_and_pay(s, {"mech_output": 3}))
+        self.assertEqual(s.resources["raw_a"], 8)
+
+    def test_broken_mechanism_does_not_count(self):
+        s = GameState(
+            resources={"raw_a": 10}, buildings={"automation_hub": 1, "mechanism_a": 1}, broken={"mechanism_a": 1},
+        )
+        self.assertEqual(engine.ensure_and_pay(s, {"mech_output": 3}).reason, "building_missing")
+
+    def test_applies_to_multi_turn_recipes_too(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        engine.set_action_priority(s, "mechanism_a_delayed_action", 10)
+        self.assertEqual(engine.ensure_and_pay(s, {"mech_output": 3}).reason, "building_missing")
+        self.assertEqual(s.manual_jobs, {})
+
+    def test_message_reaches_the_player(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        result = engine._pay_or_defer(s, {"mech_output": 3}, "тест", "manual", None)
+        self.assertFalse(result.ok)
+        self.assertIn("нужна работающая постройка «Механизм А»", result.message)
+
+    def test_background_job_idles_while_the_mechanism_is_broken(self):
+        # trickle_hub - медленный (несколько прокруток/ход): 30 штук (10 прокруток) уходят
+        # в фоновую задачу. Пока механизм сломан, задача стоит; после ремонта продолжает сама.
+        s = GameState(resources={"raw_a": 100}, buildings={"trickle_hub": 1, "mechanism_a": 1})
+        speed = engine.autocraft_speed_capacity(s)
+        self.assertLess(speed, 10)
+        self.assertEqual(engine.ensure_and_pay(s, {"mech_output": 30}).reason, "in_progress")
+        self.assertIn("mech_output", s.autocraft_jobs)
+
+        s.broken["mechanism_a"] = 1
+        engine.advance_turn(s)
+        self.assertEqual(s.autocraft_jobs["mech_output"]["fires_done"], 0)
+
+        s.broken.pop("mechanism_a")
+        engine.advance_turn(s)
+        self.assertEqual(s.autocraft_jobs["mech_output"]["fires_done"], speed)
+
+    def test_tool_tier_requirement_is_still_ignored(self):
+        import copy
+        engine.MANUAL_ACTIONS = copy.deepcopy(engine.MANUAL_ACTIONS)
+        engine.MANUAL_ACTIONS["mechanism_a_action"]["requires_tool_tiers"] = {"pickaxe": [99]}
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1, "mechanism_a": 1})
+        self.assertFalse(engine.is_manual_action_unlocked("mechanism_a_action", s))  # игроку - закрыто
+        self.assertIsNone(engine.ensure_and_pay(s, {"mech_output": 3}))  # автокрафту - нет
+
+
 class ManualJobTests(FixtureTestCase):
     """Многоходовые ручные действия (manual_actions.*.duration_turns, см. CLAUDE.md) -
     MANUAL_ACTIONS["craft_delayed"]: cost raw_a:2, gain delayed_output:5, duration_turns=3."""

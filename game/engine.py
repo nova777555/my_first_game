@@ -386,9 +386,11 @@ class AutocraftFailure:
     тоже может дать "in_progress"/"not_unlocked" - см. ENERGY_RECIPE_FOR_RESOURCE в
     _ensure_available: автокрафт САМ запускает нужный рецепт в свободном
     энергетическом преобразователе (если он есть), а если все заняты - просто ждёт
-    своей очереди, без отдельной фоновой задачи/слота автокрафта."""
+    своей очереди, без отдельной фоновой задачи/слота автокрафта.
+    building_id - только для "building_missing": какой постройки не хватает рецепту."""
     resource_id: str
-    reason: str  # "no_processor" | "autocraft_disabled" | "no_recipe" | "not_unlocked" | "tech_locked" | "insufficient_compute" | "no_free_slots" | "in_progress" | "missing_energy_recipe_material"
+    reason: str  # "no_processor" | "autocraft_disabled" | "no_recipe" | "not_unlocked" | "tech_locked" | "building_missing" | "insufficient_compute" | "no_free_slots" | "in_progress" | "missing_energy_recipe_material"
+    building_id: str | None = None
 
 
 _AUTOCRAFT_REASON_TEXT = {
@@ -397,6 +399,7 @@ _AUTOCRAFT_REASON_TEXT = {
     "no_recipe": "«{name}» - сырьё, автокрафтить его не из чего",
     "not_unlocked": "автокрафт «{name}» ещё не открыт - нужна постройка, которая его включает",
     "tech_locked": "рецепт «{name}» ещё не изучен",
+    "building_missing": "рецепту «{name}» нужна работающая постройка «{building}»",
     "insufficient_compute": "не хватает вычислительной мощности процессора для автокрафта «{name}»",
     "no_free_slots": "не хватает свободных слотов автокрафта, чтобы начать докрафт «{name}» в фоне",
     "in_progress": "«{name}» уже докрафтывается в фоне",
@@ -407,7 +410,8 @@ _AUTOCRAFT_REASON_TEXT = {
 def describe_autocraft_failure(failure: AutocraftFailure) -> str:
     name = RESOURCE_NAMES.get(failure.resource_id, failure.resource_id)
     template = _AUTOCRAFT_REASON_TEXT[failure.reason]
-    return template.format(name=name)
+    building = BUILDINGS[failure.building_id]["name"] if failure.building_id in BUILDINGS else failure.building_id
+    return template.format(name=name, building=building)
 
 
 def _add_resource(resources: dict[str, int], resource_id: str, amount: int) -> None:
@@ -1087,6 +1091,12 @@ def _aggregate_autocraft_demand(
         action = MANUAL_ACTIONS[action_id]
         if action["requires_tech"] and action["requires_tech"] not in state.techs:
             failures[resource_id] = AutocraftFailure(resource_id, "tech_locked")
+            continue
+        # Тот же гейт, что у клика игрока (is_manual_action_unlocked): хотя бы одна
+        # РАБОТАЮЩАЯ копия постройки-механизма. requires_tool_tiers автокрафт
+        # НАМЕРЕННО не проверяет (прямое пожелание).
+        if not _action_building_ok(action, state):
+            failures[resource_id] = AutocraftFailure(resource_id, "building_missing", action["requires_building"])
             continue
         effective_cost, effective_gain = graph.stats_of[resource_id]
         gain_per_fire = effective_gain[resource_id]
@@ -1989,15 +1999,21 @@ def set_building_active_count(state: GameState, building_id: str, active_count: 
     return ActionResult(True, f"«{name}»: включено {active_count} из {working}.")
 
 
+def _action_building_ok(action: dict, state: GameState) -> bool:
+    """requires_building ручного действия - необязательный доп. гейт: нужна хотя бы
+    одна РАБОТАЮЩАЯ (не сломанная целиком) копия конкретной постройки, а не просто
+    "когда-то построена". Общий для клика игрока (is_manual_action_unlocked) и
+    автокрафта (_aggregate_autocraft_demand, _process_autocraft_jobs)."""
+    req_building = action.get("requires_building")
+    return not req_building or working_count(state, req_building) > 0
+
+
 def is_manual_action_unlocked(action_id: str, state: GameState) -> bool:
     action = MANUAL_ACTIONS[action_id]
     req_tech = action["requires_tech"]
     if req_tech and req_tech not in state.techs:
         return False
-    # requires_building - необязательный доп. гейт: нужна хотя бы одна РАБОТАЮЩАЯ
-    # (не сломанная целиком) копия конкретной постройки, а не просто "когда-то построена".
-    req_building = action.get("requires_building")
-    if req_building and working_count(state, req_building) <= 0:
+    if not _action_building_ok(action, state):
         return False
     # requires_tool_tiers - необязательный доп. гейт: для КАЖДОГО перечисленного
     # инструмента текущий тир должен входить в явно отмеченный список тиров (галочки
@@ -6815,11 +6831,16 @@ def _process_autocraft_jobs(state: GameState, report: ProductionReport) -> None:
     в цепочке заводятся раньше (см. _ensure_available), поэтому обрабатываются первыми и
     успевают подвезти сырьё "вышестоящим" задачам в этот же ход. Прокрутка ограничена ещё
     и реально доступным сейчас сырьём - если его не хватает, задача просто простаивает
-    этот ход (как обычная постройка без ресурсов), а не падает с ошибкой."""
+    этот ход (как обычная постройка без ресурсов), а не падает с ошибкой. Так же
+    простаивает, пока у рецепта нет работающей постройки-механизма (requires_building
+    сломан/снесён уже после того, как задача встала в очередь) - и продолжит сама
+    после ремонта."""
     budget = autocraft_speed_capacity(state)
     for resource_id, job in list(state.autocraft_jobs.items()):
         if budget <= 0:
             break
+        if not _action_building_ok(MANUAL_ACTIONS[job["action_id"]], state):
+            continue
         # Эффективные cost/gain (см. effective_manual_action_stats) - ТЕ ЖЕ числа,
         # что использовались при заведении задачи в _ensure_available, а не сырой
         # MANUAL_ACTIONS[...] - иначе улучшение постройки, купленное ПОСЛЕ того, как
