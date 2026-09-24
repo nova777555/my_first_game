@@ -229,11 +229,10 @@ def _roll_range_amounts(amounts: dict[str, int | float | dict]) -> dict[str, int
 # каждую попытку. Ресурс, у которого ЕСТЬ только вероятностный рецепт, для _ensure_available/
 # _raw_shortfall неотличим от обычного сырья без рецепта вообще ("no_recipe") - автокрафт
 # честно напишет "не хватает", а не будет пытаться докрафтить его сам.
-# Действия с duration_turns > 1 (см. state.manual_jobs/_process_manual_jobs) тоже
-# исключены - их "прокрутка" физически растянута на несколько ходов и не укладывается
-# в бухгалтерию fires/autocraft_speed_capacity (рассчитанную на мгновенный результат
-# каждой попытки), а в одной локации уже и так допустима только ОДНА активная
-# многоходовая задача (см. do_manual_action).
+# Многоходовые действия (duration_turns > 1, см. state.manual_jobs) сюда ПОПАДАЮТ, но
+# автокрафт ведёт их не прокрутками, а ПАРТИЯМИ - запускает настоящий manual_job (как
+# клик игрока), по одной партии за раз, и ждёт её завершения (kind="long_action" в
+# _discover_autocraft_graph, см. _aggregate_autocraft_demand/_commit_autocraft_plan).
 # manual_actions.*.excluded_from_autocraft: true - явный ручной запрет автору контента,
 # НЕ связанный с детерминизмом/длительностью выше: действие может быть полностью
 # гарантированным и мгновенным и всё равно не годиться для автокрафта (например, "убить
@@ -260,8 +259,6 @@ def resource_recipe(state: GameState) -> dict[str, str]:
         if action.get("excluded_from_autocraft"):
             continue
         if not is_manual_action_deterministic(action_id):
-            continue
-        if (action.get("duration_turns") or 1) > 1:
             continue
         priority = action_priority(state, action_id)
         for resource_id in action["gain"]:
@@ -957,9 +954,11 @@ class _AutocraftGraph:
         self.preorder: dict[str, int] = {}  # порядок ПЕРВОГО обнаружения (родитель раньше своих ингредиентов) -
         # нужен только для того, чтобы при НЕСКОЛЬКИХ одновременных настоящих ошибках выбрать
         # ту же самую, что показал бы старый рекурсивный код (см. ensure_and_pay)
-        self.kind_of: dict[str, str] = {}  # "action" | "energy" | "none" (сырьё/цикл/энергорецепт без обычного)
-        self.action_of: dict[str, str] = {}  # только для kind="action"
-        self.stats_of: dict[str, tuple[dict[str, int], dict[str, int]]] = {}  # только для kind="action"
+        # "action" | "long_action" (многоходовое, manual_action_duration > 1) | "energy" |
+        # "none" (сырьё/цикл/энергорецепт без обычного)
+        self.kind_of: dict[str, str] = {}
+        self.action_of: dict[str, str] = {}  # только для kind="action"/"long_action"
+        self.stats_of: dict[str, tuple[dict[str, int], dict[str, int]]] = {}  # только для kind="action"/"long_action"
 
 
 def _discover_autocraft_graph(state: GameState, resource_ids, recipe: dict[str, str]) -> _AutocraftGraph:
@@ -987,7 +986,9 @@ def _discover_autocraft_graph(state: GameState, resource_ids, recipe: dict[str, 
         if action_id is None:
             graph.kind_of[resource_id] = "energy" if resource_id in ENERGY_RECIPE_FOR_RESOURCE else "none"
         else:
-            graph.kind_of[resource_id] = "action"
+            # Длительность - уже с апгрейдом action_duration_reduction: сокращённое до
+            # 1 хода действие становится обычным мгновенным рецептом.
+            graph.kind_of[resource_id] = "long_action" if manual_action_duration(action_id, state) > 1 else "action"
             graph.action_of[resource_id] = action_id
             effective_cost, effective_gain = effective_manual_action_stats(action_id, state)
             graph.stats_of[resource_id] = (effective_cost, effective_gain)
@@ -1003,6 +1004,7 @@ def _discover_autocraft_graph(state: GameState, resource_ids, recipe: dict[str, 
 
 def _aggregate_autocraft_demand(
     state: GameState, cost: dict[str, int], graph: _AutocraftGraph, jobs: dict[str, dict],
+    manual_jobs: dict[str, dict],
 ) -> tuple[dict[str, AutocraftFailure], dict[str, float], dict[str, float], dict[str, float], dict[str, str]]:
     """Считает СУММАРНЫЙ спрос на каждый resource_id (от исходного cost плюс от ВСЕХ
     рецептов дерева, которым он нужен как ингредиент), и одновременно решает всё, что
@@ -1036,7 +1038,11 @@ def _aggregate_autocraft_demand(
     сама попытка запуска/проверки материала - в Phase 3, т.к. конкурирует за
     свободные преобразователи с другими resource_id по порядку обработки),
     "action_pending" (гейты и fires посчитаны, финальное "мгновенно или фоновая
-    задача" зависит ещё и от готовности ингредиентов - решается в Phase 3)."""
+    задача" зависит ещё и от готовности ингредиентов - решается в Phase 3),
+    "long_running" (многоходовое действие уже идёт, либо его локацию уже занимает
+    другое многоходовое действие - ждать, спрос дальше не пускать), "long_pending"
+    (можно запускать следующую партию - спрос на ингредиенты пущен ровно на ОДНУ
+    партию, сам запуск - в Phase 3)."""
     total_needed: dict[str, float] = dict(cost)
     fires_map: dict[str, float] = {}
     gain_per_fire_map: dict[str, float] = {}
@@ -1073,7 +1079,7 @@ def _aggregate_autocraft_demand(
             resolved_of[resource_id] = "energy_pending"  # не имеет своих ингредиентов - спрос дальше не идёт
             continue
 
-        # kind == "action"
+        # kind == "action" | "long_action"
         if not is_autocraft_unlocked(resource_id, state):
             failures[resource_id] = AutocraftFailure(resource_id, "not_unlocked")
             continue
@@ -1093,6 +1099,27 @@ def _aggregate_autocraft_demand(
         compute_per_fire = sum(effective_cost.values())
         if fires * compute_per_fire > compute_capacity(state):
             failures[resource_id] = AutocraftFailure(resource_id, "insufficient_compute")
+            continue
+
+        if kind == "long_action":
+            # Многоходовое действие идёт ПАРТИЯМИ: настоящий manual_job, одна
+            # активная задача НА action_id и одна многоходовая НА локацию (те же
+            # правила, что у клика игрока, см. do_manual_action). Поэтому за раз
+            # запускается одна партия, спрос на ингредиенты - ровно на неё; следующую
+            # запустит повторная попытка отложенного действия, когда эта закончится
+            # (_process_manual_jobs идёт в advance_turn раньше _process_pending_actions -
+            # без хода простоя). Скорость/слоты автокрафта партия не тратит - её
+            # ограничивает сама локация. Локация проверяется здесь только по УЖЕ
+            # идущим задачам: если её занял кто-то ещё, спрос вниз не пускаем зря.
+            # Конфликт между двумя партиями ЭТОГО ЖЕ запроса решает Phase 3, в
+            # порядке "сырьё раньше" - иначе потребитель, обработанный здесь первым,
+            # занял бы локацию, нужную его же собственному ингредиенту.
+            if _busy_manual_job_in_location(manual_jobs, action_id) is not None:
+                resolved_of[resource_id] = "long_running"
+                continue
+            resolved_of[resource_id] = "long_pending"
+            for ing_id, ing_amount in effective_cost.items():
+                total_needed[ing_id] = total_needed.get(ing_id, 0) + ing_amount
             continue
 
         # Пока по ресурсу уже идёт фоновая задача, ВЕСЬ его дальнейший выпуск идёт
@@ -1174,7 +1201,7 @@ def _start_energy_batches(
 def _commit_autocraft_plan(
     state: GameState, graph: _AutocraftGraph, resolved_of: dict[str, str], fires_map: dict[str, float],
     gain_per_fire_map: dict[str, float], total_needed: dict[str, float], resources: dict[str, int],
-    jobs: dict[str, dict], slots: dict[str, int], energy_jobs: list[dict],
+    jobs: dict[str, dict], slots: dict[str, int], energy_jobs: list[dict], manual_jobs: dict[str, dict],
 ) -> tuple[AutocraftFailure | None, dict[str, str]]:
     """Второй проход по графу, ПО graph.ingredient_first КАК ЕСТЬ (сырьё раньше того,
     кто его ест) - все гейты (не_открыт/технология/мощность/цикл) уже решены заранее в
@@ -1183,6 +1210,8 @@ def _commit_autocraft_plan(
     - "energy_pending": партии конкурируют за свободные преобразователи с другими
       energy_pending resource_id - порядок обработки решает, кому какой достанется
       (см. _start_energy_batches);
+    - "long_pending": партия многоходового действия стартует, только если все её
+      ингредиенты уже готовы и локацию не занял раньше другой ресурс этого же запроса;
     - "action_pending": если хоть один ингредиент ещё не готов, этот рецепт тоже
       откладывается целиком - его прокрутка не может случиться раньше, чем подвезут
       сырьё. К этому моменту КАЖДЫЙ ингредиент уже обработан (ingredient_first),
@@ -1195,7 +1224,7 @@ def _commit_autocraft_plan(
     Два разных "ещё не готово" в status_of:
     - "in_progress" - ресурс подвезёт фоновая задача автокрафта (autocraft_jobs): она
       заведена с полным fires_total и сама доделает всё до конца;
-    - "waiting" - ресурс идёт ПАРТИЯМИ (крафт за энергию, многоходовое действие), и
+    - "waiting" - ресурс идёт ПАРТИЯМИ (крафт за энергию, многоходовое действие) и
       каждую следующую партию запускает только очередная повторная попытка
       (_process_pending_actions). Рецепт поверх такого ингредиента НЕ заводит свою
       фоновую задачу, а тоже ждёт ("waiting" заразен вверх по цепочке): задача
@@ -1211,6 +1240,24 @@ def _commit_autocraft_plan(
         resolution = resolved_of.get(resource_id, "ok")
         if resolution in ("ok", "existing_job"):
             status_of[resource_id] = "ok" if resolution == "ok" else "in_progress"
+            continue
+        if resolution == "long_running":
+            status_of[resource_id] = "waiting"
+            continue
+
+        if resolution == "long_pending":
+            status_of[resource_id] = "waiting"
+            action_id = graph.action_of[resource_id]
+            effective_cost, effective_gain = graph.stats_of[resource_id]
+            if any(status_of.get(ing_id) in ("waiting", "in_progress") for ing_id in effective_cost):
+                continue
+            if _busy_manual_job_in_location(manual_jobs, action_id) is not None:
+                continue
+            for ing_id, ing_amount in effective_cost.items():
+                resources[ing_id] -= ing_amount
+            manual_jobs[action_id] = _new_manual_job(
+                action_id, manual_action_duration(action_id, state), effective_cost, effective_gain, autocraft=True,
+            )
             continue
 
         if resolution == "energy_pending":
@@ -1285,12 +1332,13 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
     working_resources = dict(state.resources)
     working_jobs = {rid: dict(job) for rid, job in state.autocraft_jobs.items()}
     working_energy_jobs = [dict(job) for job in state.energy_jobs]
+    working_manual_jobs = dict(state.manual_jobs)  # автокрафт только ДОБАВЛЯЕТ задачи, свои не трогает
     slots = {"used": len(working_jobs)}
     recipe = resource_recipe(state)
 
     graph = _discover_autocraft_graph(state, cost.keys(), recipe)
     failures, total_needed, fires_map, gain_per_fire_map, resolved_of = _aggregate_autocraft_demand(
-        state, cost, graph, working_jobs,
+        state, cost, graph, working_jobs, working_manual_jobs,
     )
     if failures:
         # При нескольких одновременных настоящих ошибках сразу - та, что попала бы игроку
@@ -1298,13 +1346,13 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
         # ингредиентам в порядке рецепта, останавливаясь на ПЕРВОЙ найденной - то же самое
         # даёт наименьший graph.preorder (порядок первого обнаружения при обходе).
         best_id = min(failures, key=lambda rid: graph.preorder[rid])
-        return failures[best_id]  # настоящая ошибка - state.resources/autocraft_jobs/energy_jobs не трогаем
+        return failures[best_id]  # настоящая ошибка - state (ресурсы и все очереди задач) не трогаем
     hard_failure, status_of = _commit_autocraft_plan(
         state, graph, resolved_of, fires_map, gain_per_fire_map, total_needed,
-        working_resources, working_jobs, slots, working_energy_jobs,
+        working_resources, working_jobs, slots, working_energy_jobs, working_manual_jobs,
     )
     if hard_failure is not None:
-        return hard_failure  # настоящая ошибка - state.resources/autocraft_jobs/energy_jobs не трогаем
+        return hard_failure  # настоящая ошибка - state (ресурсы и все очереди задач) не трогаем
 
     queued: AutocraftFailure | None = None
     for resource_id in cost:
@@ -1316,6 +1364,7 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
         state.resources = working_resources
         state.autocraft_jobs = working_jobs
         state.energy_jobs = working_energy_jobs
+        state.manual_jobs = working_manual_jobs
         return queued
 
     for resource_id, amount in cost.items():
@@ -1323,6 +1372,7 @@ def ensure_and_pay(state: GameState, cost: dict[str, int]) -> AutocraftFailure |
     state.resources = working_resources
     state.autocraft_jobs = working_jobs
     state.energy_jobs = working_energy_jobs
+    state.manual_jobs = working_manual_jobs
     return None
 
 
@@ -1405,16 +1455,23 @@ def _format_shortfall(missing: dict[str, int | float]) -> str:
     return ", ".join(parts)
 
 
-def autocraft_eta_turns(state: GameState, fires: int | float) -> int | None:
+def autocraft_eta_turns(state: GameState, fires: int | float, action_id: str | None = None) -> int | None:
     """Через сколько ходов завершатся fires прокруток автокрафт-рецепта при ТЕКУЩЕЙ
     скорости (autocraft_speed_capacity) - None, если fires укладывается в один ход
     (мгновенно: фоновая задача вообще не понадобится, см. _ensure_available:
     needs_job = fires > autocraft_speed_capacity(state)). То же округление вверх,
     что и в autocraft_jobs_view для уже идущих задач - здесь используется ДО того,
     как игрок согласится на действие (см. autocraft_preview), чтобы окно
-    подтверждения могло заранее предупредить "это растянется на N ходов"."""
+    подтверждения могло заранее предупредить "это растянется на N ходов".
+    action_id - рецепт этих прокруток: у многоходового действия партии идут строго
+    по одной (одна задача на действие), так что ходов = fires * длительность, от
+    скорости автокрафта это не зависит."""
     if fires <= 0:
         return None
+    if action_id is not None:
+        duration = manual_action_duration(action_id, state)
+        if duration > 1:
+            return int(fires) * duration
     speed = autocraft_speed_capacity(state)
     if fires <= speed:
         return None
@@ -1453,7 +1510,7 @@ def _preview_node(
     fires = -(-deficit // gain_per_fire)  # округление вверх, как в _ensure_available
     node["action_id"] = action_id
     node["fires"] = fires
-    node["turns"] = autocraft_eta_turns(state, fires)
+    node["turns"] = autocraft_eta_turns(state, fires, action_id)
     next_visiting = visiting | {resource_id}
     for ing_id, ing_amount in effective_cost.items():
         node["children"].append(_preview_node(state, ing_id, ing_amount * fires, next_visiting, working, recipe))
@@ -5336,6 +5393,38 @@ def toggle_autocraft(state: GameState) -> ActionResult:
     return ActionResult(True, "Автокрафт выключен - рецепты теперь только руками.")
 
 
+def _busy_manual_job_in_location(manual_jobs: dict[str, dict], action_id: str) -> str | None:
+    """action_id многоходовой задачи, которая сейчас занимает локацию действия
+    action_id (это может быть и оно само) - None, если локация свободна. Правило
+    "одна многоходовая задача на локацию" (точное совпадение location, не
+    рекурсивно по parent_location) - общее для клика игрока (do_manual_action) и
+    автокрафта (_aggregate_autocraft_demand/_commit_autocraft_plan)."""
+    location = MANUAL_ACTIONS[action_id].get("location")
+    for other_id in manual_jobs:
+        if MANUAL_ACTIONS[other_id].get("location") == location:
+            return other_id
+    return None
+
+
+def _new_manual_job(
+    action_id: str, duration: int, cost: dict, gain: dict, autocraft: bool = False,
+) -> dict:
+    """Запись state.manual_jobs[action_id] - cost уже списан вызывающим. autocraft -
+    задачу запустил автокрафт, а не игрок: по завершении она не засчитывается в
+    action_performed_count (как и мгновенные прокрутки автокрафта), а UI помечает
+    её в панели "Долгие действия"."""
+    action = MANUAL_ACTIONS[action_id]
+    job = {
+        "turns_total": duration, "turns_done": 0,
+        "gain": dict(gain), "gain_chance": action.get("gain_chance"),
+        "spawn_species": action.get("spawn_species"),
+        "cost": dict(cost),  # для возврата при досрочной отмене, см. cancel_manual_job
+    }
+    if autocraft:
+        job["autocraft"] = True
+    return job
+
+
 def do_manual_action(state: GameState, action_id: str, scale: int | None = None) -> ActionResult:
     """scale - на сколько "партий" ЭТОГО действия хочет игрок за один клик, ТОЛЬКО
     если действие зависит от постройки-"механизма" через requires_building И у неё
@@ -5385,12 +5474,10 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
     # что итог <= 1, делает действие фактически мгновенным (ветка ниже).
     duration = manual_action_duration(action_id, state)
     if duration > 1:
-        location = action.get("location")
-        for other_id, other_job in state.manual_jobs.items():
-            if MANUAL_ACTIONS[other_id].get("location") != location:
-                continue
-            if other_id == action_id:
-                return ActionResult(False, f"«{action['name']}» уже выполняется.")
+        other_id = _busy_manual_job_in_location(state.manual_jobs, action_id)
+        if other_id == action_id:
+            return ActionResult(False, f"«{action['name']}» уже выполняется.")
+        if other_id is not None:
             return ActionResult(False, f"В этой локации уже выполняется другое действие: «{MANUAL_ACTIONS[other_id]['name']}».")
     resolved_scale = None
     building_id = action.get("requires_building")
@@ -5410,12 +5497,7 @@ def do_manual_action(state: GameState, action_id: str, scale: int | None = None)
     if uses_tool_durability:
         _consume_tool_durability(state, uses_tool_durability["tool"])
     if duration > 1:
-        state.manual_jobs[action_id] = {
-            "turns_total": duration, "turns_done": 0,
-            "gain": gain, "gain_chance": action.get("gain_chance"),
-            "spawn_species": action.get("spawn_species"),
-            "cost": cost,  # для возврата при досрочной отмене, см. cancel_manual_job
-        }
+        state.manual_jobs[action_id] = _new_manual_job(action_id, duration, cost, gain)
         return ActionResult(True, f"Начато: {action['name']} (займётся {duration} х.).")
     gain_chance = action.get("gain_chance")
     if gain_chance:
@@ -6780,7 +6862,8 @@ def _process_manual_jobs(state: GameState, report: ProductionReport) -> None:
         _gain(state.resources, gain)
         if job["spawn_species"]:
             spawn_creature(state, _roll_wild_genotype(job["spawn_species"]), identified=False)
-        state.action_performed_count[action_id] = state.action_performed_count.get(action_id, 0) + 1
+        if not job.get("autocraft"):  # партия автокрафта - не "игрок выполнил действие"
+            state.action_performed_count[action_id] = state.action_performed_count.get(action_id, 0) + 1
         del state.manual_jobs[action_id]
         report.manual_completed.append(action_id)
 
@@ -6788,9 +6871,13 @@ def _process_manual_jobs(state: GameState, report: ProductionReport) -> None:
 def manual_jobs_view(state: GameState) -> list[dict]:
     """Список активных многоходовых ручных задач для UI - какое действие, сколько ходов
     прошло/нужно всего (см. autocraft_jobs_view - тот же принцип, только без ETA: тиканье
-    здесь не зависит ни от какой пропускной способности, ровно 1 ход/тик)."""
+    здесь не зависит ни от какой пропускной способности, ровно 1 ход/тик). "autocraft" -
+    партию запустил автокрафт, а не игрок (см. _new_manual_job)."""
     return [
-        {"action_id": aid, "turns_done": j["turns_done"], "turns_total": j["turns_total"]}
+        {
+            "action_id": aid, "turns_done": j["turns_done"], "turns_total": j["turns_total"],
+            "autocraft": bool(j.get("autocraft")),
+        }
         for aid, j in state.manual_jobs.items()
     ]
 

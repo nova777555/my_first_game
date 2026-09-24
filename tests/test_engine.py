@@ -851,13 +851,13 @@ class ManualJobTests(FixtureTestCase):
         result = engine.cancel_manual_job(s, "craft_delayed")
         self.assertFalse(result.ok)
 
-    def test_resource_recipe_excludes_multi_turn_actions(self):
-        # craft_delayed имеет непустой (детерминированный!) cost - формально годится
-        # в кандидаты resource_recipe, но duration_turns > 1 должен исключать его так
-        # же, как исключает вероятностный cost/gain (см. ChanceBasedActionTests).
+    def test_resource_recipe_includes_multi_turn_actions(self):
+        # craft_delayed (duration_turns=3) - детерминированный рецепт с непустым cost:
+        # автокрафт ведёт его партиями через manual_jobs (см.
+        # tests/test_autocraft_batches.py::LongActionAutocraftTests).
         s = GameState()
         recipe = engine.resource_recipe(s)
-        self.assertNotIn("delayed_output", recipe)
+        self.assertEqual(recipe.get("delayed_output"), "craft_delayed")
 
 
 class EnergyCraftTests(FixtureTestCase):

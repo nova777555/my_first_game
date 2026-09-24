@@ -3797,7 +3797,9 @@ function renderManualJobs() {
   if (panel.hidden) return;
   container.innerHTML = "";
   VIEW.manual_jobs.forEach(job => {
-    container.appendChild(manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, job.name));
+    // job.autocraft - партию запустил автокрафт (см. engine._new_manual_job), а не игрок.
+    const label = job.autocraft ? `${job.name} (автокрафт)` : job.name;
+    container.appendChild(manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, label));
   });
 }
 

@@ -140,5 +140,171 @@ class EnergyBatchesTests(FixtureTestCase):
         self.assertEqual(s.autocraft_jobs, {})
 
 
+# Потребители delayed_output (craft_delayed: raw_a:2 -> delayed_output:5 за 3 хода,
+# локация workshop_loc). refine_delayed - мгновенный рецепт поверх многоходового,
+# long_refine - многоходовой поверх многоходового В ТОЙ ЖЕ локации.
+LONG_TEST_ACTIONS = {
+    "use_delayed": {
+        "name": "Пустить затяжной выход в дело", "requires_tech": None, "location": "yard",
+        "cost": {"delayed_output": 12}, "gain": {"test_top": 1},
+    },
+    "use_delayed_small": {
+        "name": "Пустить немного затяжного выхода", "requires_tech": None, "location": "yard",
+        "cost": {"delayed_output": 5}, "gain": {"test_top": 1},
+    },
+    "refine_delayed": {
+        "name": "Очистить затяжной выход", "requires_tech": None, "location": "yard",
+        "cost": {"delayed_output": 8}, "gain": {"test_mid": 1},
+    },
+    "use_refined": {
+        "name": "Пустить очищенное в дело", "requires_tech": None, "location": "yard",
+        "cost": {"test_mid": 1}, "gain": {"test_top": 1},
+    },
+}
+LONG_TEST_RESOURCES = {"test_top": "Тестовый итог", "test_mid": "Тестовый полуфабрикат"}
+
+
+class LongActionAutocraftTests(FixtureTestCase):
+    """Многоходовые ручные действия в автокрафте: настоящий manual_job, партии по
+    одной, следующая - сразу по завершении предыдущей."""
+
+    def setUp(self):
+        super().setUp()
+        self.add_actions(LONG_TEST_ACTIONS, resources=LONG_TEST_RESOURCES, unlock=["delayed_output", "test_mid"])
+
+    def test_starts_a_real_manual_job_for_the_shortfall(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        failure = engine.ensure_and_pay(s, {"delayed_output": 5})
+        self.assertEqual(failure.reason, "in_progress")
+        job = s.manual_jobs["craft_delayed"]
+        self.assertEqual((job["turns_total"], job["turns_done"]), (3, 0))
+        self.assertTrue(job["autocraft"])
+        self.assertEqual(s.resources["raw_a"], 8)  # cost партии списан сразу, как при клике
+        self.assertEqual(s.autocraft_jobs, {})  # слот автокрафта партия не занимает
+
+    def test_respects_autocraft_unlock(self):
+        engine.BUILDINGS["automation_hub"]["unlocks_autocraft"].remove("delayed_output")
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        failure = engine.ensure_and_pay(s, {"delayed_output": 5})
+        self.assertEqual(failure.reason, "not_unlocked")
+        self.assertEqual(s.manual_jobs, {})
+
+    def test_respects_compute_limit_on_the_whole_request(self):
+        # 40 штук = 8 партий * raw_a:2 = 16 > compute_power 15 у automation_hub.
+        s = GameState(resources={"raw_a": 100}, buildings={"automation_hub": 1})
+        failure = engine.ensure_and_pay(s, {"delayed_output": 40})
+        self.assertEqual(failure.reason, "insufficient_compute")
+        self.assertEqual(s.manual_jobs, {})
+
+    def test_runs_batches_back_to_back_until_enough(self):
+        # 12 штук = 3 партии по 5; каждая 3 хода, следующая стартует в тот же ход,
+        # когда закончилась предыдущая - итого ровно 9 ходов.
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        result = engine.do_manual_action(s, "use_delayed")
+        self.assertTrue(result.pending, result.message)
+
+        self.assertEqual(run_turns(s, lambda st: st.resources.get("test_top", 0) >= 1), 9)
+        self.assertEqual(s.resources["delayed_output"], 15 - 12)
+        self.assertEqual(s.resources["raw_a"], 10 - 3 * 2)
+        self.assertEqual(s.manual_jobs, {})
+        self.assertEqual(s.pending_actions, [])
+        # Партии автокрафта - не "игрок выполнил действие" (как и мгновенные прокрутки).
+        self.assertEqual(s.action_performed_count.get("craft_delayed", 0), 0)
+        self.assertEqual(s.action_performed_count.get("use_delayed", 0), 1)
+
+    def test_waits_while_location_is_busy_with_another_long_action(self):
+        # craft_delayed_sibling (2 хода) в той же workshop_loc запущен игроком -
+        # партия craft_delayed ждёт его, потом ещё 3 хода: итого 5.
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        self.assertTrue(engine.do_manual_action(s, "craft_delayed_sibling").ok)
+        result = engine.do_manual_action(s, "use_delayed_small")
+        self.assertTrue(result.pending, result.message)
+        self.assertNotIn("craft_delayed", s.manual_jobs)
+
+        self.assertEqual(run_turns(s, lambda st: st.resources.get("test_top", 0) >= 1), 5)
+
+    def test_waits_for_players_own_job_of_the_same_action(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        self.assertTrue(engine.do_manual_action(s, "craft_delayed").ok)
+        result = engine.do_manual_action(s, "use_delayed_small")
+        self.assertTrue(result.pending, result.message)
+        self.assertFalse(s.manual_jobs["craft_delayed"].get("autocraft"))  # задача игрока не подменена
+
+        self.assertEqual(run_turns(s, lambda st: st.resources.get("test_top", 0) >= 1), 3)
+        self.assertEqual(s.resources["raw_a"], 8)  # вторую партию не запускали - хватило одной
+
+    def test_instant_recipe_over_long_ingredient_waits_without_a_job(self):
+        # refine_delayed (мгновенный, 8 шт.) поверх craft_delayed (5 за партию):
+        # 2 партии по 3 хода, своей фоновой задачи у refine_delayed нет.
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        result = engine.do_manual_action(s, "use_refined")
+        self.assertTrue(result.pending, result.message)
+        self.assertEqual(s.autocraft_jobs, {})
+        self.assertIn("craft_delayed", s.manual_jobs)
+
+        self.assertEqual(run_turns(s, lambda st: st.resources.get("test_top", 0) >= 1), 6)
+        self.assertEqual(s.resources["delayed_output"], 10 - 8)
+        self.assertEqual(s.autocraft_jobs, {})
+
+    def test_long_recipe_over_long_ingredient_in_the_same_location_does_not_deadlock(self):
+        # long_refine и craft_delayed делят workshop_loc. Локацию должен первым
+        # занять ингредиент (craft_delayed), а не его потребитель - иначе
+        # потребитель ждал бы ингредиент, а ингредиент - свободную локацию.
+        engine.MANUAL_ACTIONS["long_refine"] = {
+            "name": "Долгая очистка", "requires_tech": None, "location": "workshop_loc",
+            "cost": {"delayed_output": 5}, "gain": {"test_mid": 1}, "duration_turns": 2, "priority": 10,
+        }
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        result = engine.do_manual_action(s, "use_refined")
+        self.assertTrue(result.pending, result.message)
+        self.assertEqual(list(s.manual_jobs), ["craft_delayed"])
+
+        # 3 хода craft_delayed + 2 хода long_refine.
+        self.assertEqual(run_turns(s, lambda st: st.resources.get("test_top", 0) >= 1), 5)
+        self.assertEqual(s.manual_jobs, {})
+
+    def test_preview_estimates_turns_as_batches_times_duration(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        preview = engine.autocraft_preview(s, {"delayed_output": 12})
+        node = preview["nodes"][0]
+        self.assertEqual((node["action_id"], node["fires"], node["turns"]), ("craft_delayed", 3, 9))
+
+    def test_cancelling_an_autocraft_batch_refunds_its_cost(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        engine.ensure_and_pay(s, {"delayed_output": 5})
+        self.assertTrue(engine.cancel_manual_job(s, "craft_delayed").ok)
+        self.assertEqual(s.resources["raw_a"], 10)
+
+
+class LongActionWebUiTests(FixtureTestCase):
+    """tools/web_ui.py поверх тех же партий: пометка в панели "Долгие действия" и
+    оценка ходов в окне подтверждения автокрафта."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        patch = fixtures.patched_content()  # заодно подменяет имена в web_ui
+        patch.__enter__()
+        self.addCleanup(patch.__exit__, None, None, None)
+        self.add_actions(LONG_TEST_ACTIONS, resources=LONG_TEST_RESOURCES, unlock=["delayed_output"])
+        import web_ui
+        self.web_ui = web_ui
+        web_ui.MANUAL_ACTIONS = engine.MANUAL_ACTIONS  # восстановит cleanup patched_content
+
+    def test_manual_jobs_view_marks_autocraft_batches(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        self.assertTrue(engine.do_manual_action(s, "craft_delayed_sub").ok)  # игрок, sub_workshop
+        engine.ensure_and_pay(s, {"delayed_output": 5})  # автокрафт, workshop_loc
+        flags = {job["action_id"]: job["autocraft"] for job in self.web_ui.manual_jobs_view(s)}
+        self.assertEqual(flags, {"craft_delayed_sub": False, "craft_delayed": True})
+
+    def test_preview_summary_turns_for_long_recipe(self):
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
+        view = self.web_ui.autocraft_preview_view(s, "manual", "use_delayed")
+        self.assertTrue(view["needs_confirm"])
+        row = next(r for r in view["summary"] if r["resource_id"] == "delayed_output")
+        self.assertEqual((row["fires"], row["turns"]), (3, 9))
+        self.assertEqual(view["tree"][0]["turns"], 9)
+
+
 if __name__ == "__main__":
     unittest.main()

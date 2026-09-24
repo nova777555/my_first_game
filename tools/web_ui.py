@@ -1217,6 +1217,7 @@ def manual_jobs_view(state: GameState) -> list[dict]:
             "name": MANUAL_ACTIONS[job["action_id"]]["name"],
             "turns_done": job["turns_done"],
             "turns_total": job["turns_total"],
+            "autocraft": job["autocraft"],
         }
         for job in engine.manual_jobs_view(state)
     ]
@@ -2170,10 +2171,13 @@ def _collect_preview_totals(nodes: list[dict], totals: dict | None = None) -> di
         totals = {}
     for node in nodes:
         rid = node["resource_id"]
-        entry = totals.setdefault(rid, {"taken": 0, "needed": 0, "fires": 0})
+        entry = totals.setdefault(rid, {"taken": 0, "needed": 0, "fires": 0, "action_id": None})
         entry["taken"] += node["taken"]
         entry["needed"] += node["needed"]
         entry["fires"] += node["fires"]
+        # Рецепт у ресурса один на всё дерево (engine.resource_recipe) - нужен для
+        # оценки ходов многоходового действия (engine.autocraft_eta_turns).
+        entry["action_id"] = entry["action_id"] or node["action_id"]
         _collect_preview_totals(node["children"], totals)
     return totals
 
@@ -2254,7 +2258,7 @@ def autocraft_preview_view(state: GameState, action_type: str, action_id, scale:
             "resource_id": rid, "name": RESOURCE_NAMES[rid],
             "needed": t["needed"], "taken": t["taken"], "stock": stock, "fires": t["fires"],
             "percent": (t["taken"] / stock) if stock > 0 else (1.0 if t["taken"] > 0 else None),
-            "turns": engine.autocraft_eta_turns(state, t["fires"]),
+            "turns": engine.autocraft_eta_turns(state, t["fires"], t["action_id"]),
         })
     return {
         "needs_confirm": True,

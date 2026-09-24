@@ -175,7 +175,7 @@ mouseleave).
 | Приоритет автокрафт-рецептов | `engine.py`: `resource_recipe`, `action_priority`, `set_action_priority`; контент `manual_actions.*.priority`, `state.action_priority` |
 | Вероятностный cost/gain у ручных действий | `engine.py`: `_roll_chance_amounts`, `is_manual_action_deterministic`; контент `cost_chance`/`gain_chance` |
 | Случайное количество produce (диапазон, равномерное распределение) | `engine.py`: `_is_range_amount`, `_roll_range_amounts`, `_add_amount`/`_scale_amount`; `content_validation.py`: `check_amount_range`; `content_editor.html`: `renderDictAmountInput` |
-| Автокрафт (гейты, compute/speed/slots, фон. задачи) | `engine.py`: `ensure_and_pay` (→ `_discover_autocraft_graph`/`_aggregate_autocraft_demand`/`_commit_autocraft_plan`, см. "Известные ограничения"), `compute_capacity`, `autocraft_speed_capacity`, `autocraft_slot_capacity`, `state.autocraft_jobs`/`pending_actions` |
+| Автокрафт (гейты, compute/speed/slots, фон. задачи, партии энергии/многоходовых) | `engine.py`: `ensure_and_pay` (→ `_discover_autocraft_graph`/`_aggregate_autocraft_demand`/`_commit_autocraft_plan`, см. "Известные ограничения"), `_start_energy_batches`, `_busy_manual_job_in_location`/`_new_manual_job`, `compute_capacity`, `autocraft_speed_capacity`, `autocraft_slot_capacity`, `state.autocraft_jobs`/`pending_actions` |
 | Сообщение "не хватает ресурсов: ..." | `engine.py`: `_pay_or_defer`, `_direct_shortfall`, `_raw_shortfall`, `_format_shortfall` |
 | Галочка "Автокрафт" вкл/выкл | `state.autocraft_enabled`, `engine.toggle_autocraft`; `web_ui.html: #autocraftToggleWrap` |
 | Крафт из энергии (преобразователь) | контент `energy_recipes` (+ необязательные `machine`/`consumes`) + `buildings.*.energy_converter`; `engine.py`: `CONVERTER_LOCATION_ID`, `start_energy_recipe`, `_process_energy_jobs`, `energy_converter_capacity`/`_max_energy_per_turn(state, building_id)` |
@@ -305,6 +305,16 @@ mouseleave).
   видит только детерминированные рецепты. Голое сырьё (пустой `cost`)
   недостижимо для автокрафта в принципе. Действие со случайным диапазоном
   (см. ниже) в `gain` исключено из `resource_recipe` по той же причине.
+  **Партии** (с 2026-09-24): многоходовое действие (`manual_action_duration > 1`)
+  автокрафт ведёт настоящим `manual_job` (флаг `autocraft`, не растит
+  `action_performed_count`) — по одной партии за раз, по тем же правилам «одна
+  задача на action_id и на локацию»; крафт за энергию — сразу на ВСЕХ свободных
+  преобразователях, сколько нужно (`_start_energy_batches`, диапазон — по `min`).
+  Следующую партию запускает повторная попытка отложенного действия, в тот же ход,
+  когда закончилась предыдущая. Рецепт поверх партий получает статус `waiting` и
+  НЕ заводит свою фоновую задачу (иначе она висела бы вечно: у ресурса с задачей
+  спрос не идёт вниз, и следующую партию никто бы не запустил), см.
+  `_commit_autocraft_plan`. Скорость/слоты автокрафта партии не тратят.
 - **Случайное количество produce** — значение ресурса в `produces`
   (постройки/`energy_recipes`/`soul_recipes`) или `gain` (`manual_actions`)
   может быть объектом `{"min", "max"}` вместо плоского числа — равномерный
