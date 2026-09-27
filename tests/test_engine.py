@@ -3491,6 +3491,18 @@ class GeneticsTests(FixtureTestCase):
         # обычной продукции critter_a - оба начисления складываются: 2 (вид) + 1 (бонус).
         self.assertEqual(s.resources.get("species_output"), 3)
 
+    def test_creature_view_shows_the_species_environment_bonus(self):
+        # Бонус среды - поле ВИДА (как в _process_habitat), а не аллели среды.
+        s = GameState(buildings={"industrial_apiary": 1}, resources={"raw_a": 100})
+        instance_id = self._farm_instance(s, "industrial_apiary")
+        engine.purchase_farm_instance_upgrade(s, instance_id, "ia_env_forest")
+        cid = self._spawn(s, "critter_a", active_period="always", environment="forest")
+        engine.house_creature(s, cid, instance_id)
+        s.creatures[cid]["identified"] = True
+        self.assertEqual(
+            engine.creature_view(s, cid)["bonus_produce"], {"resource_id": "species_output", "chance": 0.3},
+        )
+
     def test_bonus_production_does_not_fire_on_environment_mismatch(self):
         s = GameState(buildings={"industrial_apiary": 1}, resources={"raw_a": 100})
         instance_id = self._farm_instance(s, "industrial_apiary")

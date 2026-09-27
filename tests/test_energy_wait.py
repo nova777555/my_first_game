@@ -214,6 +214,16 @@ class EnergyWaitEngineTests(unittest.TestCase):
         engine.set_building_active_count(s, "e_fuel_gen", 0)
         self.assertFalse(engine.has_energy_source(s))
 
+    def test_installed_energy_soul_is_a_source(self):
+        # Души живут в экземплярах синтезаторов, а не в устаревшем state.soul_slots.
+        engine.SOUL_RECIPES = {**engine.SOUL_RECIPES, "test_soul": {"produces": {"energy": 2}}}
+        s = self.state(resources={"test_soul": 1}, buildings={"e_gen": 0, "soul_synth": 1})
+        self.assertFalse(engine.has_energy_source(s))
+        engine._ensure_soul_collector_instances(s)
+        [instance_id] = s.soul_collector_instances
+        self.assertTrue(engine.insert_soul(s, instance_id, "test_soul").ok)
+        self.assertTrue(engine.has_energy_source(s))
+
     def test_solar_counts_as_a_source_at_night(self):
         s = self.state(buildings={"e_gen": 0, "e_sun": 1})
         night = next(t for t in range(200) if not engine.is_daytime(GameState(turn=t)))

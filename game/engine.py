@@ -1518,8 +1518,9 @@ def has_energy_source(state: GameState) -> bool:
         amount = produces.get(ENERGY_RESOURCE_ID, 0)
         if (amount["max"] if _is_range_amount(amount) else amount) > 0:
             return True
-    for souls in state.soul_slots.values():
-        for soul_id in souls:
+    # Души живут в экземплярах синтезаторов (state.soul_slots - только старые сохранения).
+    for instance_id, instance in state.soul_collector_instances.items():
+        for soul_id in instance["installed"][:soul_collector_instance_capacity(state, instance_id)]:
             if ENERGY_RESOURCE_ID in SOUL_RECIPES.get(soul_id, {}).get("produces", {}):
                 return True
     for creature in state.creatures.values():
@@ -7044,10 +7045,10 @@ def creature_view(state: GameState, creature_id: str) -> dict:
     if instance_id is not None:
         active_env = _instance_environment_id(state, instance_id)
         if active_env is not None and phenotype["environment_id"] == active_env:
-            allele = trait_alleles("environment").get(active_env, {})
-            resource = allele.get("bonus_resource")
+            # Бонус среды живёт на ВИДЕ (species.*.bonus_resource), как в _process_habitat.
+            resource = species.get("bonus_resource")
             if resource:
-                entry["bonus_produce"] = {"resource_id": resource, "chance": allele.get("bonus_chance", 0)}
+                entry["bonus_produce"] = {"resource_id": resource, "chance": species.get("bonus_chance", 0)}
     entry["genotype"] = {
         trait_id: [
             {
