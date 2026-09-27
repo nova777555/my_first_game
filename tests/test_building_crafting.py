@@ -280,6 +280,11 @@ class ValidationTests(unittest.TestCase):
         }
         self.assertTrue(any("узор (pattern) не нужен" in e for e in self.errors()))
 
+    def test_more_resources_than_cells_is_rejected(self):
+        self.data["locations"][ASM]["crafting"] = {"width": 1, "height": 1, "stacks": True}
+        self.data["buildings"]["gen"]["cost"] = {"raw_a": 1, "raw_b": 1}
+        self.assertTrue(any("не разложить в 1 ячеек" in e for e in self.errors()))
+
     def test_converter_cannot_be_an_assembler(self):
         converter = self.data["locations"][cv._CONVERTER_LOCATION_ID]
         converter["crafting"] = {"width": 2, "height": 1, "stacks": True}

@@ -304,20 +304,32 @@ def validate(data: dict) -> list[str]:
         crafting = locations.get(loc_id, {}).get("crafting") if loc_id in locations else None
         return isinstance(crafting, dict) and crafting.get("stacks") is True
 
-    def check_stacks_recipe(label: str, entity: dict, costs: list) -> None:
+    def check_stacks_recipe(label: str, entity: dict, costs: list, loc_id) -> None:
         """Рецепт сборщика (crafting.stacks): форма не важна, рецептом служит цена -
         узор лишний, а цена без энергии обязана быть непустой (энергию, как и в узоре,
-        в ячейку не положить - разложить было бы нечего). costs - [(где, cost)], у
-        многоэтапной постройки по одной на этап."""
+        в ячейку не положить - разложить было бы нечего) и влезать в ячейки механизма
+        (одна стопка - один ресурс). costs - [(где, cost)], у многоэтапной постройки
+        по одной на этап."""
         if entity.get("pattern") is not None or entity.get("pattern_mirror"):
             errors.append(f"{label}: в сборщике форма не важна - узор (pattern) не нужен, рецептом служит сама цена")
+        crafting = locations[loc_id]["crafting"]
+        cells = crafting.get("width", 0) * crafting.get("height", 0) if all(
+            isinstance(crafting.get(side), int) for side in ("width", "height")) else None
         for where, cost in costs:
-            if isinstance(cost, dict) and not any(rid != _ENERGY_RESOURCE_ID for rid in cost):
+            if not isinstance(cost, dict):
+                continue
+            stacks = [rid for rid in cost if rid != _ENERGY_RESOURCE_ID]
+            if not stacks:
                 errors.append(f"{where}: в сборщике рецепт узнаётся по стопкам цены, а кроме энергии в ней ничего нет")
+            elif cells is not None and len(stacks) > cells:
+                errors.append(
+                    f"{where}: {len(stacks)} разных ресурсов не разложить в {cells} ячеек сборщика '{loc_id}' "
+                    f"(одна ячейка - одна стопка одного ресурса)"
+                )
 
     def check_action_pattern(aid: str, action: dict, loc_id) -> None:
         if is_stacks_location(loc_id):
-            check_stacks_recipe(f"Действие '{aid}'", action, [(f"Действие '{aid}'.cost", action.get("cost") or {})])
+            check_stacks_recipe(f"Действие '{aid}'", action, [(f"Действие '{aid}'.cost", action.get("cost") or {})], loc_id)
             return
         check_grid_pattern(f"Действие '{aid}'", action, loc_id, "cost")
 
@@ -875,7 +887,7 @@ def validate(data: dict) -> list[str]:
         ] if isinstance(stages, list) and stages else []
         if is_stacks_location(loc_id):
             costs = stage_costs or [(f"{label}.cost", b.get("cost") or {})]
-            check_stacks_recipe(label, b, costs)
+            check_stacks_recipe(label, b, costs, loc_id)
             for _, cost in costs:
                 register_stacks(label, loc_id, cost)
             continue

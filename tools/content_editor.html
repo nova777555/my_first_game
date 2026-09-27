@@ -3046,35 +3046,54 @@ function craftingGridRow(loc, lid) {
   batchInput.checked = !!(loc.crafting && loc.crafting.batch);
   batchLabel.append(batchInput, el("span", { text: "крафт пачкой (×N)" }));
   sizeBox.appendChild(batchLabel);
+  // crafting.stacks - сборщик: форма не важна, в ячейке стопка (ресурс + количество),
+  // рецептом служит сама цена (game/engine.py: match_grid_target). У преобразователя
+  // нельзя - его рецепты собираются только узором (валидатор).
+  const stacksLabel = el("label", { style: "display:inline-flex; align-items:center; gap:4px; margin-left:10px;",
+    title: "Сборщик: форма не важна, в ячейку кладётся стопка, рецепт узнаётся по составу и количеству" });
+  const stacksInput = el("input", { type: "checkbox" });
+  stacksInput.checked = !!(loc.crafting && loc.crafting.stacks);
+  stacksLabel.append(stacksInput, el("span", { text: "сборщик: стопки без формы" }));
+  sizeBox.appendChild(stacksLabel);
+  const withFlags = (crafting) => {
+    if (batchInput.checked) crafting.batch = true;
+    if (stacksInput.checked) crafting.stacks = true;
+    return crafting;
+  };
   const syncSize = () => {
     if (!loc.crafting) return;
     const w = Math.max(1, Math.min(9, Number(widthInput.value) || 1));
     const h = Math.max(1, Math.min(9, Number(heightInput.value) || 1));
     widthInput.value = w;
     heightInput.value = h;
-    loc.crafting = { width: w, height: h };
-    if (batchInput.checked) loc.crafting.batch = true;
+    loc.crafting = withFlags({ width: w, height: h });
   };
   widthInput.addEventListener("change", syncSize);
   heightInput.addEventListener("change", syncSize);
   batchInput.addEventListener("change", syncSize);
+  stacksInput.addEventListener("change", () => {
+    syncSize();
+    renderManual(); // узор у действий этой локации становится не нужен (или снова нужен)
+    renderBuildings(); // и у построек, которые здесь собираются
+  });
   const applyEnabled = () => {
     widthInput.disabled = !checkbox.checked;
     heightInput.disabled = !checkbox.checked;
     batchInput.disabled = !checkbox.checked;
+    stacksInput.disabled = !checkbox.checked || lid === CONVERTER_LOCATION_ID;
   };
   checkbox.addEventListener("change", () => {
     if (checkbox.checked) {
-      loc.crafting = {
+      loc.crafting = withFlags({
         width: Math.max(1, Math.min(9, Number(widthInput.value) || 3)),
         height: Math.max(1, Math.min(9, Number(heightInput.value) || 3)),
-      };
-      if (batchInput.checked) loc.crafting.batch = true;
+      });
     } else {
       delete loc.crafting;
     }
     applyEnabled();
     renderManual(); // у действий этой локации меняется доступность узора
+    renderBuildings(); // и у построек, которые здесь собираются
     if (lid === CONVERTER_LOCATION_ID) renderEnergyRecipes(); // и у рецептов крафта за энергию
   });
   applyEnabled();
@@ -3082,7 +3101,9 @@ function craftingGridRow(loc, lid) {
   row.appendChild(el("span", { class: "hint", text:
     "без галочки локация работает как сейчас - обычный список карточек действий. С галочкой локация становится механизмом: "
     + "игра открывает для неё модалку-верстак с сеткой такого размера (3×3 - верстак, 9×9 - ужасающий верстак, 2×1 - печь/мастерская). "
-    + "Внутри такой локации каждое действие само решает, крафтится оно на сетке или остаётся обычной карточкой - см. «Крафт на сетке» у действия"
+    + "Внутри такой локации каждое действие само решает, крафтится оно на сетке или остаётся обычной карточкой - см. «Крафт на сетке» у действия. "
+    + "«Сборщик» - форма не важна: игрок кладёт в ячейки стопки, рецепт узнаётся по составу и количеству (ровно cost без энергии), "
+    + "узоры не нужны, а все действия локации собираются в модалке. Постройки выбирают механизм полем «Где собирается»"
     + (lid === CONVERTER_LOCATION_ID
       ? ". У «Преобразователя» в сетке собираются рецепты крафта за энергию (вкладка «Рецепты за энергию», узор = consumes)"
       : "") }));
@@ -3152,11 +3173,28 @@ function energyRecipePatternOpts() {
   return { locationId: CONVERTER_LOCATION_ID, costField: "consumes", isEnergy: true };
 }
 
+// Постройка собирается в механизме своего buildings.*.location (вкладки «Построить»
+// в игре нет): на сетке - узор над cost, в сборщике узор не нужен.
+function buildingPatternOpts(building) {
+  return { locationId: building.location || null, costField: "cost", isEnergy: false, isBuilding: true };
+}
+
 function patternSummaryText(action, opts) {
   opts = opts || actionPatternOpts(action);
   const loc = opts.locationId ? DATA.locations[opts.locationId] : null;
-  if (!loc || !loc.crafting) return opts.isEnergy ? "у преобразователя нет крафт-сетки" : "у локации нет крафт-сетки";
-  if (!action.pattern) return opts.isEnergy ? "узора нет - запустить руками нельзя" : "обычная карточка (модалка не нужна)";
+  if (!loc || !loc.crafting) {
+    if (opts.isBuilding) return opts.locationId ? "у этой локации нет крафт-сетки" : "механизм не выбран";
+    return opts.isEnergy ? "у преобразователя нет крафт-сетки" : "у локации нет крафт-сетки";
+  }
+  if (loc.crafting.stacks) {
+    return action.pattern
+      ? "сборщик: узор здесь лишний - сними галочку (ошибка валидации)"
+      : "сборщик: узор не нужен - рецептом служит цена, игрок кладёт её стопками";
+  }
+  if (!action.pattern) {
+    if (opts.isBuilding) return "узора нет - собрать постройку будет нельзя";
+    return opts.isEnergy ? "узора нет - запустить руками нельзя" : "обычная карточка (модалка не нужна)";
+  }
   const grid = patternToGrid(action.pattern, loc.crafting.width, loc.crafting.height);
   const cost = patternCostOf(grid);
   const cells = Object.values(cost).reduce((s, n) => s + n, 0);
@@ -3175,18 +3213,22 @@ function actionPatternRow(action, aid, opts, onChange) {
   const summary = el("span", { class: "hint", text: patternSummaryText(action, opts) });
   const editBtn = el("button", { class: "small", text: "Нарисовать узор" });
 
+  // Локацию ручного действия (или механизм постройки) могли сменить в карточке -
+  // opts пересобираем.
+  const currentOpts = () => (opts.isEnergy ? opts : opts.isBuilding ? buildingPatternOpts(action) : actionPatternOpts(action));
   const refresh = () => {
-    // Локацию ручного действия могли сменить в карточке - opts пересобираем.
-    const current = opts.isEnergy ? opts : actionPatternOpts(action);
+    const current = currentOpts();
     const loc = current.locationId ? DATA.locations[current.locationId] : null;
     const crafting = loc && loc.crafting;
-    checkbox.disabled = !crafting;
+    // В сборщике узор не нужен - галочку можно только снять (если узор остался
+    // от прежней локации), поставить нельзя.
+    const stacks = !!(crafting && crafting.stacks);
+    checkbox.disabled = !crafting || (stacks && !action.pattern);
     checkbox.checked = !!action.pattern;
-    editBtn.disabled = !crafting || !action.pattern;
+    editBtn.disabled = !crafting || stacks || !action.pattern;
     summary.textContent = patternSummaryText(action, current);
     if (onChange) onChange();
   };
-  const currentOpts = () => (opts.isEnergy ? opts : actionPatternOpts(action));
 
   checkbox.addEventListener("change", () => {
     if (checkbox.checked) {
@@ -3200,7 +3242,11 @@ function actionPatternRow(action, aid, opts, onChange) {
   editBtn.addEventListener("click", () => openPatternModal(action, aid, refresh, currentOpts()));
 
   row.append(checkbox, summary, editBtn);
-  row.appendChild(el("span", { class: "hint", text: opts.isEnergy
+  row.appendChild(el("span", { class: "hint", text: opts.isBuilding
+    ? "узор = что игрок раскладывает на сетке механизма, чтобы поставить постройку; одна ячейка - одна единица cost "
+      + "(обязаны совпадать), энергия - сверх узора. На сетке без узора постройку не собрать (ошибка валидации). "
+      + "В сборщике узор не нужен - там рецептом служит цена. Многоэтапную постройку собирают только в сборщике"
+    : opts.isEnergy
     ? "узор = что игрок раскладывает в слотах преобразователя, чтобы запустить этот рецепт; одна ячейка - одна единица "
       + "consumes (обязаны совпадать). Энергия в узор не входит - она копится по ходам до порога. Пока у преобразователя "
       + "есть крафт-сетка, рецепт без узора - ошибка валидации: запустить его руками было бы нельзя"
@@ -3223,6 +3269,8 @@ function openPatternModal(action, aid, onChange, opts) {
   if (!crafting) {
     alert(opts.isEnergy
       ? "У локации «Преобразователь» не включена крафт-сетка - сначала включи её на вкладке «Локации»."
+      : opts.isBuilding
+      ? "Сначала выбери, где собирается постройка («Где собирается»), - механизм с крафт-сеткой."
       : "У локации этого действия не включена крафт-сетка - сначала включи её на вкладке «Локации».");
     onChange();
     return;
@@ -3306,6 +3354,8 @@ function openPatternModal(action, aid, onChange, opts) {
     if (!ids.length) {
       costBox.appendChild(el("p", { class: "hint", text: opts.isEnergy
         ? "сетка пуста - при закрытии узор у рецепта будет убран"
+        : opts.isBuilding
+        ? "сетка пуста - при закрытии узор будет убран (собрать постройку на этой сетке станет нельзя)"
         : "сетка пуста - при закрытии действие вернётся в обычные карточки" }));
     } else {
       ids.forEach(rid => {
@@ -3320,7 +3370,7 @@ function openPatternModal(action, aid, onChange, opts) {
     const matches = sameCost(cost, current);
     const note = el("div", { class: "pattern-note " + (matches ? "ok" : "err") });
     if (matches) {
-      note.appendChild(el("div", { text: `${costField} ${opts.isEnergy ? "рецепта" : "действия"} совпадает с узором` }));
+      note.appendChild(el("div", { text: `${costField} ${opts.isEnergy ? "рецепта" : opts.isBuilding ? "постройки" : "действия"} совпадает с узором` }));
     } else {
       const currentText = Object.keys(current).length
         ? Object.entries(current).map(([rid, amt]) => `${patternResourceName(rid)} ×${amt}`).join(", ")
@@ -4726,6 +4776,13 @@ function openBuildingUpgradesEditorModal(b, onChange) {
   document.body.appendChild(overlay);
 }
 
+// Куда по умолчанию ставить новую постройку - первый сборщик (там узор не нужен, её
+// сразу можно собрать); сборщика нет - нигде (карточка покажет предупреждение).
+function defaultBuildingLocation() {
+  const found = Object.entries(DATA.locations).find(([, l]) => l.crafting && l.crafting.stacks);
+  return found ? found[0] : undefined;
+}
+
 function renderBuildings() {
   const root = document.getElementById("tab-buildings");
   root.innerHTML = "";
@@ -4735,7 +4792,7 @@ function renderBuildings() {
   const cardsBox = el("div");
   const filterBar = makeFilterBar("buildings", cardsBox);
   const addForm = idPromptAndAdd("постройка", (id) => {
-    DATA.buildings[id] = { name: "Новая постройка", description: "", requires_tech: null, cost: {}, produces: {}, consumes: {}, breakdown_chance: 0.02, repair_cost: {}, icon_label: id.slice(0, 2).toUpperCase() };
+    DATA.buildings[id] = { name: "Новая постройка", description: "", requires_tech: null, location: defaultBuildingLocation(), cost: {}, produces: {}, consumes: {}, breakdown_chance: 0.02, repair_cost: {}, icon_label: id.slice(0, 2).toUpperCase() };
     jumpTo(`card-buildings-${id}`, "buildings", { focusName: true });
   });
   root.appendChild(makeToolbar(addForm, filterBar));
@@ -4752,7 +4809,7 @@ function renderBuildings() {
       index: i, count: buildingIds.length,
       onMove: (delta) => { moveDictKeyInPlace(DATA.buildings, bid, delta); renderBuildings(); },
       kind: "постройка",
-      createDefault: (id) => ({ name: "Новая постройка", description: "", requires_tech: null, cost: {}, produces: {}, consumes: {}, breakdown_chance: 0.02, repair_cost: {}, icon_label: id.slice(0, 2).toUpperCase() }),
+      createDefault: (id) => ({ name: "Новая постройка", description: "", requires_tech: null, location: defaultBuildingLocation(), cost: {}, produces: {}, consumes: {}, breakdown_chance: 0.02, repair_cost: {}, icon_label: id.slice(0, 2).toUpperCase() }),
       insertAfter: (id, value) => insertDictKeyAfterInPlace(DATA.buildings, bid, id, value),
       jumpToNew: (id) => { renderBuildings(); jumpTo(`card-buildings-${id}`, "buildings", { focusName: true }); },
     });
@@ -4766,7 +4823,7 @@ function renderBuildings() {
     const descRow = el("div", { class: "field-row" });
     descRow.appendChild(el("label", { text: "Описание" }));
     descRow.appendChild(descriptionTextarea(b.description, "Зачем нужна эта постройка - что она даёт игроку", (v) => { b.description = v; }));
-    descRow.appendChild(el("span", { class: "hint", text: "показывается игроку в каталоге строительства и в подсказке над построенной копией - обязательное поле" }));
+    descRow.appendChild(el("span", { class: "hint", text: "показывается игроку на карточке построенной копии - обязательное поле" }));
     card.appendChild(descRow);
 
     const techRow = el("div", { class: "field-row" });
@@ -4864,7 +4921,7 @@ function renderBuildings() {
       if (consumesBox) renderDictEditor(consumesBox, b.consumes);
     });
     energyConsRow.appendChild(energyConsInput);
-    energyConsRow.appendChild(el("span", { class: "hint", text: "0 - не потребляет; игрок видит это в панели построек и в каталоге строительства" }));
+    energyConsRow.appendChild(el("span", { class: "hint", text: "0 - не потребляет; игрок видит это в панели построек" }));
     card.appendChild(energyConsRow);
 
     const labTierRow = el("div", { class: "field-row" });
@@ -5040,11 +5097,49 @@ function renderBuildings() {
     }}));
     card.appendChild(upgradesRow);
 
+    // Где собирается постройка (buildings.*.location): вкладки «Построить» в игре
+    // нет - постройку ставит крафт в модалке механизма. На сетке нужен узор (слой
+    // над cost, как у ручного действия), в сборщике (crafting.stacks) рецептом
+    // служит сама цена - игрок кладёт её стопками.
+    let buildingCostBox = null;
+    const whereRow = el("div", { class: "field-row" });
+    whereRow.appendChild(el("label", { text: "Где собирается" }));
+    const craftingLocEntries = Object.entries(DATA.locations)
+      .filter(([, l]) => l.crafting)
+      .map(([lid, l]) => ({
+        value: lid,
+        label: l.crafting.stacks ? `${l.name} - сборщик, стопки` : `${l.name} - сетка ${l.crafting.width}×${l.crafting.height}`,
+      }));
+    const whereWarn = el("div", { class: "pattern-note warn", text:
+      "Постройку нигде не собрать: вкладки «Построить» в игре нет, игрок не сможет её поставить. Выбери механизм." });
+    // Окно узора меняет cost на месте («Записать узор в cost») - словарь цены ниже
+    // перерисовываем (он объявлен позже, refresh зовёт onChange сразу при создании).
+    const buildingPatternRow = actionPatternRow(b, bid, buildingPatternOpts(b), () => {
+      if (buildingCostBox) renderDictEditor(buildingCostBox, b.cost);
+    });
+    whereRow.appendChild(genericPickerSelect(craftingLocEntries, b.location || null, (v) => {
+      if (v) b.location = v; else delete b.location;
+      // Узор хранится в размере сетки своего механизма; в сборщике он не нужен вовсе.
+      const loc = v ? DATA.locations[v] : null;
+      if (!loc || loc.crafting.stacks) { delete b.pattern; delete b.pattern_mirror; }
+      buildingPatternRow._refresh();
+      whereWarn.hidden = !!b.location;
+    }, { title: "Где собирается постройка", placeholder: "— выбрать механизм —", noneLabel: "— нигде —",
+      emptyText: "Ни у одной локации нет крафт-сетки - включи её на вкладке «Локации»." }));
+    whereRow.appendChild(el("span", { class: "hint", text:
+      "механизм, в модалке которого игрок собирает эту постройку: крафт сразу ставит её. "
+      + "Сетка (верстак) - нужен узор ниже; сборщик (стопки) - узор не нужен, рецептом служит цена" }));
+    card.appendChild(whereRow);
+    whereWarn.hidden = !!b.location;
+    card.appendChild(whereWarn);
+    card.appendChild(buildingPatternRow);
+
     const costRowWrap = el("div");
     costRowWrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Цена постройки (cost)" })]));
     const costBox = el("div", { class: "dict-editor" });
     if (!b.cost) b.cost = {};
     renderDictEditor(costBox, b.cost);
+    buildingCostBox = costBox;
     costRowWrap.appendChild(costBox);
     card.appendChild(costRowWrap);
 
@@ -5063,9 +5158,10 @@ function renderBuildings() {
     stagesToggleRow.appendChild(el("label", { text: "Многоэтапное строительство" }));
     card.appendChild(stagesToggleRow);
     card.appendChild(el("p", { class: "hint", text:
-      "Пока включено, поле cost выше игнорируется - цена берётся из этапов. Игрок платит за этапы по очереди " +
-      "(каталог показывает «Постройка: <описание этапа> (Стадия N из M)», а при ровно одном этапе - без счётчика); " +
-      "сама постройка появляется и начинает работать только после последнего этапа." }));
+      "Пока включено, поле cost выше игнорируется - цена берётся из этапов. Игрок собирает этапы по очереди в сборщике " +
+      "(модалка показывает «стадия N из M: <описание этапа>», а при ровно одном этапе - без счётчика); " +
+      "сама постройка появляется и начинает работать только после последнего этапа. На сетке с узором многоэтапную " +
+      "постройку не собрать - один узор не повторит цену каждого этапа." }));
 
     const stagesBox = el("div", { class: "stages-box" });
     function renderStagesBox() {
