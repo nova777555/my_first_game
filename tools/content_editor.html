@@ -9516,7 +9516,8 @@ function renderReactor() {
   fluidsBox.appendChild(el("h3", { text: "Охлаждающие жидкости (resources.*.reactor_coolant_fluid)" }));
   fluidsBox.appendChild(el("p", { class: "hint", text:
     "Расходник теплоносителей: каждый ход зона тратит (мощность теплоносителей × поток% × units_per_power) "
-    + "единиц, а снимаемое тепло умножается на cooling_mult. Если в контенте НЕТ ни одной жидкости, механика "
+    + "единиц, а снимаемое тепло умножается на cooling_mult. Жидкость - всегда дробный ресурс (ставится сам). "
+    + "Если в контенте НЕТ ни одной жидкости, механика "
     + "выключена целиком и теплоносители работают даром. Если жидкости не хватило - охлаждение срабатывает "
     + "частично, пропорционально остатку." }));
   const freeForFluid = DATA.resources.filter(r => !r.reactor_coolant_fluid);
@@ -9526,7 +9527,11 @@ function renderReactor() {
     const fluidSelect = genericPickerSelect(fluidEntries, addFluidId, (v) => { addFluidId = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
     const addFluidBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
       const resource = DATA.resources.find(r => r.id === addFluidId);
-      if (resource) resource.reactor_coolant_fluid = { cooling_mult: 1.0, units_per_power: 0.5 };
+      // Расход жидкости за ход дробный - ресурс обязан быть дробным (валидатор).
+      if (resource) {
+        resource.reactor_coolant_fluid = { cooling_mult: 1.0, units_per_power: 0.5 };
+        resource.fractional = true;
+      }
       renderReactor();
     }});
     fluidsBox.appendChild(el("div", { class: "add-form" }, [el("span", { text: "Жидкость из ресурса:" }), fluidSelect, addFluidBtn]));

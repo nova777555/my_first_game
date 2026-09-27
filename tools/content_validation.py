@@ -812,6 +812,10 @@ def validate(data: dict) -> list[str]:
         upp = fluid.get("units_per_power")
         if not isinstance(upp, (int, float)) or isinstance(upp, bool) or upp < 0:
             errors.append(f"{where}.units_per_power: должен быть неотрицательным числом (расход единиц на единицу мощности теплоносителя при потоке 100%)")
+        # Расход за ход дробный (мощность × поток% × units_per_power) - целый ресурс
+        # стал бы на складе дробным, в обход правила «целые ресурсы всегда целые».
+        if not r.get("fractional"):
+            errors.append(f"Ресурс '{rid}': охлаждающая жидкость реактора должна быть дробной (fractional) - её расход за ход дробный")
 
     # Жидкий металл плавильни (resources.*.molten) - живёт только в тигле; color - цвет
     # слоя, density - порядок слоёв (тяжёлый тонет). См. game/content.py:RESOURCE_MOLTEN.

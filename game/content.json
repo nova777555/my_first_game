@@ -487,7 +487,8 @@
         "cooling_mult": 0.6,
         "units_per_power": 0.8
       },
-      "replication_cost": 0.1
+      "replication_cost": 0.1,
+      "fractional": true
     },
     {
       "id": "coolant_antifreeze",
@@ -495,7 +496,8 @@
       "reactor_coolant_fluid": {
         "cooling_mult": 1.0,
         "units_per_power": 0.5
-      }
+      },
+      "fractional": true
     },
     {
       "id": "coolant_liquid_metal",
@@ -503,7 +505,8 @@
       "reactor_coolant_fluid": {
         "cooling_mult": 1.8,
         "units_per_power": 0.3
-      }
+      },
+      "fractional": true
     },
     {
       "id": "tempered_ingot",

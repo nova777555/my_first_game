@@ -53,6 +53,16 @@ class BrokenReferenceTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("made_up_tech" in e for e in errors))
 
+    def test_reactor_coolant_fluid_must_be_fractional(self):
+        # Расход жидкости за ход дробный - целая «Вода» стала бы на складе дробной.
+        d = copy.deepcopy(self.data)
+        fluid = next(r for r in d["resources"] if r["id"] == "raw_b")
+        fluid["reactor_coolant_fluid"] = {"cooling_mult": 1.0, "units_per_power": 0.5}
+        fluid.pop("fractional", None)
+        self.assertTrue(any("raw_b" in e and "дробной" in e for e in cv.validate(d)))
+        fluid["fractional"] = True
+        self.assertFalse(any("дробной" in e for e in cv.validate(d)))
+
     def test_rejects_unknown_resource_in_cost(self):
         d = copy.deepcopy(self.data)
         any_action = next(iter(d["manual_actions"]))
