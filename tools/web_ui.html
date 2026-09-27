@@ -598,11 +598,19 @@
     overflow-y: auto; overflow-x: hidden;
     display: flex; flex-direction: column;
   }
+  /* top/left/right/bottom: 0, не -1px - отрицательный отступ раньше высовывал
+     уголок на 1px за пределы content-box .modal, и раз .modal сам скроллится
+     (overflow-y: auto, см. выше), этот вылезающий пиксель считался частью
+     scrollable overflow и вешал вечный фантомный скроллбар на ЛЮБУЮ модалку
+     (включая те, что и так помещаются целиком - подтверждение сноса, охота,
+     список сохранений) - высота содержимого тут ни при чём, дело чисто в
+     уголках. Визуальная разница на 1px незаметна (сама рамка модалки только
+     rgba(255,255,255,.1), 2px акцентная обводка уголка её и так перекрывает). */
   .bracket { position: absolute; width: 22px; height: 22px; pointer-events: none; animation: bracket-breathe 4s ease-in-out infinite; }
-  .bracket.tl { top: -1px; left: -1px; border-top: 2px solid var(--blueprint); border-left: 2px solid var(--blueprint); }
-  .bracket.tr { top: -1px; right: -1px; border-top: 2px solid var(--blueprint); border-right: 2px solid var(--blueprint); }
-  .bracket.bl { bottom: -1px; left: -1px; border-bottom: 2px solid var(--blueprint); border-left: 2px solid var(--blueprint); }
-  .bracket.br { bottom: -1px; right: -1px; border-bottom: 2px solid var(--blueprint); border-right: 2px solid var(--blueprint); }
+  .bracket.tl { top: 0; left: 0; border-top: 2px solid var(--blueprint); border-left: 2px solid var(--blueprint); }
+  .bracket.tr { top: 0; right: 0; border-top: 2px solid var(--blueprint); border-right: 2px solid var(--blueprint); }
+  .bracket.bl { bottom: 0; left: 0; border-bottom: 2px solid var(--blueprint); border-left: 2px solid var(--blueprint); }
+  .bracket.br { bottom: 0; right: 0; border-bottom: 2px solid var(--blueprint); border-right: 2px solid var(--blueprint); }
   @keyframes bracket-breathe {
     0%, 100% { opacity: .7; filter: drop-shadow(0 0 0 rgba(95,208,232,0)); }
     50% { opacity: 1; filter: drop-shadow(0 0 3px rgba(95,208,232,.6)); }
@@ -2857,6 +2865,10 @@
      (см. craftGridRenderCellContent/craftGridPartialLay) - ячейка остаётся
      пустой (без иконки), просто обведена красным с этой меткой в углу. */
   .cg-cell-mark { position: absolute; right: 3px; top: 1px; font-family: Consolas, monospace; font-size: 11px; font-weight: 700; color: var(--danger); }
+  /* Стопка в ячейке сборщика (crafting.stacks): количество в углу, при нехватке
+     красным «есть/нужно» (см. craftGridRenderCellContent). */
+  .cg-cell-count { position: absolute; right: 5px; bottom: 3px; font-family: Consolas, monospace; font-size: 12px; font-weight: 700; color: var(--accent); }
+  .cg-cell-count.short { color: var(--danger); }
   .cg-arrow { color: var(--accent); display: flex; align-items: center; }
   .cg-output {
     position: relative; width: 92px; height: 92px; background: var(--bg);
@@ -3045,6 +3057,7 @@
   .cg-src-cell.filled { background: rgba(240,160,48,.06); box-shadow: inset 0 0 0 1px rgba(240,160,48,.45); cursor: pointer; }
   .cg-src-cell.filled:hover { background: rgba(240,160,48,.12); box-shadow: inset 0 0 0 2px var(--accent); }
   .cg-src-cell .cg-icon-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .cg-src-cell-count { position: absolute; right: 2px; bottom: 0; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; color: var(--accent); text-shadow: 0 0 2px #000; }
   .cg-src-arrow-icon { color: var(--accent); display: flex; align-items: center; flex-shrink: 0; }
   .cg-src-output { position: relative; width: 64px; height: 64px; flex-shrink: 0; background: var(--bg); box-shadow: inset 0 0 0 2px rgba(240,160,48,.55); }
   .cg-src-output .cg-icon-wrap { position: absolute; left: 12px; right: 12px; top: 9px; bottom: 15px; display: flex; align-items: center; justify-content: center; }
@@ -3646,7 +3659,16 @@ const BUILDING_PALETTE = {
 // над встроенной. resourceIcon/buildingIcon возвращают null, если кастомной нет -
 // вызывающий код сам решает про откат (для построек это ещё и буква поверх иконки).
 function resourceIcon(rid) {
+  const bid = buildingItemBuildingId(rid);
+  if (bid) return buildingIcon(bid) || { grid: ICONS.machine.grid, palette: BUILDING_PALETTE.ok };
   return (VIEW.icons.resources && VIEW.icons.resources[rid]) || ICONS[rid] || moltenDropIcon(rid);
+}
+// Постройка там, где ждут id ресурса (выход рецепта постройки в модалке механизма,
+// справочник, закреплённые) - "building:<id>", см. tools/web_ui.py: building_item_id.
+// На складе такого id не бывает никогда.
+const BUILDING_ITEM_PREFIX = "building:";
+function buildingItemBuildingId(rid) {
+  return typeof rid === "string" && rid.startsWith(BUILDING_ITEM_PREFIX) ? rid.slice(BUILDING_ITEM_PREFIX.length) : null;
 }
 // Жидкий металл (resources.*.molten) без своей нарисованной иконки - капля его цвета.
 const MOLTEN_DROP_GRID = ["....DD....", "....DD....", "...DMMD...", "...DMMD...", "..DLMMMD..", ".DLLMMMMD.", ".DLMMMMMD.", ".DMMMMMMD.", "..DMMMMD..", "...DDDD..."];
@@ -4157,7 +4179,6 @@ function tryRunAction(key, delayMs, btn, fn) {
 function actionCooldownInfo(kind, item) {
   const dflt = VIEW.default_action_delay_ms;
   if (kind === "manual") return { key: `manual:${item.id}`, delay: item.click_delay_ms ?? dflt };
-  if (kind === "build") return { key: `build:${item.id}`, delay: item.click_delay_ms ?? dflt };
   if (kind === "repair") return { key: `repair:${item.id}`, delay: item.repair_click_delay_ms ?? dflt };
   if (kind === "hunting") {
     if (item.kind === "search") return { key: `hunt_search:${item.location}`, delay: dflt };
@@ -4310,12 +4331,9 @@ function renderAll() {
   if (document.getElementById("speciesBookOverlay")) openSpeciesBookModal();
   const upgradesOverlay = document.getElementById("buildingUpgradesOverlay");
   if (upgradesOverlay) {
-    // Кнопка "Улучшения" теперь открывается из VIEW.buildings (панель "Производственные
-    // мощности"), а не только из каталога "Построить" - постройка, упёршаяся в
-    // max_count, в каталоге уже не появится вовсе, но в VIEW.buildings остаётся,
-    // пока построена хотя бы одна копия (см. tools/web_ui.py: build_view).
-    const freshItem = VIEW.buildings.find(b => b.id === upgradesOverlay.dataset.buildingId)
-      || VIEW.categories.build.find(b => b.id === upgradesOverlay.dataset.buildingId);
+    // Кнопка "Улучшения" открывается из VIEW.buildings (панель "Производственные
+    // мощности") - только у уже построенной копии.
+    const freshItem = VIEW.buildings.find(b => b.id === upgradesOverlay.dataset.buildingId);
     // Постройка теоретически могла исчезнуть совсем (например, разобрана) -
     // тогда просто закрываем модалку вместо показа устаревших данных.
     if (freshItem) openBuildingUpgradesModal(freshItem);
@@ -5678,7 +5696,7 @@ function closeGeneticsLabModal() {
 // openFarmTypeModal/hive-stage-head), а не показывается сразу в стопке -
 // апгрейды сразу нескольких экземпляров разом визуально перегружали бы
 // модалку "Особи". Тот же приём стека оверлеев, что buildingUpgradesOverlay
-// поверх каталога "Построить".
+// поверх панели построек.
 function openFarmUpgradesModal(farm) {
   const prevModal = document.querySelector("#farmUpgradesOverlay .modal");
   const savedScroll = prevModal ? prevModal.scrollTop : null;
@@ -8840,14 +8858,6 @@ let buildingsTagFilter = new Set();
 // применить фильтр), как buildingsSearchQuery.
 let buildingsTagDropdownOpen = false;
 
-// Тот же фильтр по тегам (buildings.*.tags), но для каталога "Построить"
-// (VIEW.categories.build, вкладка "Построить") - отдельное состояние от
-// buildingsTagFilter выше, т.к. это разные панели с разными списками построек
-// (ещё не построенные vs уже построенные). Без фильтра по состоянию/поломке -
-// в каталоге он не имеет смысла, постройка ещё не существует физически.
-let buildCatalogTagFilter = new Set();
-let buildCatalogTagDropdownOpen = false;
-
 const BLD_STATUS_FILTER_CYCLE = ["all", "ok", "broken"];
 const BLD_STATUS_FILTER_META = {
   all: { label: "Все" },
@@ -8929,64 +8939,12 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// Тот же выпадающий список тегов, что renderBuildingsFilterBar, но БЕЗ
-// переключателя состояния/поломки - используется над каталогом "Построить"
-// (renderActionCategory("build")), где ещё не построенные постройки не могут
-// быть сломаны. null, если тегов вообще нет ни у одной доступной для постройки
-// (тогда панель фильтров не нужна совсем).
-function renderBuildCatalogFilterBar(allTags) {
-  if (!allTags.length) return null;
-  const bar = el("div", { class: "bld-filters" });
-  const tagWrap = el("div", { class: "bld-tag-dropdown" });
-  const tagBtn = el("button", {
-    type: "button", class: "bld-tag-dropdown-btn",
-    text: buildCatalogTagFilter.size ? `Тип: ${[...buildCatalogTagFilter].join(", ")}` : "Тип: любой",
-  });
-  tagBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    buildCatalogTagDropdownOpen = !buildCatalogTagDropdownOpen;
-    renderActions();
-  });
-  tagWrap.appendChild(tagBtn);
-
-  if (buildCatalogTagDropdownOpen) {
-    const panel = el("div", { class: "bld-tag-dropdown-panel" });
-    allTags.forEach(tag => {
-      const label = el("label", { class: "bld-tag-option" });
-      const cb = el("input", { type: "checkbox" });
-      cb.checked = buildCatalogTagFilter.has(tag);
-      cb.addEventListener("change", () => {
-        if (cb.checked) buildCatalogTagFilter.add(tag); else buildCatalogTagFilter.delete(tag);
-        renderActions();
-      });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(tag));
-      panel.appendChild(label);
-    });
-    if (buildCatalogTagFilter.size) {
-      const clearBtn = el("button", { type: "button", class: "bld-tag-clear", text: "Сбросить" });
-      clearBtn.addEventListener("click", () => { buildCatalogTagFilter.clear(); renderActions(); });
-      panel.appendChild(clearBtn);
-    }
-    tagWrap.appendChild(panel);
-  }
-  bar.appendChild(tagWrap);
-  return bar;
-}
-document.addEventListener("click", (e) => {
-  if (buildCatalogTagDropdownOpen && !e.target.closest(".bld-tag-dropdown")) {
-    buildCatalogTagDropdownOpen = false;
-    renderActions();
-  }
-});
-
 // Список построек (не сетка тайлов) - та же строка, что "Банк особей" в
 // "Особях": иконка со статусом, счётчик/бейдж лимита, описание, содержание
-// за ход (upkeepRow/specialAbilitiesRow - те же хелперы, что у карточки
-// каталога "Построить") и, если у типа постройки вообще есть upgrades,
-// кнопка "⚙ Улучшения" прямо в строке - единственное место, откуда она теперь
-// открывается (см. tools/web_ui.py: build_view, каталог "Построить" больше не
-// обязан держать штучную постройку на виду после max_count ради этой кнопки).
+// за ход (upkeepRow/specialAbilitiesRow) и, если у типа постройки вообще есть
+// upgrades, кнопка "⚙ Улучшения" прямо в строке - единственное место, откуда она
+// открывается. Сами постройки собираются в механизмах (buildings.*.location), не
+// здесь: вкладки «Построить» больше нет.
 // Три спец-механики (is_farm/is_breeding_station/is_genetics_lab, тоже из
 // build_view) дают ещё по одной кнопке ТУТ ЖЕ, на карточке ИМЕННО ТОЙ
 // постройки, что отвечает за механику - по прямому пожеланию, 2026-09-10:
@@ -9049,9 +9007,7 @@ function renderBuildings() {
     const title = el("div", { class: "bld-row-title" });
     title.appendChild(document.createTextNode(b.name));
     // Штучные постройки (max_count) показывают "сколько построено из скольки
-    // можно" вместо голого счётчика - именно эти постройки пропадают из
-    // каталога "Построить" по достижению лимита, счётчик здесь - единственное
-    // место, где это видно.
+    // можно" вместо голого счётчика.
     if (b.max_count != null) {
       title.appendChild(el("span", { class: "bld-badge limit", text: `лимит ${b.count}/${b.max_count}` }));
     } else {
@@ -9064,10 +9020,8 @@ function renderBuildings() {
 
     if (b.description) main.appendChild(el("div", { class: "bld-row-desc", text: b.description }));
 
-    // Те же хелперы, что у карточки постройки в каталоге "Построить" - раньше
-    // содержание за ход и особые способности (вычислительная мощность,
-    // разблокировка автокрафта, ёмкость преобразователя) были видны только в
-    // hover-подсказке (buildingTooltip), теперь - прямо в строке.
+    // Содержание за ход и особые способности (вычислительная мощность,
+    // разблокировка автокрафта, ёмкость преобразователя) - прямо в строке.
     const upkeep = upkeepRow(b);
     if (upkeep) main.appendChild(upkeep);
     const special = specialAbilitiesRow(b);
@@ -9350,8 +9304,8 @@ function upgradeBeforeAfterBlock(label, beforeOutput, beforeInput, afterOutput, 
 
 // Небольшое отдельное окно улучшений ОДНОГО типа постройки (три жёстко зашитых
 // типа - см. game/engine.py:effective_building_stats) - открывается кнопкой
-// "Улучшения" на уже построенной карточке в каталоге "Построить" (upgradesRow).
-// item - запись из VIEW.categories.build (передаётся свежая при каждом открытии/
+// "Улучшения" на карточке построенной постройки (renderBuildings).
+// item - запись из VIEW.buildings (передаётся свежая при каждом открытии/
 // пересборке, см. renderAll()).
 function openBuildingUpgradesModal(item) {
   // Тот же приём, что openStorage()/openToolsModal(): покупка улучшения дёргает
@@ -10504,7 +10458,39 @@ function craftGridShapesEqual(a, b) {
 }
 function craftGridMirrorShape(shape) { return shape.map(row => row.slice().reverse()); }
 
+// Ячейка раскладки: у сетки с узором - id ресурса, у сборщика - стопка {id, amount}.
+function craftGridCellId(cell) {
+  return cell == null ? null : (typeof cell === "string" ? cell : cell.id);
+}
+function craftGridCellAmount(cell) {
+  return cell == null ? 0 : (typeof cell === "string" ? 1 : cell.amount);
+}
+
+// Сколько каждого ресурса лежит во всех ячейках, кроме skip (у сборщика стопки
+// одного ресурса в разных ячейках складываются - форма не важна).
+function craftGridPlacedTotals(placed, skip = -1) {
+  const totals = {};
+  placed.forEach((cell, i) => {
+    const rid = craftGridCellId(cell);
+    if (rid && i !== skip) totals[rid] = (totals[rid] || 0) + craftGridCellAmount(cell);
+  });
+  return totals;
+}
+
+// Та же проверка, что game/engine.py: _stacks_match - набор стопок РОВНО равен
+// цене рецепта без энергии (держать в паре).
+function craftGridStacksMatch(recipe, totals) {
+  const need = recipe.stack_cost || [];
+  if (!need.length || Object.keys(totals).length !== need.length) return false;
+  return need.every(c => Math.abs((totals[c.id] || 0) - c.amount) < 1e-9);
+}
+
 function craftGridMatchRecipe(entry, placed) {
+  if (entry.stacks) {
+    const totals = craftGridPlacedTotals(placed);
+    if (!Object.keys(totals).length) return null;
+    return entry.recipes.find(r => craftGridStacksMatch(r, totals)) || null;
+  }
   const normalized = craftGridNormalize(placed, entry.width, entry.height);
   if (!normalized.length) return null;
   for (const recipe of entry.recipes) {
@@ -10533,7 +10519,42 @@ function craftGridMaxRuns(recipe) {
     const have = (VIEW.resources && VIEW.resources[c.id]) || 0;
     max = Math.min(max, Math.floor(have / c.amount));
   }
+  // Постройка со штучным лимитом - не больше, чем ещё можно поставить.
+  if (recipe.kind === "building" && recipe.max_count != null) max = Math.min(max, recipe.max_count - recipe.owned);
   return Number.isFinite(max) ? Math.max(0, max) : 0;
+}
+
+// Что разложить под рецепт, по ячейкам механизма: у сетки с узором - плоский
+// узор (id или null), у сборщика - стопки цены по порядку ({id, amount} или null).
+function craftGridRecipeLayout(entry, recipe) {
+  if (!entry.stacks) return craftGridFlattenPattern(recipe.pattern);
+  const out = (recipe.stack_cost || []).map(c => ({ id: c.id, amount: c.amount }));
+  while (out.length < entry.width * entry.height) out.push(null);
+  return out;
+}
+
+// Частичный перенос (craftGridPartialLay) для любого механизма: у сборщика в
+// стопку кладётся столько, сколько есть на складе, но не больше нужного.
+function craftGridPartialLayout(entry, layout) {
+  if (!entry.stacks) return craftGridPartialLay(layout);
+  const left = {};
+  return layout.map(want => {
+    if (!want) return null;
+    if (!(want.id in left)) left[want.id] = (VIEW.resources && VIEW.resources[want.id]) || 0;
+    const amount = Math.min(want.amount, left[want.id]);
+    left[want.id] -= amount;
+    return amount > 0 ? { id: want.id, amount } : null;
+  });
+}
+
+// Чего не хватило при переносе (craftGridMissingIds) для любого механизма.
+function craftGridLayoutMissingIds(entry, layout, laid) {
+  if (!entry.stacks) return craftGridMissingIds(layout, laid);
+  const out = [];
+  layout.forEach((want, i) => {
+    if (want && craftGridCellAmount(laid[i]) < want.amount && !out.includes(want.id)) out.push(want.id);
+  });
+  return out;
 }
 
 // "Перенос кладёт только то, что есть на складе" (правило 1 артборда
@@ -10569,12 +10590,14 @@ function craftGridMissingIds(patternFlat, laid) {
 // артборда), кладётся только то, что есть на складе, недостающие ячейки
 // остаются пустыми с красной меткой "!" (craftGridLastLaidPattern).
 function craftGridLayRecipe(recipe) {
-  const patternFlat = craftGridFlattenPattern(recipe.pattern);
-  craftGridPlaced = craftGridPartialLay(patternFlat);
-  craftGridLastLaidPattern = patternFlat;
+  const entry = craftGridEntry(craftGridLocationId);
+  if (!entry) return;
+  const layout = craftGridRecipeLayout(entry, recipe);
+  craftGridPlaced = craftGridPartialLayout(entry, layout);
+  craftGridLastLaidPattern = layout;
   craftGridSelected = null;
   craftGridHoverRecipe = null;
-  const missing = craftGridMissingIds(patternFlat, craftGridPlaced);
+  const missing = craftGridLayoutMissingIds(entry, layout, craftGridPlaced);
   craftGridStatus = missing.length
     ? `Не хватает: ${missing.map(RESOURCE_NAME_LOOKUP).join(", ")}.`
     : `Разложено: ${recipe.name}.`;
@@ -10653,12 +10676,43 @@ function isRecipePinnedGlobally(actionId) {
   return (VIEW.pinned_recipes || []).includes(actionId);
 }
 
-function craftGridCellClick(i, entry) {
+function craftGridCellClick(i, entry, e) {
+  if (entry.stacks) return craftGridStackAdd(i, craftGridSelected, e && e.shiftKey ? 10 : (e && (e.ctrlKey || e.metaKey) ? Infinity : 1));
   const current = craftGridPlaced[i];
   if (craftGridSelected == null) craftGridPlaced[i] = null;
   else if (current === craftGridSelected) craftGridPlaced[i] = null;
   else craftGridPlaced[i] = craftGridSelected;
   craftGridLastLaidPattern = null; // ручная правка отменяет метку "!" от переноса
+  openCraftGridModal(craftGridLocationId);
+}
+
+// Сборщик: добавить в ячейку i стопку ресурса rid (+step, Infinity - всё, что
+// осталось на складе). Без ресурса в руке клик очищает ячейку. Другой ресурс
+// заменяет стопку. Больше, чем есть на складе (за вычетом других ячеек), не
+// положить - иначе разложенный рецепт оказался бы не по карману.
+function craftGridStackAdd(i, rid, step) {
+  if (rid == null) {
+    craftGridPlaced[i] = null;
+  } else {
+    const current = craftGridPlaced[i];
+    const base = craftGridCellId(current) === rid ? craftGridCellAmount(current) : 0;
+    const have = (VIEW.resources && VIEW.resources[rid]) || 0;
+    const free = Math.max(0, have - (craftGridPlacedTotals(craftGridPlaced, i)[rid] || 0));
+    const amount = Math.min(free, base + step);
+    craftGridPlaced[i] = amount > 0 ? { id: rid, amount } : null;
+    if (amount <= base) craftGridStatus = `На складе больше нет: ${RESOURCE_NAME_LOOKUP(rid)}.`;
+  }
+  craftGridLastLaidPattern = null;
+  openCraftGridModal(craftGridLocationId);
+}
+
+// Сборщик, правый клик: убрать из стопки step штук (стопка из 0 исчезает).
+function craftGridStackTake(i, step) {
+  const current = craftGridPlaced[i];
+  if (!current) return;
+  const amount = craftGridCellAmount(current) - step;
+  craftGridPlaced[i] = amount > 0 ? { id: craftGridCellId(current), amount } : null;
+  craftGridLastLaidPattern = null;
   openCraftGridModal(craftGridLocationId);
 }
 
@@ -10670,9 +10724,9 @@ function craftGridHoverInfo(entry) {
   if (!craftGridHoverRecipe) return null;
   const recipe = entry.recipes.find(r => r.action_id === craftGridHoverRecipe);
   if (!recipe) return null;
-  const patternFlat = craftGridFlattenPattern(recipe.pattern);
-  const partial = craftGridPartialLay(patternFlat);
-  return { recipe, patternFlat, partial, missingIds: craftGridMissingIds(patternFlat, partial) };
+  const patternFlat = craftGridRecipeLayout(entry, recipe);
+  const partial = craftGridPartialLayout(entry, patternFlat);
+  return { recipe, patternFlat, partial, missingIds: craftGridLayoutMissingIds(entry, patternFlat, partial) };
 }
 
 function craftGridHoverStatusText(hover) {
@@ -10690,31 +10744,52 @@ function craftGridHoverStatusText(hover) {
 // последнего переноса), hover={recipe,patternFlat,partial,missingIds} - режим
 // призрака: узор ПОЛНОСТЬЮ перекрывает то, что реально разложено (как в
 // design-канвасе: shown = hoverPattern ? want : c), ячейка вне узора гасится.
-function craftGridRenderCellContent(cell, i, hover) {
+function craftGridRenderCellContent(cell, i, hover, entry) {
   cell.className = "cg-cell";
   cell.innerHTML = "";
   cell.title = "";
-  let icon = null, mark = false;
+  const stacks = !!(entry && entry.stacks);
+  let icon = null, mark = false, count = null, short = false;
   if (hover) {
     const want = hover.patternFlat[i];
     if (want) {
-      const missing = !hover.partial[i];
+      const laid = hover.partial[i];
+      const missing = stacks ? craftGridCellAmount(laid) < want.amount : !laid;
       cell.classList.add(missing ? "ghost-missing" : "ghost-ok");
-      icon = want;
+      icon = craftGridCellId(want);
       mark = missing;
+      if (stacks) {
+        count = missing ? `${formatAmount(craftGridCellAmount(laid))}/${formatAmount(want.amount)}` : formatAmount(want.amount);
+        short = missing;
+      }
     } else {
       cell.classList.add("ghost-out");
     }
   } else {
-    const placedId = craftGridPlaced[i];
-    if (placedId) {
+    const placed = craftGridPlaced[i];
+    const want = craftGridLastLaidPattern ? craftGridLastLaidPattern[i] : null;
+    if (placed) {
       cell.classList.add("filled");
-      icon = placedId;
-    } else if (craftGridLastLaidPattern && craftGridLastLaidPattern[i]) {
+      icon = craftGridCellId(placed);
+      if (stacks) {
+        count = formatAmount(craftGridCellAmount(placed));
+        // Перенос положил в стопку меньше, чем нужно рецепту, - «есть/нужно» красным.
+        if (want && craftGridCellId(want) === icon && craftGridCellAmount(placed) < want.amount) {
+          cell.classList.add("ghost-missing");
+          count = `${count}/${formatAmount(want.amount)}`;
+          short = mark = true;
+        }
+      }
+    } else if (want) {
       // Перенос был нечем заполнить именно эту ячейку - см. craftGridPartialLay
       // (правило "перенос кладёт только то, что есть", CLAUDE.md/план, этап 4).
       cell.classList.add("ghost-missing");
       mark = true;
+      if (stacks) {
+        icon = craftGridCellId(want);
+        count = `0/${formatAmount(want.amount)}`;
+        short = true;
+      }
     }
   }
   if (icon) {
@@ -10724,22 +10799,35 @@ function craftGridRenderCellContent(cell, i, hover) {
     cell.appendChild(wrap);
     cell.title = RESOURCE_NAME_LOOKUP(icon);
   }
+  if (count != null) cell.appendChild(el("span", { class: "cg-cell-count" + (short ? " short" : ""), text: count }));
   if (mark) cell.appendChild(el("span", { class: "cg-cell-mark", text: "!" }));
+  if (stacks) {
+    const tip = "ЛКМ +1 · Shift +10 · Ctrl — всё со склада · ПКМ −1 (Shift −10) · пустой рукой — очистить";
+    cell.title = cell.title ? `${cell.title}\n${tip}` : tip;
+  }
 }
 
 function craftGridCellEl(i, entry, hover) {
   const cell = el("button", { type: "button" });
-  craftGridRenderCellContent(cell, i, hover);
+  craftGridRenderCellContent(cell, i, hover, entry);
   cell.addEventListener("dragover", (e) => e.preventDefault());
   cell.addEventListener("drop", (e) => {
     e.preventDefault();
     const rid = e.dataTransfer.getData("text/plain");
     if (!rid) return;
+    // Сборщик: перетащенная плитка склада - стопка целиком (всё, что осталось).
+    if (entry.stacks) return craftGridStackAdd(i, rid, Infinity);
     craftGridPlaced[i] = rid;
     craftGridLastLaidPattern = null;
     openCraftGridModal(craftGridLocationId);
   });
-  cell.addEventListener("click", () => craftGridCellClick(i, entry));
+  cell.addEventListener("click", (e) => craftGridCellClick(i, entry, e));
+  if (entry.stacks) {
+    cell.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      craftGridStackTake(i, e.shiftKey ? 10 : 1);
+    });
+  }
   return cell;
 }
 
@@ -10753,7 +10841,7 @@ function craftGridApplyHoverToDom() {
   const entry = craftGridEntry(craftGridLocationId);
   if (!entry) return;
   const hover = craftGridHoverInfo(entry);
-  overlay.querySelectorAll(".cg-grid button").forEach((cell, i) => craftGridRenderCellContent(cell, i, hover));
+  overlay.querySelectorAll(".cg-grid button").forEach((cell, i) => craftGridRenderCellContent(cell, i, hover, entry));
   const statusEl = overlay.querySelector(".cg-status-line");
   if (statusEl) statusEl.textContent = hover ? craftGridHoverStatusText(hover) : craftGridStatus;
 }
@@ -10762,6 +10850,8 @@ function craftGridApplyHoverToDom() {
 // без словаря имён (VIEW.crafting не дублирует resource_names), берём из
 // VIEW.resource_names (см. tools/web_ui.py:build_view), общего для всей игры.
 function RESOURCE_NAME_LOOKUP(rid) {
+  const bid = buildingItemBuildingId(rid);
+  if (bid) return (VIEW.building_names && VIEW.building_names[bid]) || bid;
   return (VIEW.resource_names && VIEW.resource_names[rid]) || rid;
 }
 
@@ -10871,12 +10961,15 @@ const SOURCE_KIND_INFO = {
 };
 const SOURCES_FILTERS = [
   ["all", "все"], ["grid_craft", "крафт"], ["smeltery", "плавильня"], ["creature", "существа"],
-  ["soul", "души"], ["building", "постройки"], ["loot", "лут"], ["replicator", "репликатор"],
+  ["soul", "души"], ["building", "постройки"], ["mechanisms", "собрать постройку"], ["loot", "лут"],
+  ["replicator", "репликатор"],
 ];
-// Фильтр «плавильня» - все три вида её рецептов разом.
-function sourcesFilterMatch(kinds, filter) {
-  if (filter === "smeltery") return kinds.some(k => SMELTERY_SOURCE_KINDS.has(k));
-  return kinds.includes(filter);
+// Фильтр «плавильня» - все три вида её рецептов разом; «собрать постройку» - сами
+// постройки (item.building), а не ресурсы, которые постройки производят («постройки»).
+function sourcesFilterMatch(item, filter) {
+  if (filter === "mechanisms") return !!item.building;
+  if (filter === "smeltery") return item.kinds.some(k => SMELTERY_SOURCE_KINDS.has(k));
+  return item.kinds.includes(filter);
 }
 
 // host = {refresh, isOpen} - справочник источников встроен в ДВЕ разные модалки
@@ -11048,6 +11141,35 @@ function sourcesPatternVisual(src, host) {
   return visual;
 }
 
+// Рецепт сборщика (crafting.stacks): стопки цены в ячейках механизма - форма не
+// важна, порядок как в цене, количество в углу. Клик по стопке - к её источникам.
+function sourcesStacksVisual(src, host) {
+  const w = src.grid_width || 3, h = src.grid_height || 2;
+  const gap = 4;
+  const cell = Math.max(24, Math.min(48, Math.floor((142 - (w - 1) * gap) / w)));
+  const visual = el("div", { class: "cg-src-visual" });
+  const grid = el("div", { class: "cg-src-grid", style: `grid-template-columns: repeat(${w}, ${cell}px); gap: ${gap}px;` });
+  const stacks = src.stack_cost || [];
+  for (let i = 0; i < w * h; i++) {
+    const c = stacks[i];
+    if (!c) {
+      grid.appendChild(el("div", { class: "cg-src-cell", style: `width:${cell}px;height:${cell}px;` }));
+      continue;
+    }
+    const label = `${RESOURCE_NAME_LOOKUP(c.id)} ×${formatAmount(c.amount)}. Откуда берётся?`;
+    const btn = el("button", { type: "button", class: "cg-src-cell filled", title: label, style: `width:${cell}px;height:${cell}px;` });
+    btn.setAttribute("aria-label", label);
+    btn.appendChild(sourcesIconWrap(c.id, Math.round(cell * 0.6)));
+    btn.appendChild(el("span", { class: "cg-src-cell-count", text: formatAmount(c.amount) }));
+    btn.addEventListener("click", () => craftGridOpenSourceDetail(c.id, true, host));
+    grid.appendChild(btn);
+  }
+  visual.appendChild(grid);
+  visual.appendChild(sourcesArrowIcon());
+  visual.appendChild(sourcesOutputBox(sourcesDetailResourceId, src.amount));
+  return visual;
+}
+
 // Не-сеточный источник: особь/душа (если есть своя иконка) -> выход.
 function sourcesGenericVisual(src) {
   const visual = el("div", { class: "cg-src-visual" });
@@ -11093,11 +11215,12 @@ function sourcesIngredientChip(c, host) {
 // (артборд "Перенос и нехватка"). Наведение (и фокус с клавиатуры) рисует узор
 // призраком прямо в сетке: зелёная ячейка - положится, красная с "!" - нечем.
 function craftGridLayButton(recipe) {
-  const patternFlat = craftGridFlattenPattern(recipe.pattern);
-  const complete = !craftGridMissingIds(patternFlat, craftGridPartialLay(patternFlat)).length;
+  const entry = craftGridEntry(craftGridLocationId);
+  const layout = craftGridRecipeLayout(entry, recipe);
+  const complete = !craftGridLayoutMissingIds(entry, layout, craftGridPartialLayout(entry, layout)).length;
   const btn = el("button", {
     type: "button", class: "cg-src-act cg-lay-btn " + (complete ? "full" : "partial"),
-    text: complete ? "Разложить узор" : "Разложить частично",
+    text: complete ? (entry.stacks ? "Разложить стопки" : "Разложить узор") : "Разложить частично",
   });
   const show = () => {
     if (craftGridHoverSuppressed === recipe.action_id) return; // только что разложено, см. craftGridHoverSuppressed
@@ -11163,6 +11286,9 @@ function sourcesActionButton(src, currentEntry) {
 function sourcesConditions(src) {
   const conds = [];
   if (src.pattern_mirror) conds.push(["ok", "⇄ ЗЕРКАЛЬНО ТОЖЕ ПОДХОДИТ"]);
+  if (src.stacks) conds.push(["ok", "ФОРМА НЕ ВАЖНА · СТОПКИ"]);
+  if (src.building_recipe) conds.push(["ok", "ПОСТРОЙКА · СТАВИТСЯ СРАЗУ"]);
+  if (src.stage_total > 1) conds.push(["warn", `ЭТАПОВ: ${src.stage_total} · ЦЕНА ПЕРВОГО`]);
   if (src.chance != null) conds.push(["warn", `ШАНС ${Math.round(src.chance * 100)}%`]);
   if (src.threshold != null) conds.push(["energy", `⚡ ${formatAmount(src.threshold)} ЭНЕРГИИ`]);
   if (src.kind === "grid_craft") {
@@ -11255,16 +11381,19 @@ function craftGridSourceDetailView(currentEntry, host) {
 
   wrap.dataset.scrollKey = `card:${resourceId}:${idx}`;
   const panel = el("div", { class: "cg-src-panel" });
-  const isGrid = src.kind === "grid_craft" && src.pattern;
+  const isGrid = src.kind === "grid_craft" && (src.pattern || src.stacks);
   const isSmeltery = SMELTERY_SOURCE_KINDS.has(src.kind);
-  panel.appendChild(isGrid ? sourcesPatternVisual(src, host) : isSmeltery ? sourcesSmelteryVisual(src, host) : sourcesGenericVisual(src));
+  panel.appendChild(
+    isGrid ? (src.stacks ? sourcesStacksVisual(src, host) : sourcesPatternVisual(src, host))
+      : isSmeltery ? sourcesSmelteryVisual(src, host) : sourcesGenericVisual(src),
+  );
   panel.appendChild(el("div", { class: "cg-src-machine", text: isGrid ? (src.location_name || src.name) : src.name }));
   if (isGrid) panel.appendChild(el("div", { class: "cg-src-recipe", text: src.name }));
   if (isSmeltery) {
     // Какие плавильни контента его ведут (построенные и нет) - жар из content.json.
     const names = (src.building_ids || []).map(bid => {
       const built = (VIEW.smelteries || []).find(s => s.building_id === bid);
-      const b = VIEW.buildings.find(x => x.id === bid) || (VIEW.categories.build || []).find(x => x.id === bid);
+      const b = VIEW.buildings.find(x => x.id === bid);
       return built ? built.name : (b ? b.name : bid);
     });
     if (names.length) panel.appendChild(el("div", { class: "cg-src-recipe", text: names.join(" · ") }));
@@ -11300,7 +11429,8 @@ function craftGridSourceDetailView(currentEntry, host) {
 // "energy_recipe:<id>", ритуал - "ritual_recipe:<id>", репликатор - уже готовый
 // "replicator:<ресурс>" (engine.grid_recipe_key; N - единицы ресурса).
 function sourceOrderKey(src) {
-  if (!src.action_id) return null;
+  // Постройка ставится крафтом сразу, на склад её не выдать - заказа «×N» нет.
+  if (!src.action_id || src.building_recipe) return null;
   if (src.kind === "grid_craft" || src.kind === "replicator") return String(src.action_id);
   if (src.kind === "energy") return `energy_recipe:${src.action_id}`;
   if (src.kind === "ritual") return `ritual_recipe:${src.action_id}`;
@@ -11420,7 +11550,7 @@ function craftGridBuildSourcesPanel(entry, host) {
     const q = sourcesSummaryQuery.trim().toLowerCase();
     const items = sourcesSummaryCache
       .filter(item => activeFilter === "all"
-        || (activeFilter === "here" ? localOutputs.has(item.id) : sourcesFilterMatch(item.kinds, activeFilter)))
+        || (activeFilter === "here" ? localOutputs.has(item.id) : sourcesFilterMatch(item, activeFilter)))
       .filter(item => !q || item.name.toLowerCase().includes(q));
     if (!items.length) {
       const nothingHere = activeFilter === "here" && !q;
@@ -11591,7 +11721,7 @@ function craftGridTakeCompletedJob(locationId, isRebuild) {
 function craftGridCaptureCells() {
   const out = [];
   document.querySelectorAll("#craftGridOverlay .cg-grid button").forEach((cell, i) => {
-    const rid = craftGridPlaced[i];
+    const rid = craftGridCellId(craftGridPlaced[i]);
     if (!rid) return;
     const wrap = cell.querySelector(".cg-icon-wrap") || cell;
     out.push({ rid, rect: wrap.getBoundingClientRect() });
@@ -11744,7 +11874,11 @@ function craftGridPlayCraftFx(recipe, origin, payload) {
   }
   const outWrap = overlay.querySelector(".cg-output .cg-icon-wrap");
   if (outWrap && arrive) outWrap.classList.add("cg-await");
-  const items = craftGridGainedItems(recipe, payload);
+  // Постройка не попадает на склад (action_deltas её не знают) - сколько поставлено,
+  // говорит times_done.
+  const items = recipe.kind === "building"
+    ? (payload.times_done > 0 ? [{ ...recipe.gain[0], amount: payload.times_done }] : [])
+    : craftGridGainedItems(recipe, payload);
   setTimeout(() => craftGridOutputBurst(items), arrive);
 }
 
@@ -11765,6 +11899,17 @@ async function craftGridRunCraft(recipe, times) {
   // списаны: ни полёта в выход, ни тряски - только статус.
   if (payload.ok && (payload.times_done > 0 || !payload.waiting)) craftGridPlayCraftFx(recipe, origin, payload);
   else if (!payload.ok) craftGridShakeStage();
+}
+
+// Подпись под сценой для рецепта постройки: что поставится, этап многоэтапной и
+// сколько уже стоит (у штучной - из скольки можно).
+function craftGridBuildingResultName(r) {
+  let text = `Постройка: ${r.name}`;
+  if (r.stage_total > 1) text += ` · стадия ${r.stage_number} из ${r.stage_total}: ${r.stage_description}`;
+  else if (r.stage_total === 1 && r.stage_description) text += ` · ${r.stage_description}`;
+  if (r.max_count != null) text += ` · ${r.owned}/${r.max_count}`;
+  else if (r.owned) text += ` · уже есть ${r.owned}`;
+  return text;
 }
 
 function openCraftGridModal(locationId) {
@@ -11901,9 +12046,9 @@ function openCraftGridModal(locationId) {
   });
   if (completedJob) setTimeout(() => craftGridOutputBurst(completedJob.gain), job ? 0 : 320);
 
-  const resultName = matched
-    ? `${matched.name} → ${matched.gain.map(g => g.name).join(", ")}`
-    : "Узор не распознан";
+  const resultName = !matched ? (entry.stacks ? "Набор стопок не распознан" : "Узор не распознан")
+    : matched.kind === "building" ? craftGridBuildingResultName(matched)
+    : `${matched.name} → ${matched.gain.map(g => g.name).join(", ")}`;
   centerCol.appendChild(el("div", { class: "cg-result-name", text: resultName }));
 
   const controlsRow = el("div", { class: "cg-controls-row" });
@@ -11911,6 +12056,7 @@ function openCraftGridModal(locationId) {
   // режет times до 1 сам, см. craft_grid_view), поле "РАЗ" для него гасим.
   const multiTurn = !!(matched && craftGridIsLongRecipe(matched));
   const energyRecipe = !!(matched && matched.kind === "energy_recipe");
+  const buildingRecipe = !!(matched && matched.kind === "building");
   // Крафт пачкой ("РАЗ" + "макс" + "Скрафтить ×N") - только у механизма с
   // crafting.batch (верстак); у остальных одна кнопка "Скрафтить", сервер и
   // сам режет times до 1 (tools/web_ui.py: craft_grid_view).
@@ -11941,10 +12087,15 @@ function openCraftGridModal(locationId) {
   const craftBtn = el("button", {
     class: "primary",
     text: energyRecipe ? "Запустить"
+      : buildingRecipe ? (times > 1 ? `Построить ×${times}` : "Построить")
       : multiTurn ? `Скрафтить (${matched.duration_turns} х.)` : (times > 1 ? `Скрафтить ×${times}` : "Скрафтить"),
   });
   if (!matched) {
     craftBtn.disabled = true;
+  } else if (buildingRecipe && matched.limit_reached) {
+    // build() всё равно отказал бы - гасим заранее и говорим почему.
+    craftBtn.disabled = true;
+    craftBtn.title = `Больше ${matched.max_count} шт. этой постройки не поставить`;
   } else if (energyRecipe && !matched.available) {
     // Один преобразователь ведёт один крафт за раз (start_energy_recipe) -
     // сервер всё равно отказал бы.
@@ -12894,7 +13045,6 @@ function smelteryTankAmount(rid) {
 
 const ACTION_TABS = [
   ["locations", "Локации"],
-  ["build", "Построить"],
   ["tech", "Исследовать"],
 ];
 
@@ -13011,9 +13161,7 @@ function renderActions() {
   }
 }
 
-const EMPTY_NOTES = {
-  build: "Нечего строить.",
-};
+const EMPTY_NOTES = {};
 
 function manualActionsAt(locationId) {
   return VIEW.categories.manual.filter(m => m.location === locationId);
@@ -13195,29 +13343,6 @@ function closeConverterModal() {
 
 let locationSearchQuery = {}; // location_id -> текст поиска, чтобы не сбрасывался при переключении локаций
 
-// Тот же приём, что makeLocationSearchBar, но для вкладок категорий действий
-// (сейчас используется только для "build" - каталог построек растёт быстрее
-// остальных категорий, см. renderActionCategory). categorySearchQuery[kind] -
-// текст поиска, чтобы не сбрасывался при переключении вкладок/после действий.
-let categorySearchQuery = {};
-
-function makeCategorySearchBar(kind, listContainer) {
-  const bar = el("div", { class: "loc-search-bar" });
-  const input = el("input", { type: "text", placeholder: "Поиск по названию…" });
-  input.value = categorySearchQuery[kind] || "";
-  const apply = () => {
-    const q = input.value.trim().toLowerCase();
-    categorySearchQuery[kind] = input.value;
-    listContainer.querySelectorAll("[data-search]").forEach(node => {
-      node.style.display = (!q || node.dataset.search.includes(q)) ? "" : "none";
-    });
-  };
-  input.addEventListener("input", apply);
-  bar.appendChild(input);
-  apply();
-  return bar;
-}
-
 function makeLocationSearchBar(locationId, listContainer) {
   const bar = el("div", { class: "loc-search-bar" });
   const input = el("input", { type: "text", placeholder: "Поиск по названию…" });
@@ -13243,38 +13368,11 @@ function renderActionCategory(kind) {
     return container;
   }
 
-  // Фильтр по тегам построек (item.tags) - только у каталога "Построить", тот
-  // же приём, что buildingsTagFilter в панели "Производственные мощности" (см.
-  // renderBuildCatalogFilterBar). Остальные вкладки ("Исследовать" и т.п.) тегов
-  // не несут вовсе, фильтровать там нечего.
-  let items = list;
-  let filterBar = null;
-  if (kind === "build") {
-    const allTags = [...new Set(list.flatMap(item => item.tags || []))].sort((a, b) => a.localeCompare(b, "ru"));
-    [...buildCatalogTagFilter].forEach(t => { if (!allTags.includes(t)) buildCatalogTagFilter.delete(t); });
-    if (buildCatalogTagFilter.size) {
-      items = items.filter(item => (item.tags || []).some(t => buildCatalogTagFilter.has(t)));
-    }
-    filterBar = renderBuildCatalogFilterBar(allTags);
-  }
-
-  if (!items.length) {
-    container.appendChild(el("div", { class: "empty-note", text: "Ничего не подходит под фильтр." }));
-  } else {
-    items.forEach(item => {
-      const card = actionCard(kind, item);
-      card.dataset.search = actionLabel(kind, item).toLowerCase();
-      container.appendChild(card);
-    });
-  }
-
-  if (kind === "build") {
-    const wrap = el("div");
-    if (filterBar) wrap.appendChild(filterBar);
-    wrap.appendChild(makeCategorySearchBar(kind, container));
-    wrap.appendChild(container);
-    return wrap;
-  }
+  list.forEach(item => {
+    const card = actionCard(kind, item);
+    card.dataset.search = actionLabel(kind, item).toLowerCase();
+    container.appendChild(card);
+  });
   return container;
 }
 
@@ -13482,16 +13580,6 @@ function actionLabel(kind, item) {
     if (item.kind === "summon") return `Призвать: ${item.name}`;
   }
   if (kind === "converter") return `Запустить: ${item.name}`;
-  if (kind === "build" && item.stage_total > 1) {
-    return `${item.name}: ${item.stage_description} (Стадия ${item.stage_number} из ${item.stage_total})`;
-  }
-  // Ровно 1 этап в construction_stages - счётчик "1 из 1" ничего не говорит игроку,
-  // но описание этапа всё равно показываем (см. game/engine.py:current_construction_stage).
-  if (kind === "build" && item.stage_total === 1) {
-    return `${item.name}: ${item.stage_description}`;
-  }
-  if (kind === "build" && item.max_count != null) return `${item.name} (построено: ${item.owned}/${item.max_count})`;
-  if (kind === "build" && item.owned) return `${item.name} (уже построено: ${item.owned})`;
   return item.name;
 }
 
@@ -13516,9 +13604,7 @@ function actionCard(kind, item) {
   if (kind === "manual" && !hasScale && !manualJobRunning) btn.dataset.actionId = item.id;
 
   let iconDef = null;
-  if (kind === "build") {
-    iconDef = buildingIcon(item.id) || { grid: ICONS.machine.grid, palette: BUILDING_PALETTE.ok };
-  } else if (kind === "manual" && item.gain && item.gain[0]) {
+  if (kind === "manual" && item.gain && item.gain[0]) {
     iconDef = resourceIcon(item.gain[0].id);
   } else if (kind === "converter") {
     iconDef = (item.produces[0] && resourceIcon(item.produces[0].id)) || ICONS.energy;
@@ -13529,7 +13615,7 @@ function actionCard(kind, item) {
 
   const main = el("div", { class: "main" });
   main.appendChild(el("div", { class: "name", text: actionLabel(kind, item) }));
-  if ((kind === "build" || kind === "converter" || (kind === "hunting" && item.kind === "summon")) && item.description) {
+  if ((kind === "converter" || (kind === "hunting" && item.kind === "summon")) && item.description) {
     main.appendChild(el("div", { class: "desc", text: item.description }));
   }
 
@@ -13562,19 +13648,8 @@ function actionCard(kind, item) {
   };
   renderCosts(currentScale);
   main.appendChild(costs);
-  if (kind === "build") {
-    const upkeep = upkeepRow(item);
-    if (upkeep) main.appendChild(upkeep);
-    const special = specialAbilitiesRow(item);
-    if (special) main.appendChild(special);
-  }
   btn.appendChild(main);
 
-  // Кнопка "⚙ Улучшения" сюда больше не заходит - постройка, упёршаяся в
-  // max_count, теперь просто пропадает из этого каталога (см. tools/web_ui.py:
-  // build_view), а сама кнопка живёт в панели "Производственные мощности"
-  // (см. renderBuildings) - каталог "Построить" всегда показывает только то,
-  // что ещё можно построить.
   const noFreeConverter = kind === "converter" && !item.available;
   if (noFreeConverter) {
     btn.disabled = true;
@@ -13632,7 +13707,6 @@ function actionCard(kind, item) {
 
 function runAction(kind, item, scale) {
   if (kind === "manual") return doAction("manual", item.id, scale);
-  if (kind === "build") return doAction("build", item.id);
   if (kind === "converter") return doAction("start_energy_recipe", item.id);
   if (kind === "hunting") {
     // После успешного поиска/призыва (VIEW.hunting.active_encounter появился)
@@ -14758,7 +14832,7 @@ function pushLog(log) {
 // ---------- инвентарь ----------
 
 // Текст поиска по складу - переживает rebuild сетки (openStorage() дёргается
-// заново на каждый пин/апгрейд), как categorySearchQuery/locationSearchQuery.
+// заново на каждый пин/апгрейд), как locationSearchQuery.
 let storageSearchQuery = "";
 
 const STORAGE_SORT_OPTIONS = [
@@ -14790,8 +14864,7 @@ let priorityResourceSearchQuery = "";
 // (search-dim) - сетка не должна "прыгать" и терять привычное игроку
 // расположение, поиск тут подсказка "где смотреть", а не фильтр. Обычные
 // списки (hide=true - постройки, банк особей, книга пчёл) прячут непопавшие
-// строки целиком через display:none, тот же приём, что makeCategorySearchBar/
-// makeLocationSearchBar - порядок строк неважен, скрытие ничего не ломает.
+// строки целиком через display:none, тот же приём, что makeLocationSearchBar - порядок строк неважен, скрытие ничего не ломает.
 function applyResourceHighlight(grid, query, hide) {
   const q = query.trim().toLowerCase();
   grid.querySelectorAll("[data-resource-name]").forEach(tile => {
