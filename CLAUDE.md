@@ -947,7 +947,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 
 ## Известные ограничения
 
-- `state.history` растёт бесконечно, без ротации.
+- `state.history` хранит последние `HISTORY_MAX_ENTRIES` (100) ходов - статистика дальше не смотрит.
 - `effective_building_stats`/`effective_breakdown_chance` пересчитываются с
   нуля на каждый вызов — на РЕАЛЬНОМ content.json (36 построек, 19 техов) это
   ~0.4 мс/ход, замерено профилированием (2026-09-10). `advance_turn` теперь
