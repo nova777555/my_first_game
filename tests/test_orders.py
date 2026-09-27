@@ -956,6 +956,17 @@ class FinishedReportTests(OrdersTestCase):
         self.assertEqual(len(s.orders), 1)
 
 
+class AutomationRuleOrderTests(OrdersTestCase):
+    def test_rule_waits_for_its_order_without_repeating_itself(self):
+        # Правилу не хватило сырья - оформлен заказ; пока он идёт, правило молчит,
+        # а не пишет в журнал «уже заказано» каждый ход.
+        s = self.mech_state(resources={"raw_a": 10}, buildings={"hub": 1})
+        self.assertTrue(engine.add_automation_rule(s, "hub", "manual_action", "use_m_slow", []).ok)
+        fired = [len(engine.advance_turn(s).automation_fired) for _ in range(4)]
+        self.assertEqual(fired, [1, 0, 0, 0])
+        self.assertEqual(len(s.orders), 1)
+
+
 class SpawnOnlyActionOrderTests(OrdersTestCase):
     """Действие с ценой, но без gain (только spawn_species - платная ловля особи):
     валидатор его разрешает, а заказу «×N» нечего выдать на склад."""

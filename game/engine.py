@@ -5511,6 +5511,8 @@ def is_automation_eligible_energy_recipe(recipe_id: str) -> bool:
 # Ритуал - цель без ограничений, как крафт за энергию: правило просто зовёт
 # start_ritual (как клик игрока), шанс/диапазон produces бросается уже там.
 AUTOMATION_TARGET_KINDS = ("manual_action", "energy_recipe", "ritual_recipe")
+# Вид заказа (_ORDER_RETRY), который оформляет срабатывание правила, если сырья не хватает.
+_AUTOMATION_ORDER_KIND = {"manual_action": "manual", "energy_recipe": "start_energy_recipe", "ritual_recipe": "start_ritual"}
 
 
 def _is_automation_target_eligible(kind: str, target_id: str) -> bool:
@@ -5688,6 +5690,12 @@ def process_automation_rules(state: GameState, report: ProductionReport, daytime
             else:
                 continue
             if not all(_automation_condition_met(c, state) for c in rule["conditions"]):
+                continue
+            # Прошлое срабатывание уже оформило заказ (не хватало сырья или энергии) -
+            # ждём его: повторный вызов ничего не сделал бы, только писал бы в журнал
+            # «уже заказано» каждый ход.
+            order_kind = _AUTOMATION_ORDER_KIND[kind]
+            if any(o["kind"] == order_kind and o["target_id"] == target_id for o in state.orders):
                 continue
             if kind == "manual_action":
                 result = do_manual_action(state, target_id)
