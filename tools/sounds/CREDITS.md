@@ -14,3 +14,8 @@
 `soul_seal.wav`, `lootbox_chime.wav`) — CC0, взяты с opengameart.org
 (подробности и прямые ссылки на страницы — в `sound_candidates/README.md`
 в корне репозитория, пока она не удалена).
+
+`ritual_ignite.ogg`/`ritual_crystal.ogg`/`ritual_flash.ogg` (звуки ритуалов
+`ritual_recipes.*.sound`) — CC0, из пака `sound_candidates/extra_cc0_packs/
+80_cc0_rpg_sfx/` (исходные имена `spell_fire_01.ogg`/`spell_02.ogg`/
+`spell_01.ogg`).

@@ -28,6 +28,14 @@ from game.state import GameState  # noqa: E402
 PORT = 8799
 
 
+class SaveSandboxTests(unittest.TestCase):
+    def test_tests_never_write_into_the_real_saves_folder(self):
+        # Регрессия: web_ui.craft_grid_view -> run_turn -> save_state из тестов без
+        # своей подмены путей перезаписывал настоящий saves/autosave.json игрока.
+        self.assertNotEqual(web_ui.SAVES_DIR.resolve(), (ROOT / "saves").resolve())
+        self.assertEqual(web_ui.SAVES_DIR.parent.resolve(), Path(fixtures._SAVE_SANDBOX).resolve())
+
+
 class WebUiHttpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -199,6 +207,25 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertFalse(limited["can_upgrade"])
         self.assertEqual(limited["next_capacity_add"], 50)
         self.assertEqual(limited["next_tech_name"], fixtures.TECHS["tech1"]["name"])
+
+    def test_storage_view_exposes_next_infinite_tier_and_purchase_removes_cap(self):
+        # fixtures.RESOURCE_STORAGE["vault_res"]: тир 1 обычный (+20), тир 2 -
+        # infinite: True (game/engine.py:storage_capacity) - вместо next_capacity_add
+        # панель получает next_infinite: True, а после покупки capacity == None,
+        # как у ресурса вовсе без storage.
+        web_ui.STATE.storage_tier["vault_res"] = 1
+        web_ui.STATE.resources["raw_a"] = 100
+        status, state = self._get("/api/state")
+        vault = next(item for item in state["storage"] if item["id"] == "vault_res")
+        self.assertTrue(vault["next_infinite"])
+        self.assertIsNone(vault["next_capacity_add"])
+        status, resp = self._post("/api/action", {"type": "storage_upgrade", "id": "vault_res"})
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        self.assertIn("без ограничений", resp["log"]["message"])
+        vault = next(item for item in resp["state"]["storage"] if item["id"] == "vault_res")
+        self.assertIsNone(vault["capacity"])
+        self.assertFalse(vault["next_infinite"])
+        self.assertIsNone(vault["next_capacity_add"])
 
     def test_storage_upgrade_action_advances_turn_and_raises_capacity(self):
         web_ui.STATE.resources["raw_a"] = 100
@@ -543,11 +570,35 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(mid_node["fires"], 2)
         self.assertEqual(mid_node["action_name"], "Сделать полуфабрикат")
         self.assertEqual(mid_node["children"][0]["resource_id"], "raw_a")
+        # сырья raw_a нет - заказ не оформится, окно обязано сказать почему
+        self.assertIn("Сырьё A", resp["reason"])
+        # сырьё - не «докрафтится», а «не хватает»
+        self.assertEqual((summary_by_id["mid"]["missing"], summary_by_id["raw_a"]["missing"]), (0, 8))
+        self.assertEqual(mid_node["children"][0]["missing"], 8)
+
+    def test_autocraft_preview_skips_the_window_when_nothing_can_be_crafted(self):
+        # Регрессия: рецепт mid не автоматизирован (у bare_processor только мощность) -
+        # окно писало «докрафтится 2», хотя автокрафт его не сделает. Докрафтить нечего -
+        # окна нет, клик сразу говорит, чего не хватает.
+        web_ui.STATE.buildings["bare_processor"] = 1
+        web_ui.STATE.resources["raw_b"] = 1
+        status, resp = self._post("/api/autocraft_preview", {"type": "manual", "id": "craft_final"})
+        self.assertEqual(status, 200)
+        self.assertFalse(resp["needs_confirm"])
+        status, resp = self._post("/api/action", {"type": "manual", "id": "craft_final"})
+        self.assertEqual(resp["log"]["message"], "Не хватает ресурсов на «Собрать изделие». Не хватает: Полуфабрикат 2.")
+
+    def test_autocraft_preview_has_no_reason_when_the_order_will_go_through(self):
+        web_ui.STATE.buildings["automation_hub"] = 1
+        web_ui.STATE.resources.update({"raw_a": 100, "raw_b": 1})
+        status, resp = self._post("/api/autocraft_preview", {"type": "manual", "id": "craft_final"})
+        self.assertTrue(resp["needs_confirm"])
+        self.assertIsNone(resp["reason"])
 
     def test_autocraft_preview_reports_turns_when_docraft_spans_several_turns(self):
-        # trickle_hub: скорость автокрафта 1(база)+2=3/ход. assemble_gadget просит
+        # trickle_hub - сборщик мастерской на 2 крафта за ход. assemble_gadget просит
         # slow_mid:10 - craft_slow_mid делает по 1 за прокрутку, 10 прокруток не
-        # влезают в один ход, значит растянется на ceil(10/3)=4 хода - и summary,
+        # влезают в один ход, значит растянется на ceil(10/2)=5 ходов - и summary,
         # и узел дерева обязаны явно показать эту оценку.
         web_ui.STATE.resources["slow_raw"] = 1000
         web_ui.STATE.buildings["trickle_hub"] = 1
@@ -555,9 +606,9 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(resp["needs_confirm"])
         summary_row = next(row for row in resp["summary"] if row["resource_id"] == "slow_mid")
-        self.assertEqual(summary_row["turns"], 4)
+        self.assertEqual(summary_row["turns"], 5)
         tree_node = next(n for n in resp["tree"] if n["resource_id"] == "slow_mid")
-        self.assertEqual(tree_node["turns"], 4)
+        self.assertEqual(tree_node["turns"], 5)
 
     def test_scale_upgrade_tiers_require_sequential_purchase_and_collapse_when_bought(self):
         # upgradable_factory: uf_scale (x2) идёт ПЕРЕД uf_scale_more (x3) в её
@@ -722,19 +773,11 @@ class WebUiHttpTests(unittest.TestCase):
         status, resp = self._post("/api/action", {"type": "start_energy_recipe", "id": "make_catalyst"})
         self.assertTrue(resp["log"]["ok"])
 
-    def test_cancel_autocraft_job_does_not_advance_the_turn(self):
-        web_ui.STATE.buildings["trickle_hub"] = 1
-        web_ui.STATE.resources["slow_raw"] = 1000
-        web_ui.engine.ensure_and_pay(web_ui.STATE, {"slow_mid": 10})
-        self.assertIn("slow_mid", web_ui.STATE.autocraft_jobs)
-        turn_before = web_ui.STATE.turn
-
-        status, resp = self._post("/api/cancel_job", {"kind": "autocraft", "resource_id": "slow_mid"})
+    def test_order_preview_explains_why_a_recipe_cannot_be_ordered(self):
+        status, preview = self._post("/api/order_preview", {"action_id": "craft_slow_mid", "qty": 1})
         self.assertEqual(status, 200)
-        self.assertTrue(resp["ok"], resp["message"])
-        job_ids = [j["resource_id"] for j in resp["state"]["autocraft"]["jobs"]]
-        self.assertNotIn("slow_mid", job_ids)
-        self.assertEqual(web_ui.STATE.turn, turn_before)
+        self.assertFalse(preview["can_order"])
+        self.assertIn("Мастерская", preview["reason"])
 
     def test_cancel_job_with_unknown_kind_returns_400(self):
         status, resp = self._post("/api/cancel_job", {"kind": "nonsense"})
@@ -1180,18 +1223,106 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertFalse(resp["ok"])
 
-    def test_autocraft_toggle_flips_flag_without_advancing_turn(self):
-        status, resp = self._get("/api/state")
-        self.assertTrue(resp["autocraft_enabled"])  # по умолчанию включён
-
-        status, resp = self._post("/api/autocraft_toggle", {})
+    def test_order_api_previews_places_and_cancels_an_order(self):
+        # Заказ «рецепт ×N» - обычное действие (тратит ход, как клик), предпросмотр
+        # и отмена - нет. trickle_hub - сборщик мастерской, 2 крафта за ход.
+        web_ui.STATE.buildings["trickle_hub"] = 1
+        web_ui.STATE.resources["slow_raw"] = 10
+        status, preview = self._post("/api/order_preview", {"action_id": "craft_slow_mid", "qty": 3})
         self.assertEqual(status, 200)
-        self.assertTrue(resp["ok"])
-        self.assertFalse(resp["state"]["autocraft_enabled"])
-        self.assertEqual(resp["state"]["turn"], 1)  # это настройка, не игровое действие - ход не тратится
+        self.assertTrue(preview["can_order"], preview["reason"])
+        self.assertEqual(preview["eta_turns"], 2)
 
-        status, resp = self._post("/api/autocraft_toggle", {})
-        self.assertTrue(resp["state"]["autocraft_enabled"])
+        status, resp = self._post("/api/action", {"type": "order", "id": "craft_slow_mid:3"})
+        self.assertEqual(status, 200)
+        (order,) = resp["state"]["autocraft"]["orders"]
+        self.assertTrue(order["label"].endswith("» ×3"), order["label"])
+        self.assertEqual(web_ui.STATE.resources["slow_raw"], 7)  # изъято в резерв
+
+        turn_before = web_ui.STATE.turn
+        status, resp = self._post("/api/cancel_job", {"kind": "order", "order_id": order["id"]})
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertEqual(resp["state"]["autocraft"]["orders"], [])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+
+    def test_order_api_handles_converter_recipes(self):
+        # Рецепт преобразователя заказывается по ключу "energy_recipe:<id>", N - партии.
+        web_ui.STATE.buildings.update({"energy_converter": 1, "bare_processor": 1})
+        key = "energy_recipe:upgrade_matter"
+        status, preview = self._post("/api/order_preview", {"action_id": key, "qty": 2})
+        self.assertEqual(status, 200)
+        self.assertFalse(preview["can_order"])
+        self.assertIn("«Автоматизация»", preview["reason"])
+
+        web_ui.STATE.buildings["matter_generator"] = 1
+        web_ui.STATE.building_upgrades["matter_generator"] = ["matter_auto"]
+        web_ui.STATE.resources["raw_a"] = 10
+        status, preview = self._post("/api/order_preview", {"action_id": key, "qty": 2})
+        self.assertTrue(preview["can_order"], preview["reason"])
+        status, resp = self._post("/api/action", {"type": "order", "id": f"{key}:2"})
+        self.assertEqual(status, 200)
+        (order,) = resp["state"]["autocraft"]["orders"]
+        self.assertEqual(order["steps"][0]["name"], "Улучшить материю")
+        self.assertEqual(web_ui.STATE.resources["raw_a"], 0)  # 2 × 5 в резерве
+
+    def test_order_api_handles_rituals(self):
+        # Ритуал заказывается по ключу "ritual_recipe:<id>" - проводят его только
+        # сборщики алтаря (autocraft_assembler {building}), 1 ритуал за ход у обычного.
+        assembler = {
+            "name": "Сборщик ритуалов (тест)", "description": "Тест.", "requires_tech": None, "cost": {},
+            "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {},
+            "autocraft_assembler": {"building": "ritual_altar", "per_turn": 1},
+        }
+        with mock.patch.dict(engine.BUILDINGS, {"ritual_asm": assembler}):
+            web_ui.STATE.buildings.update({"ritual_altar": 1, "bare_processor": 1})
+            web_ui.STATE.resources.update({"raw_a": 4, "raw_b": 2})
+            key = "ritual_recipe:ritual_basic"
+            status, preview = self._post("/api/order_preview", {"action_id": key, "qty": 2})
+            self.assertEqual(status, 200)
+            self.assertFalse(preview["can_order"])
+            self.assertIn("«Сборщик ритуалов (тест)»", preview["reason"])
+
+            web_ui.STATE.buildings["ritual_asm"] = 1
+            status, preview = self._post("/api/order_preview", {"action_id": key, "qty": 2})
+            self.assertTrue(preview["can_order"], preview["reason"])
+            self.assertEqual(preview["eta_turns"], 2)
+            self.assertEqual(
+                web_ui.assembler_view("ritual_asm"),
+                {"location_name": "Ритуальный алтарь (тест)", "per_turn": 1, "ritual": True},
+            )
+
+            status, resp = self._post("/api/action", {"type": "order", "id": f"{key}:2"})
+            self.assertEqual(status, 200)
+            (order,) = resp["state"]["autocraft"]["orders"]
+            self.assertEqual(order["label"], "ритуал «Простой ритуал» ×2")
+            self.assertEqual(order["steps"][0]["done"], 1)  # заказ потратил ход - первый ритуал готов
+            self.assertEqual(web_ui.STATE.resources["raw_a"], 0)  # всё сырьё в резерве
+            self.assertEqual(web_ui.STATE.ritual_jobs, {})  # алтарь свободен
+
+    def test_preview_tree_names_the_ritual_step(self):
+        assembler = {
+            "name": "Сборщик ритуалов (тест)", "description": "Тест.", "requires_tech": None, "cost": {},
+            "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {},
+            "autocraft_assembler": {"building": "ritual_altar", "per_turn": None},
+        }
+        with mock.patch.dict(engine.RITUAL_RECIPES, {"ritual_only": {
+            "name": "Только ритуалом", "description": "Тест.", "requires_tech": None,
+            "requires_building": "ritual_altar", "ring_cost": {"raw_a": 1}, "center_cost": "raw_b",
+            "extra_cost": {}, "duration_turns": 3, "extra_consumes_per_turn": {}, "extra_consumes_chance": {},
+            "produces": {"mineral": 2}, "produces_chance": {},
+        }}), mock.patch.dict(engine.BUILDINGS, {"ritual_asm": assembler}):
+            web_ui.STATE.buildings.update({"ritual_altar": 1, "bare_processor": 1, "ritual_asm": 1})
+            preview = engine.autocraft_preview(web_ui.STATE, {"mineral": 3})
+            (node,) = preview["nodes"]
+            self.assertEqual((node["ritual_recipe_id"], node["fires"]), ("ritual_only", 2))
+            self.assertEqual(web_ui._preview_node_view(node)["action_name"], "Только ритуалом (ритуал)")
+
+    def test_preview_tree_names_the_converter_step(self):
+        web_ui.STATE.buildings.update({"energy_converter": 1, "bare_processor": 1})
+        web_ui.STATE.building_upgrades["energy_converter"] = ["conv_auto"]
+        view = web_ui.order_preview_view(web_ui.STATE, "assemble_capacitor", 1)
+        (node,) = [n for n in view["tree"] if n["resource_id"] == "raw_b"]
+        self.assertEqual(node["action_name"], "Сделать сырьё B из энергии (преобразователь)")
 
     def test_enchanting_view_exposes_strip_on_fail_as_a_content_setting(self):
         # strip_on_fail - настройка КОНТЕНТА (buildings.*.enchanting_table, правит
@@ -1223,6 +1354,18 @@ class WebUiHttpTests(unittest.TestCase):
         entry = next(a for a in resp["state"]["action_priorities"] if a["id"] == "craft_mid")
         self.assertEqual(entry["priority"], 0)
         self.assertFalse(entry["overridden"])
+
+    def test_converter_recipes_are_listed_and_take_a_priority(self):
+        # make_raw_b - единственный путь к raw_b (обычного рецепта в фикстуре нет),
+        # поэтому он основной, а не запасной.
+        status, resp = self._get("/api/state")
+        entry = next(a for a in resp["action_priorities"] if a["id"] == "energy_recipe:make_raw_b")
+        self.assertEqual((entry["kind"], entry["priority"]), ("energy_recipe", 0))
+        self.assertEqual((entry["is_active_recipe"], entry["is_fallback"]), (True, False))
+        status, resp = self._post("/api/set_action_priority", {"action_id": "energy_recipe:make_raw_b", "priority": 5})
+        self.assertTrue(resp["ok"])
+        entry = next(a for a in resp["state"]["action_priorities"] if a["id"] == "energy_recipe:make_raw_b")
+        self.assertEqual((entry["priority"], entry["overridden"]), (5, True))
 
     def test_set_action_priority_rejects_unknown_action(self):
         status, resp = self._post("/api/set_action_priority", {"action_id": "does_not_exist", "priority": 1})
@@ -1512,6 +1655,114 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertTrue(resp["ok"])  # хотя бы одна итерация прошла
         self.assertEqual(resp["times_done"], 2)
         self.assertEqual(resp["state"]["turn"], 3)
+
+    def test_crafting_entry_reports_batch_flag(self):
+        status, resp = self._get("/api/state")
+        entry = next(c for c in resp["crafting"] if c["location_id"] == "grid_loc")
+        self.assertTrue(entry["batch"])
+
+    def test_craft_grid_times_clamped_to_one_without_batch(self):
+        # Механизм без crafting.batch (например, печь) крафтит строго по одному -
+        # сервер режет times сам, не доверяя "×N" с клиента.
+        crafting = web_ui.LOCATIONS["grid_loc"]["crafting"]
+        crafting["batch"] = False
+        self.addCleanup(crafting.__setitem__, "batch", True)
+        web_ui.STATE.resources["raw_a"] = 100
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 5,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"])
+        self.assertEqual(resp["times_requested"], 1)
+        self.assertEqual(resp["times_done"], 1)
+        self.assertEqual(resp["state"]["turn"], 2)
+        entry = next(c for c in resp["state"]["crafting"] if c["location_id"] == "grid_loc")
+        self.assertFalse(entry["batch"])
+
+    def _make_grid_line_multi_turn(self, turns):
+        # Долгий сеточный рецепт (duration_turns) - прогресс-бар в модалке механизма.
+        action = web_ui.MANUAL_ACTIONS["grid_line"]
+        action["duration_turns"] = turns
+        self.addCleanup(action.pop, "duration_turns", None)
+
+    def test_crafting_recipe_reports_duration_and_click_delay(self):
+        status, resp = self._get("/api/state")
+        entry = next(c for c in resp["crafting"] if c["location_id"] == "grid_loc")
+        grid_line = next(r for r in entry["recipes"] if r["action_id"] == "grid_line")
+        self.assertEqual(grid_line["duration_turns"], 1)
+        self.assertIsNone(grid_line["click_delay_ms"])
+        self.assertIsNone(entry["job"])
+
+    def test_crafting_entry_reports_running_multi_turn_job(self):
+        self._make_grid_line_multi_turn(3)
+        web_ui.STATE.resources["raw_a"] = 100
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 1,
+        })
+        self.assertTrue(resp["ok"])
+        entry = next(c for c in resp["state"]["crafting"] if c["location_id"] == "grid_loc")
+        grid_line = next(r for r in entry["recipes"] if r["action_id"] == "grid_line")
+        self.assertEqual(grid_line["duration_turns"], 3)
+        job = entry["job"]
+        self.assertIsNotNone(job)
+        self.assertEqual(job["action_id"], "grid_line")
+        self.assertEqual(job["turns_total"], 3)
+        self.assertEqual([g["id"] for g in job["gain"]], ["grid_output"])
+
+    def test_craft_grid_multi_turn_recipe_runs_once_even_with_times(self):
+        # Долгий рецепт занимает механизм целиком - вторая итерация пачки
+        # гарантированно упёрлась бы в "уже выполняется", сервер режет до 1.
+        self._make_grid_line_multi_turn(3)
+        web_ui.STATE.resources["raw_a"] = 100
+        status, resp = self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 5,
+        })
+        self.assertTrue(resp["ok"])
+        self.assertEqual(resp["times_requested"], 1)
+        self.assertEqual(resp["times_done"], 1)
+        self.assertEqual(resp["state"]["resources"]["raw_a"], 98)
+
+    def test_log_reports_completed_manual_job_ids(self):
+        self._make_grid_line_multi_turn(2)
+        web_ui.STATE.resources["raw_a"] = 100
+        self._post("/api/craft_grid", {
+            "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 1,
+        })
+        completed = []
+        for _ in range(3):
+            status, resp = self._post("/api/action", {"type": "skip", "id": None})
+            completed.extend(resp["log"]["manual_completed_ids"])
+            if completed:
+                break
+        self.assertEqual(completed, ["grid_line"])
+        entry = next(c for c in resp["state"]["crafting"] if c["location_id"] == "grid_loc")
+        self.assertIsNone(entry["job"])
+
+    def test_state_reports_pinned_recipes_including_locked(self):
+        # grid_locked ещё закрыт технологией (его нет в crafting[].recipes), но
+        # закреплённым он должен числиться - звезда в карточке справочника.
+        web_ui.STATE.pinned_recipes.append("grid_locked")
+        status, resp = self._get("/api/state")
+        self.assertEqual(resp["pinned_recipes"], ["grid_locked"])
+        # И плитка слева у него есть - иначе закреплённое «пропадало» бы до открытия.
+        self.assertEqual([t["action_id"] for t in resp["pinned_tiles"]], ["grid_locked"])
+        self.assertTrue(resp["pinned_tiles"][0]["locked"])
+
+    def test_pin_any_source_from_the_reference(self):
+        # Звезда есть у любого способа справочника, не только у сеточного крафта.
+        key = next(s["pin_key"] for s in web_ui.resource_sources("mid") if s["kind"] == "ritual")
+        status, resp = self._post("/api/pin_recipe", {"action_id": key})
+        self.assertTrue(resp["ok"])
+        self.assertIn(key, resp["state"]["pinned_recipes"])
+        tile = next(t for t in resp["state"]["pinned_tiles"] if t["action_id"] == key)
+        self.assertEqual((tile["source_kind"], tile["gain"][0]["id"]), ("ritual", "mid"))
+        status, resp = self._post("/api/pin_recipe", {"action_id": key})
+        self.assertNotIn(key, resp["state"]["pinned_recipes"])
+
+    def test_pin_refuses_made_up_source(self):
+        status, resp = self._post("/api/pin_recipe", {"action_id": "source:mid:ritual:nope"})
+        self.assertFalse(resp["ok"])
+        self.assertEqual(resp["state"]["pinned_recipes"], [])
 
     def test_pin_recipe_toggle(self):
         status, resp = self._post("/api/pin_recipe", {"action_id": "grid_line"})

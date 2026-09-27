@@ -85,8 +85,26 @@ game/content.json. Тесты, использующие patched_content(), не 
 """
 from __future__ import annotations
 
+import atexit
 import contextlib
 import copy
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+# Сохранения тестов - во временной папке, а не в настоящем saves/ игрока (см.
+# GAME_SAVE_ROOT в tools/web_ui.py): тест, дошедший до web_ui.save_state (например,
+# craft_grid_view -> run_turn), иначе перезаписывал saves/autosave.json. Все тесты
+# импортируют этот модуль раньше web_ui; если web_ui всё же уже импортирован -
+# переставляем его пути напрямую.
+_SAVE_SANDBOX = tempfile.mkdtemp(prefix="game_test_saves_")
+os.environ["GAME_SAVE_ROOT"] = _SAVE_SANDBOX
+atexit.register(shutil.rmtree, _SAVE_SANDBOX, True)
+if "web_ui" in sys.modules:
+    sys.modules["web_ui"].SAVES_DIR = Path(_SAVE_SANDBOX) / "saves"
+    sys.modules["web_ui"].SAVE_PATH = Path(_SAVE_SANDBOX) / "saves" / "autosave.json"
 
 RESOURCES = [
     {"id": "energy", "name": "Тестовая энергия", "fractional": True},
@@ -134,6 +152,20 @@ RESOURCES = [
             "tiers": [
                 {"capacity_add": 20, "cost": {"raw_a": 5}, "requires_tech": None},
                 {"capacity_add": 50, "cost": {"raw_a": 15}, "requires_tech": "tech1"},
+            ],
+        },
+    },
+    # Отдельный ресурс - тир с "infinite": True вместо capacity_add (game/engine.py:
+    # storage_capacity) - для теста "куплен infinite-тир -> вместимость None (как
+    # без storage вовсе)". Отдельно от limited_res, чтобы не менять его max_tier/
+    # прогрессию и не задеть существующие тесты, завязанные на неё.
+    {
+        "id": "vault_res", "name": "Хранимый ресурс",
+        "storage": {
+            "base_capacity": 10,
+            "tiers": [
+                {"capacity_add": 20, "cost": {"raw_a": 5}, "requires_tech": None},
+                {"infinite": True, "cost": {"raw_a": 15}, "requires_tech": None},
             ],
         },
     },
@@ -188,12 +220,25 @@ RESOURCES = [
     {"id": "grid_locked_output", "name": "Выход заблокированного сеточного рецепта"},
     {"id": "grid_mirror_output", "name": "Выход зеркального сеточного рецепта"},
     {"id": "grid_plain_output", "name": "Выход обычного действия на верстаке"},
+    # Плавильня (tests/test_smeltery.py): руда/топливо -> жидкие металлы (molten) + шлак
+    # в тигле, сплав металлов, литьё в форму (форма не расходуется).
+    {"id": "smelt_ore", "name": "Плавильная руда"},
+    {"id": "smelt_ore_b", "name": "Вторая руда"},
+    {"id": "smelt_fuel", "name": "Плавильное топливо"},
+    {"id": "smelt_slag", "name": "Тестовый шлак"},
+    {"id": "molten_a", "name": "Жидкий металл A", "molten": {"color": "#e07a3f", "density": 9}},
+    {"id": "molten_b", "name": "Жидкий металл B", "molten": {"color": "#b9c4c9", "density": 7}},
+    {"id": "molten_ab", "name": "Жидкий сплав AB", "molten": {"color": "#c8903a", "density": 8}},
+    {"id": "molten_hidden", "name": "Тайный сплав", "molten": {"color": "#ec8f5e"}},
+    {"id": "cast_form", "name": "Тестовая форма"},
+    {"id": "cast_product", "name": "Тестовая отливка"},
 ]
 RESOURCE_NAMES = {r["id"]: r["name"] for r in RESOURCES}
 RESOURCE_ORDER = [r["id"] for r in RESOURCES]
 RESOURCE_ICONS: dict = {}
 RESOURCE_FRACTIONAL = {r["id"]: bool(r.get("fractional", False)) for r in RESOURCES}
 RESOURCE_STORAGE = {r["id"]: r["storage"] for r in RESOURCES if r.get("storage")}
+RESOURCE_REPLICATION_COST = {r["id"]: r["replication_cost"] for r in RESOURCES if r.get("replication_cost")}
 RESOURCE_SOUL_KIND = {r["id"]: r["soul_kind"] for r in RESOURCES if r.get("soul_kind")}
 RESOURCE_REACTOR_COMPONENT = {r["id"]: r["reactor_component"] for r in RESOURCES if r.get("reactor_component")}
 RESOURCE_REACTOR_CATALYST = {r["id"]: r["reactor_catalyst"] for r in RESOURCES if r.get("reactor_catalyst")}
@@ -203,6 +248,7 @@ RESOURCE_REACTOR_CATALYST = {r["id"]: r["reactor_catalyst"] for r in RESOURCES i
 # Тесты самой механики жидкостей подменяют эту константу точечно.
 RESOURCE_REACTOR_COOLANT_FLUID = {r["id"]: r["reactor_coolant_fluid"]
                                   for r in RESOURCES if r.get("reactor_coolant_fluid")}
+RESOURCE_MOLTEN = {r["id"]: r["molten"] for r in RESOURCES if r.get("molten")}
 
 LOCATIONS = {
     "yard": {"name": "Двор", "requires_tech": None},
@@ -228,7 +274,9 @@ LOCATIONS = {
     # Локация-верстак (см. MANUAL_ACTIONS["grid_*"] ниже) - для тестов
     # engine.match_grid/location_crafting/grid_actions_at. Сетка 2x2 - минимальный
     # размер, на котором ещё можно проверить и обрезку краёв, и зеркало.
-    "grid_loc": {"name": "Тестовый верстак", "requires_tech": None, "crafting": {"width": 2, "height": 2}},
+    # batch - крафт пачкой ("Скрафтить ×N", см. web_ui.craft_grid_view), нужен
+    # тестам times>1; обрезку до 1 без флага проверяет test_web_ui_http.
+    "grid_loc": {"name": "Тестовый верстак", "requires_tech": None, "crafting": {"width": 2, "height": 2, "batch": True}},
 }
 
 MANUAL_ACTIONS = {
@@ -766,6 +814,29 @@ BUILDINGS = {
                 "id": "ritual_altar_ring_9", "name": "Расширение круга (9)", "description": "Кольцо алтаря до 9 пьедесталов.",
                 "type": "ritual_pedestals", "value": 6, "requires_tech": None, "cost": {"raw_a": 4},
             },
+        ],
+    },
+    # Плавильни (buildings.*.smeltery, tests/test_smeltery.py): холодная яма (1 слот,
+    # тигель 4, жар 1) и горн (2 слота/копия, тигель 6/копия, жар 2) с апгрейдами всех
+    # трёх типов. НЕ построены по умолчанию.
+    "smelt_pit": {
+        "name": "Плавильная яма (тест)", "description": "Тестовая плавильня с низким жаром.",
+        "requires_tech": None, "cost": {"raw_a": 1},
+        "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {"raw_a": 1},
+        "smeltery": {"slots": 1, "capacity": 4, "heat": 1},
+    },
+    "smelt_forge": {
+        "name": "Горн (тест)", "description": "Тестовая плавильня с высоким жаром.",
+        "requires_tech": None, "cost": {"raw_a": 1},
+        "produces": {}, "consumes": {}, "breakdown_chance": 0.0, "repair_cost": {"raw_a": 1},
+        "smeltery": {"slots": 2, "capacity": 6, "heat": 2},
+        "upgrades": [
+            {"id": "forge_capacity", "name": "Большой тигель", "description": "+4 к тиглю.",
+             "type": "smeltery_capacity", "value": 4, "requires_tech": None, "cost": {"raw_a": 1}},
+            {"id": "forge_slots", "name": "Ещё слот", "description": "+1 слот плавки.",
+             "type": "smeltery_slots", "value": 1, "requires_tech": None, "cost": {"raw_a": 1}},
+            {"id": "forge_heat", "name": "Большие мехи", "description": "+1 к жару.",
+             "type": "smeltery_heat", "value": 1, "requires_tech": None, "cost": {"raw_a": 1}},
         ],
     },
     # Реактор (buildings.*.reactor) - решётка 2x2, принимает все 4 роли;
@@ -1391,6 +1462,32 @@ RITUAL_RECIPES = {
     },
 }
 
+# Плавильня (tests/test_smeltery.py): одна и та же руда в «холодном» (жар 1, хуже выход)
+# и «горячем» (жар 2) рецепте, металл B только в горне, рецепт за tech1; сплав AB и
+# скрытый сплав (hidden - пропорция видна после первой пробы); литьё с остыванием и мгновенное.
+MELT_RECIPES = {
+    "melt_a_cold": {"name": "Руда в яме", "requires_tech": None, "heat": 1,
+                    "input": {"smelt_ore": 2, "smelt_fuel": 1}, "output": {"molten_a": 1, "smelt_slag": 1}, "turns": 2},
+    "melt_a_hot": {"name": "Руда в горне", "requires_tech": None, "heat": 2,
+                   "input": {"smelt_ore": 2, "smelt_fuel": 1}, "output": {"molten_a": 2, "smelt_slag": 1}, "turns": 1},
+    "melt_b": {"name": "Вторая руда", "requires_tech": None, "heat": 2,
+               "input": {"smelt_ore_b": 1}, "output": {"molten_b": 1}, "turns": 1},
+    "melt_locked": {"name": "Запертая плавка", "requires_tech": "tech1", "heat": 1,
+                    "input": {"smelt_ore": 1}, "output": {"molten_a": 1}, "turns": 1},
+}
+ALLOY_RECIPES = {
+    "alloy_ab": {"name": "Сплав AB", "requires_tech": None, "heat": 2,
+                 "input": {"molten_a": 2, "molten_b": 1}, "output": {"molten_ab": 3}},
+    "alloy_hidden": {"name": "Тайный сплав", "requires_tech": None, "heat": 2, "hidden": True,
+                     "input": {"molten_a": 1, "molten_b": 1}, "output": {"molten_hidden": 2}},
+}
+CAST_RECIPES = {
+    "cast_a": {"name": "Отливка из A", "requires_tech": None, "form": "cast_form", "metal": "molten_a",
+               "amount": 2, "output": {"cast_product": 1}, "turns": 2},
+    "cast_ab_instant": {"name": "Отливка из AB", "requires_tech": None, "form": "cast_form", "metal": "molten_ab",
+                        "amount": 1, "output": {"cast_product": 2}, "turns": 1},
+}
+
 # Кейс с лутом (см. QUESTS ниже) - "prizes" - барабан лутбокса (веса, а не шансы) -
 # выпадает РОВНО один приз, см. game/engine.py:_roll_loot_case_prize.
 LOOT_CASES = {
@@ -1486,6 +1583,9 @@ def as_content_dict() -> dict:
         "skills": copy.deepcopy(SKILLS),
         "soul_recipes": copy.deepcopy(SOUL_RECIPES),
         "ritual_recipes": copy.deepcopy(RITUAL_RECIPES),
+        "melt_recipes": copy.deepcopy(MELT_RECIPES),
+        "alloy_recipes": copy.deepcopy(ALLOY_RECIPES),
+        "cast_recipes": copy.deepcopy(CAST_RECIPES),
         "loot_cases": copy.deepcopy(LOOT_CASES),
         "quests": copy.deepcopy(QUESTS),
         "combat_moves": copy.deepcopy(COMBAT_MOVES),
@@ -1518,13 +1618,15 @@ def build_mutations_by_pair(mutations: list) -> dict:
 _ENGINE_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "GENETICS_SETTINGS", "COMBAT_SETTINGS",
                  "LOCATIONS", "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "MUTATIONS", "SPECIES", "TOOLS",
                  "RESOURCE_NAMES", "TECHS", "TIME", "ENERGY_RECIPE_FOR_RESOURCE", "MUTATIONS_BY_PAIR",
-                 "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "RESOURCE_SOUL_KIND", "RESOURCE_REACTOR_COMPONENT",
-                 "RESOURCE_REACTOR_CATALYST", "RESOURCE_REACTOR_COOLANT_FLUID",
+                 "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "RESOURCE_REPLICATION_COST", "RESOURCE_SOUL_KIND", "RESOURCE_REACTOR_COMPONENT",
+                 "RESOURCE_REACTOR_CATALYST", "RESOURCE_REACTOR_COOLANT_FLUID", "RESOURCE_MOLTEN",
                  "REACTOR_ACCIDENTS", "MOBS", "SKILLS", "SOUL_RECIPES",
-                 "RITUAL_RECIPES", "LOOT_CASES", "QUESTS", "COMBAT_MOVES", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
+                 "RITUAL_RECIPES", "MELT_RECIPES", "ALLOY_RECIPES", "CAST_RECIPES",
+                 "LOOT_CASES", "QUESTS", "COMBAT_MOVES", "BREAKDOWN_TYPES", "ENCHANTMENTS"]
 _WEB_UI_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "LOCATIONS",
                  "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "TOOLS", "RESOURCE_ICONS", "RESOURCE_NAMES",
                  "RESOURCE_ORDER", "TECHS", "RESOURCE_STORAGE", "MOBS", "SKILLS", "SOUL_RECIPES", "RITUAL_RECIPES",
+                 "MELT_RECIPES", "ALLOY_RECIPES", "CAST_RECIPES", "RESOURCE_MOLTEN",
                  "LOOT_CASES", "QUESTS", "BREAKDOWN_TYPES", "ENCHANTMENTS", "SPECIES", "MUTATIONS"]
 
 
@@ -1551,6 +1653,7 @@ def _fixture_values() -> dict:
         "MUTATIONS_BY_PAIR": build_mutations_by_pair(MUTATIONS),
         "RESOURCE_FRACTIONAL": RESOURCE_FRACTIONAL,
         "RESOURCE_STORAGE": RESOURCE_STORAGE,
+        "RESOURCE_REPLICATION_COST": RESOURCE_REPLICATION_COST,
         "RESOURCE_SOUL_KIND": RESOURCE_SOUL_KIND,
         "RESOURCE_REACTOR_COMPONENT": RESOURCE_REACTOR_COMPONENT,
         "RESOURCE_REACTOR_CATALYST": RESOURCE_REACTOR_CATALYST,
@@ -1560,6 +1663,10 @@ def _fixture_values() -> dict:
         "SKILLS": SKILLS,
         "SOUL_RECIPES": SOUL_RECIPES,
         "RITUAL_RECIPES": RITUAL_RECIPES,
+        "MELT_RECIPES": MELT_RECIPES,
+        "ALLOY_RECIPES": ALLOY_RECIPES,
+        "CAST_RECIPES": CAST_RECIPES,
+        "RESOURCE_MOLTEN": RESOURCE_MOLTEN,
         "LOOT_CASES": LOOT_CASES,
         "QUESTS": QUESTS,
         "COMBAT_MOVES": COMBAT_MOVES,

@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fixtures  # noqa: E402
 import web_ui  # noqa: E402
+from game import engine  # noqa: E402
+from game.state import GameState  # noqa: E402
 
 
 class FixtureTestCase(unittest.TestCase):
@@ -40,6 +42,14 @@ class GridCraftSourceTests(FixtureTestCase):
         self.assertEqual(entry["cost"], [{"id": "raw_a", "name": "Сырьё A", "amount": 2}])
         self.assertEqual(entry["amount"], 1)
         self.assertFalse(entry["pattern_mirror"])
+
+    def test_grid_recipe_reports_pattern_and_mechanism_name(self):
+        # Карточка рецепта рисует сам узор сеткой механизма - игрок должен видеть
+        # целевую раскладку, а не только список ингредиентов.
+        sources = web_ui.resource_sources("grid_output")
+        entry = _find(sources, kind="grid_craft", action_id="grid_line")
+        self.assertEqual(entry["pattern"], {"rows": ["AA", ".."], "key": {"A": "raw_a"}})
+        self.assertEqual(entry["location_name"], "Тестовый верстак")
 
     def test_grid_recipe_reports_pattern_mirror_flag(self):
         sources = web_ui.resource_sources("grid_mirror_output")
@@ -105,6 +115,10 @@ class RitualSourceTests(FixtureTestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(entry["building_id"], "ritual_altar")
 
+    def test_ritual_cost_is_ring_center_and_extra_together(self):
+        entry = _find(web_ui.resource_sources("mid"), kind="ritual", action_id="ritual_basic")
+        self.assertEqual({c["id"]: c["amount"] for c in entry["cost"]}, {"raw_a": 2, "raw_b": 1})
+
 
 class MiningSourceTests(FixtureTestCase):
     def test_mineable_resource_reports_base_yield(self):
@@ -154,6 +168,67 @@ class BreedingSourceTests(FixtureTestCase):
         self.assertIn("Существо А", entry["name"])
         self.assertEqual(entry["building_id"], "crossing_station")
         self.assertEqual(entry["chance"], 0.5)
+
+
+class SourcePinKeyTests(FixtureTestCase):
+    """Звезда закрепления есть у ЛЮБОГО способа (прямое пожелание, 2026-09-27)."""
+
+    RESOURCES = ["raw_a", "raw_b", "energy", "mid", "catalyst", "mineral", "test_soul",
+                 "critter_a", "critter_b", "species_output", "grid_output"]
+
+    def test_every_source_has_a_distinct_pin_key(self):
+        for rid in self.RESOURCES:
+            keys = [s["pin_key"] for s in web_ui.resource_sources(rid)]
+            self.assertTrue(keys, rid)
+            self.assertEqual(len(keys), len(set(keys)), rid)
+
+    def test_grid_recipe_keeps_its_recipe_key(self):
+        entry = _find(web_ui.resource_sources("grid_output"), kind="grid_craft", action_id="grid_line")
+        self.assertEqual(entry["pin_key"], "grid_line")
+
+    def test_other_sources_are_keyed_by_resource_kind_and_id(self):
+        entry = _find(web_ui.resource_sources("raw_a"), kind="loot", mob_id="test_mob")
+        self.assertEqual(engine.parse_source_pin_key(entry["pin_key"]), ("raw_a", "loot", "test_mob"))
+        soul = _find(web_ui.resource_sources("test_soul"), kind="loot", mob_id="test_mob")
+        self.assertNotEqual(soul["pin_key"], entry["pin_key"])
+        self.assertNotIn("pin_ident", soul)
+
+    def test_engine_pins_and_unpins_a_source_key(self):
+        s = GameState()
+        key = engine.source_pin_key("raw_a", "loot", "test_mob")
+        self.assertTrue(engine.toggle_pinned_recipe(s, key).ok)
+        self.assertEqual(s.pinned_recipes, [key])
+        self.assertTrue(engine.toggle_pinned_recipe(s, key).ok)
+        self.assertEqual(s.pinned_recipes, [])
+
+    def test_engine_refuses_unknown_resource_and_non_string(self):
+        s = GameState()
+        self.assertFalse(engine.toggle_pinned_recipe(s, "source:nope:loot:test_mob").ok)
+        self.assertFalse(engine.toggle_pinned_recipe(s, None).ok)
+        self.assertEqual(s.pinned_recipes, [])
+
+
+class PinnedTilesTests(FixtureTestCase):
+    def test_tiles_follow_pin_order_and_cover_every_kind(self):
+        ritual = _find(web_ui.resource_sources("mid"), kind="ritual")["pin_key"]
+        mining = _find(web_ui.resource_sources("mineral"), kind="mining")["pin_key"]
+        s = GameState(pinned_recipes=[mining, "grid_locked", ritual])
+        tiles = web_ui.pinned_recipes_view(s, web_ui.crafting_view(s), [])
+        self.assertEqual([t["action_id"] for t in tiles], [mining, "grid_locked", ritual])
+        self.assertEqual(tiles[0]["gain"][0]["id"], "mineral")
+        self.assertIsNone(tiles[0]["enough"])  # у шахты нет разовой цены - точки нет
+        self.assertTrue(tiles[1]["locked"])
+        self.assertFalse(tiles[2]["enough"])  # сырья на ритуал нет
+
+    def test_source_tile_reports_enough_when_cost_is_on_hand(self):
+        ritual = _find(web_ui.resource_sources("mid"), kind="ritual")["pin_key"]
+        s = GameState(pinned_recipes=[ritual], resources={"raw_a": 2, "raw_b": 1})
+        tile = web_ui.pinned_recipes_view(s, [], [])[0]
+        self.assertTrue(tile["enough"])
+
+    def test_forgotten_source_is_skipped(self):
+        s = GameState(pinned_recipes=["source:raw_a:loot:gone_mob"])
+        self.assertEqual(web_ui.pinned_recipes_view(s, [], []), [])
 
 
 class SourcesSummaryTests(FixtureTestCase):

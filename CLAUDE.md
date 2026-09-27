@@ -78,24 +78,29 @@ tools/content_validation.py    - validate(dict) -> [errors]; тоже НЕ им�
 Топ-уровень: `resources`, `locations`, `manual_actions`, `buildings`, `techs`,
 `mining_info`, `tools`, `energy_recipes`, `ui`, `time`, а также `mobs`, `skills`,
 `soul_recipes` (см. "Охота, навыки, синтезаторы душ" ниже), `quests`/`loot_cases`
-(см. "Квестбук и лутбоксы" ниже) и `species`/`genetic_traits`/`mutations`/`genetics`
-(см. "Разведение существ (фермы, генетика)" ниже).
+(см. "Квестбук и лутбоксы" ниже), `species`/`genetic_traits`/`mutations`/`genetics`
+(см. "Разведение существ (фермы, генетика)" ниже) и `melt_recipes`/`alloy_recipes`/
+`cast_recipes` (см. "Плавильня" ниже).
 
 Generic-поля построек (есть у ЛЮБОЙ постройки, не завязаны на конкретный id):
 `description` (обязательна, валидируется строго), `cost`/`produces`/`consumes`/
 `repair_cost`, `breakdown_chance`, `energy_storage` (ёмкость хранилища ОДНОЙ
-копии), `active_period` (`null`/`day`/`night`), `compute_power` (лимит РАЗМЕРА
-автокрафта), `autocraft_speed` (лимит СКОРОСТИ автокрафта, прокруток/ход),
-`autocraft_slots` (доп. одновременные фоновые задачи), `max_count`,
-`unlocks_autocraft` (список resource_id), `energy_converter`
+копии), `active_period` (`null`/`day`/`night`), `compute_power` (процессор:
+максимальный размер ОДНОГО заказа автокрафта), `autocraft_slots` (доп. заказы
+одновременно), `autocraft_assembler` (`{location | building, per_turn}` — сборщик
+локации или ритуального алтаря, см. «Заказы автокрафта»), `max_count`, `energy_converter`
 (`{max_energy_per_turn}` — делает постройку слотом крафта за энергию),
 `soul_collector` (`{slots, accepts_kind}` — делает постройку синтезатором душ, см.
 ниже), `automation_hub` (`{slots}` — делает постройку автоматизатором, см.
-"Автоматизатор" ниже), `construction_stages` (непустой список этапов вместо
+"Автоматизатор" ниже), `replicator` (`{matter, max_matter_per_turn, slots}` —
+репликатор, см. карту кода и «Заказы автокрафта»), `smeltery` (`{slots, capacity, heat}` —
+плавильня, см. "Плавильня" ниже), `energy_surplus_only`
+(энергию берёт предпоследней в ходу), `construction_stages` (непустой список этапов вместо
 разового `cost`), `upgrades` (список улучшений — тип `scale`/
 `energy_efficiency`/`generation_efficiency`/`energy_converter_capacity`/
 `breeding_*`/`soul_collector_slots`/`soul_generation_efficiency`/
-`automation_slots`, плюс необязательные `repeatable`/`cost_growth`/
+`automation_slots`/`replicator_throughput`/`smeltery_slots`/`smeltery_capacity`/`smeltery_heat`,
+плюс необязательные `repeatable`/`cost_growth`/
 `max_purchases` — см. "Repeatable-апгрейды" ниже), `click_delay_ms`, `lab_tier`.
 
 `requires_tech` + `requires_building` — гейт через И (не ИЛИ), есть у построек,
@@ -103,6 +108,22 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 (не сломанную) копию другой постройки (`engine.working_count`). У построек
 допускает цикл (проверяется `find_building_requires_cycle`); у локаций — нет
 своего цикл-чекера (разные id-пространства).
+
+**Постройка-механизм рецепта наследуется от локации.** Ручное действие без
+своего `requires_building` зависит от `requires_building` СВОЕЙ локации (только
+сама локация, не рекурсивно по `parent_location`) — `engine.action_mechanism_building`,
+ЕДИНСТВЕННАЯ точка правила в движке (копия — в `content_validation.py`). Отсюда
+и гейт «механизм работает» (клик, автокрафт), и улучшения постройки
+(`scale`/`energy_efficiency`/`action_duration_reduction`) на ВСЕ рецепты
+механизма сразу: улучшил печь — ускорились все её рецепты. Собственный
+`requires_building` действия побеждает. В UI локация-механизм (`crafting` или
+преобразователь), где нет ничего, кроме механизма (ни обычных действий без
+`pattern`, ни дочерних локаций, считается по контенту), — не «комната», а кнопка
+«Открыть: …» в родителе (`web_ui.py: _location_opens_as_button` → `as_button`);
+верстак с «Набрать воды» остаётся комнатой. `locations.*.shows_building_mechanisms`
+(у «Механизмов») добавляет кнопки окон построенных автоматизаторов/синтезаторов
+душ/ритуальных кругов/реакторов (`web_ui.html: buildingMechanismsAt`). Пустая
+комната скрыта целиком (`locationChildren`), поэтому у «Механизмов» нет `requires_tech`.
 
 `manual_actions.*.location` — необязательное поле; `null` = действие в корне
 дерева локаций. Ходить по локациям бесплатно, ход тратит только само действие.
@@ -120,23 +141,73 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 и валидатор ТРЕБУЕТ точного совпадения узора с `cost` — два источника истины
 тут давали бы тихое расхождение (игрок видит узор, движок списывает `cost`).
 Редактор показывает расхождение красной плашкой и даёт кнопку «Записать узор
-в cost».
+в cost». ЕДИНСТВЕННОЕ исключение — энергия: в ячейку её не положить (в `key`
+узора — ошибка), она идёт в `cost` СВЕРХ узора и списывается при крафте
+(`content_validation.py: check_grid_pattern` ↔ `content_editor.html: itemCostOf`,
+поле «Энергия за крафт» в окне узора; в игре — подпись «⚡N» у стрелки).
 
 Сеточные действия физически убраны из `VIEW.categories.manual` — граница
 «крафт только через раскладывание» живёт в `tools/web_ui.py: build_view`, НЕ
 в движке: `do_manual_action` по-прежнему выполняет их как обычно, автоматизация
 и докрафт не задеты. Раскладывание и матчинг узора мгновенно считаются на
 клиенте (`web_ui.html: craftGridMatchRecipe`) для отклика, но сервер ВСЕГДА
-перепроверяет сам (`engine.match_grid`) при реальном крафте
-(`POST /api/craft_grid`, крутит цикл «действие + `advance_turn`» `times` раз за
-один запрос). Закреплённые рецепты — `state.pinned_recipes`
-(`engine.toggle_pinned_recipe`, `POST /api/pin_recipe`) — переживают закрытие
-модалки и перезапуск игры; клик по закреплённой плитке кладёт то, что реально
-есть на складе (`craftGridPartialLay`), оставляя недостающие ячейки обведёнными
-красным, наведение красит сетку призраком заранее, ничего не трогая
-(`craftGridApplyHoverToDom`, НЕ через полную пересборку модалки — иначе
-пересозданная под курсором кнопка гонялась бы сама с собой по mouseenter/
-mouseleave).
+перепроверяет сам (`engine.match_grid`, только рецепты СВОЕЙ локации) при
+реальном крафте (`POST /api/craft_grid`, крутит цикл «действие +
+`advance_turn`» `times` раз за один запрос). `times > 1` («Скрафтить ×N», поле
+«РАЗ» + «макс») — только у механизма с `crafting.batch: true` (сейчас верстак),
+у остальных (печь) сервер режет `times` до 1 сам; пачку для других механизмов
+игрок планирует давать улучшениями — это отдельная будущая работа.
+
+Обратная связь крафта в модалке механизма (`craftGridRunCraft`): кнопка с тем же
+антиавтокликерным кулдауном, что у ручных действий (`tryRunAction`, ключ
+`craft_grid:<локация>`); мгновенный рецепт — ингредиенты летят в выходной слот
++ вспышка + «+N» (`craftGridPlayCraftFx`/`craftGridOutputBurst`, fixed-слой
+`#cgFxLayer` поверх модалки, т.к. модалка пересобирается сразу после ответа);
+провал — тряска сцены. Долгий рецепт (`duration_turns >= 2`) — ингредиенты
+уходят в стрелку, стрелка + строка `craftGridJobRow` («Ждать ход»/✕) показывают
+job механизма (`crafting_view: job`), по завершении (`log.manual_completed_ids`)
+в слоте та же вспышка; пачкой не запускается (сервер режет `times` до 1).
+
+**Сетка преобразователя.** Если у `CONVERTER_LOCATION_ID` есть `crafting`
+(в реальном контенте 2×1), в той же модалке собираются `energy_recipes` —
+`energy_recipes.*.pattern`/`pattern_mirror` слоем над `consumes` (валидатор:
+`check_grid_pattern(..., "consumes")`, общая с действиями таблица дубликатов
+форм; при сетке рецепт БЕЗ узора — ошибка). Энергия в ячейки не кладётся:
+она копится по ходам, модалка показывает её шкалой под слотами
+(`craftGridEnergyRow`: накоплено/порог + нижняя оценка ходов по
+`max_energy_per_turn`), первая задача — на стрелке, остальные преобразователи —
+строками ниже. Ключ рецепта в `crafting_view`/справочнике/`state.pinned_recipes`
+— `engine.grid_recipe_key`: id действия как есть или `"energy_recipe:<id>"`
+(id двух разделов могут совпасть); клиент сравнивает ключи и не разбирает их.
+`engine.match_grid_target` → `(kind, id)`; `craft_grid_view` для энергорецепта
+зовёт `start_energy_recipe` (ход тратится, пачкой нельзя). Завершение —
+`log.energy_completed_keys`; рецепт, готовый в тот же ход (дерево), играет
+вспышку сразу. Без `crafting` у преобразователя остаётся старая модалка-список
+(`openConverterModal`, `VIEW.categories.converter` — туда НЕ попадают рецепты,
+собираемые в сетке). Автокрафт/автоматизатор узор не читают.
+
+Модалка механизма (`openCraftGridModal`, одна на ЛЮБУЮ локацию с `crafting`) и
+склад (`openStorage`, по прямому пожеланию) — три колонки: закреплённые
+рецепты | сетка/склад | справочник. Панели рецептов есть ТОЛЬКО там и в модалке
+плавильни (`openSmelteryModal`, прямое пожелание, 2026-09-25) — в модалки
+ритуала/пасек/скрещивания/синтезатора душ/зачарований и т.п. их НЕ
+добавлять (прямое пожелание, 2026-09-24). Закреплённые — `state.pinned_recipes`
+(`engine.toggle_pinned_recipe`, `POST /api/pin_recipe`; целиком в
+`VIEW.pinned_recipes`), слева — плитки ВСЕГО закреплённого в порядке закрепления,
+включая ещё не открытое (`web_ui.py: pinned_recipes_view` → `VIEW.pinned_tiles`,
+`globalPinnedRecipes`). Клик по плитке НИЧЕГО не раскладывает — только
+открывает карточку этого рецепта справа (`craftGridShowRecipe`). Карточка
+(`craftGridSourceDetailView`) рисует сам узор сеткой механизма → выход, чипы
+«ресурс нужно из есть» и ОДНУ кнопку действия (`sourcesActionButton`):
+«Разложить узор»/«Разложить частично» — только если рецепт открыт игроку в
+ЭТОМ ЖЕ механизме; иначе «Открыть: <механизм>» (карточка остаётся открытой и
+там). Перенос (`craftGridLayRecipe`) кладёт только то, что есть на складе
+(`craftGridPartialLay`), недостающие ячейки — пустые, красные с «!»; наведение
+на кнопку рисует тот же расклад призраком прямо в сетке
+(`craftGridApplyHoverToDom` — НЕ полной пересборкой, иначе кнопка под курсором
+гонялась бы сама с собой по mouseenter/mouseleave; `craftGridHoverSuppressed`
+не даёт призраку сразу накрыть только что разложенное). Подсказок-надписей в
+колонках нет намеренно (прямое пожелание).
 
 Справочник источников (`tools/web_ui.py: resource_sources`/
 `sources_summary_view`, `GET /api/sources_summary` + `POST /api/sources`)
@@ -144,11 +215,20 @@ mouseleave).
 крафт (сеточный и обычный), ловля дикой особи (`spawn_species`), мутация при
 скрещивании, постройка, особь на ферме, душа в синтезаторе, крафт за энергию,
 ритуал, шахта, лут с моба (включая шансовую душу), приз лутбокса (с именем
-квеста-награды). Чисто по контенту, не по `state` — отвечает на «как вообще
+квеста-награды). Чисто по контенту, не по `state` (поэтому клиент кэширует
+ответы на всю сессию, `sourcesDetailCache`) — отвечает на «как вообще
 получить», а не «чем я уже владею» (то же решение наоборот, что
-`recipe_board_target` в движке, см. его комментарий). Живёт в правой колонке
-модалки верстака (`web_ui.html: craftGridBuildSourcesPanel`), с поиском,
-фильтром по виду источника и переходом по ингредиентам (история — `sourcesTrail`).
+`recipe_board_target` в движке, см. его комментарий). Виджет один
+(`craftGridBuildSourcesPanel`), перерисовку ему передаёт хозяин-модалка через
+`host = {refresh, isOpen}` (`craftGridSourcesHost()`/`storageSourcesHost()`).
+Звезда ЗАКРЕПЛЕНИЯ есть у ЛЮБОГО способа справочника (прямое пожелание,
+2026-09-27), только в шапке карточки (открепить — ещё и звездой на плитке
+слева). Ключ — `pin_key` записи `resource_sources`: у сеточного крафта и
+плавильни прежний ключ рецепта, у остальных `engine.source_pin_key`
+(`"source:<ресурс>:<вид>:<id способа>"`; что такой способ есть, проверяет
+`/api/pin_recipe` по справочнику — движок знает только ресурс). Не путать с ★ САМОГО РЕСУРСА на плитке склада
+(`state.pinned` — не даёт плитке пропасть при нуле): две независимые сущности
+с одинаковым символом.
 
 ## Карта: тема → где искать в коде
 
@@ -164,32 +244,35 @@ mouseleave).
 | Разведение существ: фермы, скрещивание, генетика, синтез | `engine.py`: `GENOTYPE_TRAIT_IDS`, `MUTATIONS_BY_PAIR`, `trait_alleles`, `_cross_genotype`, `breed_creatures`, `spawn_creature`, `analyze_creature`, `synthesize_creature`, `_ensure_farm_instances`, `_process_habitat`; `state.creatures`/`state.farm_instances`/`state.known_alleles`; контент `species`/`genetic_traits`/`mutations`/`genetics`; `web_ui.html: renderFarmSection`, `renderCreatureBankSection`, `openSpeciesBookModal`, `openBreedingModal`, `openGeneticsLabModal` |
 | Навыки (generic-прокачка, любое число линеек) | `engine.py`: `skill_level`, `skill_level_effects`, `add_skill_xp`, `skills_view`; `state.skill_xp`; контент `skills`; `web_ui.html: openSkillsModal` |
 | Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_kind`, `soul_collector_accepts_kind`, `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `resources.*.soul_kind` + `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: openSoulSynthesizerModal` |
-| Автоматизатор (правила "если ресурс — тогда действие/рецепт энергокрафта", проверяются каждый ход) | `engine.py`: `automation_slots_capacity`, `is_automation_eligible_action`/`is_automation_eligible_energy_recipe`, `automation_eligible_targets`, `add_automation_rule`/`update_automation_rule`/`remove_automation_rule` (принимают `kind`+`target_id`), `process_automation_rules`; `state.automation_rules`; контент `buildings.*.automation_hub` + апгрейд типа `automation_slots`; `web_ui.py: automation_view`; `web_ui.html: openAutomationModal`/`openAutomationRuleEditorModal` |
+| Ритуальный круг: ритуалы, сборщики ритуалов | `engine.py`: `ritual_pedestal_capacity`, `is_ritual_recipe_available`, `start_ritual`/`cancel_ritual`, `_process_ritual_jobs`, `building_assembler_capacity`, `ritual_recipe_for_resource`, `_ritual_autocraft_failure`, `_advance_ritual_step`; `state.ritual_jobs`; контент `ritual_recipes` + `buildings.*.ritual_circle` + `autocraft_assembler.building`; `web_ui.py: ritual_altars_view`; `web_ui.html: openRitualCircleModal`, `sourceOrderKey` |
+| Автоматизатор (правила "если ресурс — тогда действие/рецепт энергокрафта/ритуал", проверяются каждый ход) | `engine.py`: `automation_slots_capacity`, `is_automation_eligible_action`/`is_automation_eligible_energy_recipe`, `automation_eligible_targets`, `add_automation_rule`/`update_automation_rule`/`remove_automation_rule` (принимают `kind`+`target_id`), `process_automation_rules`; `state.automation_rules`; контент `buildings.*.automation_hub` + апгрейд типа `automation_slots`; `web_ui.py: automation_view`; `web_ui.html: openAutomationModal`/`openAutomationRuleEditorModal` |
 | Квестбук (вкладка-граф на каждую эру, requires между эрами гейтит без явного ребра), оформление эр/квестов и лутбоксы (кейс = один приз из барабана) | `engine.py`: `is_quest_available`, `_condition_met`, `check_quests`, `_roll_loot_case_prize`, `claim_quest_reward`; `state.completed_quests`/`claimed_quests`; контент `quests` (`era`/`requires`/`icon`/`bg`/`border`) + `eras` (`game/content.py: ERAS`) + `loot_cases`; `web_ui.html: openQuestsModal`/`renderQuestGraph`/`eraTheme`/`buildQuestNode`/`openLootBoxModal`; `content_editor.html: renderQuestGraphView`/`renderEraManager` |
 | Repeatable-апгрейды (покупка N раз, цена растёт геометрически) | `engine.py`: `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `building_upgrade_purchase_count`, `farm_instance_upgrade_purchase_count`; контент `upgrades[].repeatable`/`cost_growth`/`max_purchases` |
 | Ползунок масштаба ручного действия | `engine.py`: `mechanism_scale_cap`, `effective_manual_action_stats(chosen_scale=...)`; `POST /api/action {scale}` |
 | Меню "Механизмы": вкл/выкл N из M копий пассивной постройки (produces И consumes непустые) | `state.building_disabled`; `engine.py`: `is_disableable_building`, `building_active_count`, `set_building_active_count`; `POST /api/set_building_active_count`; `web_ui.html: renderMechanismToggle` |
 | Снос постройки (1 копия за вызов, без возврата ресурсов, ход не тратится; сначала сносит сломанную копию, если есть; у ферм/синтезаторов душ/реакторов удаляет весь физический экземпляр, расселяя заселённых особей обратно в банк) | `engine.py: demolish_building`; `POST /api/demolish_building`; `web_ui.html: demolishBuilding` |
-| "Механизмы" (постройка без produces/consumes + завязанные действия) | `locations.*.requires_building`, `manual_actions.*.requires_building`, `engine.py: effective_manual_action_stats` |
+| "Механизмы" (постройка без produces/consumes + завязанные действия; рецепты наследуют постройку локации; кнопки механизмов в «Механизмах») | `locations.*.requires_building`/`shows_building_mechanisms`, `manual_actions.*.requires_building`, `engine.py: action_mechanism_building`, `effective_manual_action_stats`; `web_ui.py: _location_opens_as_button`; `web_ui.html: mechanismButtonsAt`/`mechanismOpenCard`/`buildingMechanismsAt`/`openConverterModal` |
 | Дробные/целые ресурсы | `content.json resources.*.fractional`; `engine.py: _round_amounts`; `content.py: RESOURCE_FRACTIONAL` |
-| Приоритет автокрафт-рецептов | `engine.py`: `resource_recipe`, `action_priority`, `set_action_priority`; контент `manual_actions.*.priority`, `state.action_priority` |
+| Приоритет автокрафт-рецептов (и рецептов преобразователя — ключ `energy_recipe:<id>`) | `engine.py`: `resource_recipe`, `action_priority`, `set_action_priority`, `converter_preferred_resources`; контент `manual_actions.*.priority`, `state.action_priority`; `web_ui.py: action_priority_view`; `web_ui.html: renderAutocraftPriorityTab` |
 | Вероятностный cost/gain у ручных действий | `engine.py`: `_roll_chance_amounts`, `is_manual_action_deterministic`; контент `cost_chance`/`gain_chance` |
 | Случайное количество produce (диапазон, равномерное распределение) | `engine.py`: `_is_range_amount`, `_roll_range_amounts`, `_add_amount`/`_scale_amount`; `content_validation.py`: `check_amount_range`; `content_editor.html`: `renderDictAmountInput` |
-| Автокрафт (гейты, compute/speed/slots, фон. задачи, партии энергии/многоходовых) | `engine.py`: `ensure_and_pay` (→ `_discover_autocraft_graph`/`_aggregate_autocraft_demand`/`_commit_autocraft_plan`, см. "Известные ограничения"), `_start_energy_batches`, `_busy_manual_job_in_location`/`_new_manual_job`, `compute_capacity`, `autocraft_speed_capacity`, `autocraft_slot_capacity`, `state.autocraft_jobs`/`pending_actions` |
-| Сообщение "не хватает ресурсов: ..." | `engine.py`: `_pay_or_defer`, `_direct_shortfall`, `_raw_shortfall`, `_format_shortfall` |
-| Галочка "Автокрафт" вкл/выкл | `state.autocraft_enabled`, `engine.toggle_autocraft`; `web_ui.html: #autocraftToggleWrap` |
-| Крафт из энергии (преобразователь) | контент `energy_recipes` (+ необязательные `machine`/`consumes`) + `buildings.*.energy_converter`; `engine.py`: `CONVERTER_LOCATION_ID`, `start_energy_recipe`, `_process_energy_jobs`, `energy_converter_capacity`/`_max_energy_per_turn(state, building_id)` |
+| Заказы автокрафта (доступ через механизм: сборщики/«Автоматизация»; резерв; шаги; финал; отмена; «Заказать ×N») | `engine.py`: `_pay_or_defer` → `_place_order` → `_plan_order` (→ `_discover_autocraft_graph`/`_aggregate_autocraft_demand`), `_process_orders`/`_advance_order_step`/`_advance_energy_step`/`_finalize_order`, `order_recipe`/`check_order`, `_order_route`/`_route_fallback`, `converter_eta_turns`, `cancel_order`, `orders_view`, `location_assembler_capacity`/`mechanism_automated`/`location_autocraft_capacity`, `automated_converter_types`, `compute_capacity`, `autocraft_slot_capacity`, `_ORDER_RETRY`, `drop_removed_content`; `state.orders`; контент `buildings.*.autocraft_assembler` + апгрейд `type: autocraft`; `web_ui.py`: `autocraft_view`, `order_preview_view`, `/api/order_preview`, `/api/action type=order`, `/api/cancel_job kind=order`; `web_ui.html`: `renderAutocraft` (панель «Заказы»), `sourcesOrderBlock`; `content_editor.html`: `openAutocraftSettingsModal`; тесты `tests/test_orders.py` |
+| Сообщение "не хватает ресурсов: ..." | `engine.py`: `_pay_or_defer`, `_direct_shortfall`, `AutocraftFailure.missing` (собирает `_plan_order`), `_format_shortfall` |
+| Ожидание энергии (заказы и клик ждут притока; резерв от преобразователей; энергия в цене сеточного рецепта) | `engine.py`: `energy_wait_note`, `has_energy_source`, `energy_reserved`, `energy_wait_eta_turns`, `order["waits_energy"/"energy_reserve"]`; `web_ui.py`: `craft_grid_view` (пачка стоп на ожидании); `web_ui.html`: панель «Заказы» («⚡ ждёт энергию»), `.cg-arrow-energy`; тесты `tests/test_energy_wait.py`; песочница в контенте — `energy_workshop`/`energy_beacon`, рецепты `temper_ingot`/`induction_smelt`/`craft_energy_core`/... |
+| Плавильня: слоты плавки -> тигель (жидкие металлы + шлак) -> сплав по кнопке -> литьё в формы | `engine.py`: `smeltery_heat`/`smeltery_slot_capacity`/`smeltery_tank_capacity`, `load_melt`/`cancel_melt_slot`/`skim_smeltery`/`alloy_smeltery`/`pour_cast`, `*_block_reason`, `best_melt_recipe_for`, `_process_smelteries`, `smeltery_recipe_key`/`parse_smeltery_recipe_key`; `state.smelteries`/`state.discovered_alloys`; контент `buildings.*.smeltery` + `melt_recipes`/`alloy_recipes`/`cast_recipes` + `resources.*.molten` (`content.py: RESOURCE_MOLTEN`); `web_ui.py`: `smelteries_view`, `smeltery_pinned_view`, типы действий `smelt_load`/`smelt_alloy`/`smelt_pour` (`"<постройка>:<рецепт>"`), `/api/smelt_cancel_slot`, `/api/smelt_skim`, источники `smelt`/`alloy`/`cast`; `web_ui.html: openSmelteryModal`, `smelterySourceAction`, `SM_FX`; `content_editor.html: renderSmeltery`, `openSmelterySettingsModal`; тесты `tests/test_smeltery.py` |
+| Генератор материи и репликатор (постройка «на излишках энергии»; материя -> любой ресурс с ценой за шт., лимит материи за ход, модалка, источник автокрафта) | `engine.py`: проход `surplus_consumers` в `advance_turn`, `energy_breakdown(include_surplus_only=)`, `replicate`, `_process_replicator_jobs`, `cancel_replicator_job`, `replication_matter_cost`, `replicator_max_matter_per_turn`, `replication_storage_free`, `_autocraft_replicator_building`, `_advance_replicate_step`, `replicator_eta_turns`; `state.replicator_jobs`; контент `buildings.*.replicator`/`energy_surplus_only` + `resources.*.replication_cost` (`content.py: RESOURCE_REPLICATION_COST`) + апгрейд `replicator_throughput`; `web_ui.py`: `replicator_view`, тип действия `replicate` (`"<ресурс>:<кол-во>"`), `cancel_job kind=replicator`, источник `kind: replicator`; `web_ui.html: openReplicatorModal`; тесты `tests/test_replicator.py` |
+| Крафт из энергии (преобразователь) | контент `energy_recipes` (+ необязательные `machine`/`consumes`/`pattern`) + `buildings.*.energy_converter`; `engine.py`: `CONVERTER_LOCATION_ID`, `start_energy_recipe`, `_process_energy_jobs`, `energy_converter_capacity`/`_max_energy_per_turn(state, building_id)`; сетка слотов — `grid_energy_recipes_at`, `match_grid_target`, `grid_recipe_key`; `web_ui.py: _energy_grid_recipe_view`/`_converter_jobs_view`; `web_ui.html: craftGridEnergyRow` |
 | Энергосистема: несколько типов машин + приоритеты | `engine.py`: `energy_converter_building_types`, `energy_priority`/`set_energy_priority`, `ProductionReport.energy_shortfall`; контент `buildings.*.energy_priority`; `web_ui.html: openPrioritiesModal` (вкладка "Энергосистема") |
 | Многоэтапное строительство | контент `buildings.*.construction_stages`; `engine.py`: `current_construction_stage`, `state.construction_progress` |
 | Многоходовые ручные действия | контент `manual_actions.*.duration_turns`; `engine.py`: `do_manual_action`, `_process_manual_jobs`, `cancel_manual_job`; `state.manual_jobs`; `web_ui.html: manualJobProgressRow` (прогресс + отмена и на карточке действия, и в панели «Долгие действия») |
 | Задержка после клика (антиавтокликер, клиент-онли) | контент `ui.default_action_delay_ms` + `click_delay_ms`; `web_ui.html`: `tryRunAction`/`applyCooldownVisual` |
 | Звук: пресеты, кастомные файлы (действия + ритуалы + 3 глобальных слота), громкость | контент `manual_actions.*.sound`/`ritual_recipes.*.sound` + `ui.sounds` (`background_music`/`lootbox_open`/`button_click`); `web_ui.html`: `SOUND_PRESETS`, `playSound`/`playCustomSound`/`playGlobalSound`, `_sfxVolume`/`_musicVolume`; `web_ui.py`: `sound_url`, `SOUNDS_DIR`; `content_editor.html`: `soundRow` (вызывается и на карточке ручного действия, и на карточке ритуала), вкладка «Настройки» |
-| Отмена фоновой задачи | `engine.py`: `cancel_autocraft_job`/`cancel_energy_job`; `web_ui.html: jobCancelButton` |
+| Отмена фоновой задачи / заказа | `engine.py`: `cancel_order`/`cancel_energy_job`/`cancel_manual_job`; `web_ui.html: jobCancelButton` |
 | Вложенные локации | контент `locations.*.parent_location`; `engine.py: location_children`; `web_ui.html: locationPath` |
-| Крафт на сетке (верстак): узор, матчинг, перенос, справочник источников | `engine.py`: `location_crafting`, `action_pattern`, `match_grid`, `_normalize_grid`, `toggle_pinned_recipe`; `state.pinned_recipes`; контент `locations.*.crafting` + `manual_actions.*.pattern`/`pattern_mirror`; валидация - `content_validation.py`: `pattern_shape`, `mirror_shape`, `check_action_pattern`; редактор - `content_editor.html`: `craftingGridRow`, `actionPatternRow`, `openPatternModal`; HTTP - `tools/web_ui.py`: `crafting_view`, `craft_grid_view`, `resource_sources`, `sources_summary_view`, `/api/craft_grid`, `/api/pin_recipe`, `/api/sources`, `/api/sources_summary`; UI - `web_ui.html`: `openCraftGridModal`, `craftGridMatchRecipe`, `craftGridApplyHoverToDom`, `craftGridBuildSourcesPanel` |
+| Крафт на сетке (верстак, печь, любой механизм с `crafting`): узор, матчинг, перенос, пачка ×N, закреплённые, справочник источников | `engine.py`: `location_crafting`, `action_pattern`, `match_grid`, `_normalize_grid`, `toggle_pinned_recipe`; `state.pinned_recipes`; контент `locations.*.crafting` (+`batch`) + `manual_actions.*.pattern`/`pattern_mirror`; валидация - `content_validation.py`: `pattern_shape`, `mirror_shape`, `check_action_pattern`; редактор - `content_editor.html`: `craftingGridRow`, `actionPatternRow`, `openPatternModal`; HTTP - `tools/web_ui.py`: `crafting_view`, `craft_grid_view`, `resource_sources`, `sources_summary_view`, `/api/craft_grid`, `/api/pin_recipe`, `/api/sources`, `/api/sources_summary`; UI - `web_ui.html`: `openCraftGridModal`, `craftGridMatchRecipe`, `craftGridBuildPinnedCol`, `craftGridShowRecipe`, `craftGridSourceDetailView`, `craftGridLayButton`/`craftGridLayRecipe`, `craftGridApplyHoverToDom`, `craftGridBuildSourcesPanel` |
 | Потолок ресурса (1e9) | `engine.py`: `MAX_RESOURCE_AMOUNT`, `_add_resource` (ЕДИНСТВЕННАЯ точка начисления) |
 | Вместимость склада | контент `resources.*.storage`; `engine.py`: `storage_capacity`, `state.storage_tier`, `upgrade_storage`; `web_ui.html: openStorage` |
-| Подтверждение автокрафта (модалка "спишется/докрафтится") | `engine.py`: `autocraft_preview`, `resolve_action_cost`; `web_ui.py: autocraft_preview_view`; `web_ui.html: openAutocraftConfirmModal` |
+| Подтверждение автокрафта (модалка "спишется/докрафтится/не хватает"; `reason` - заказ не оформится, «Запустить» выключена; строка причины - только если нет красных строк `missing`; докрафтить нечего - модалки нет вовсе) | `engine.py`: `autocraft_preview` (→ `_preview_node` по дереву `_order_route`), `autocraft_failure` (→ `_order_failure`, общая с `_place_order`/`check_order`), `resolve_action_cost`; `web_ui.py: autocraft_preview_view`, `_preview_crafts_anything`; `web_ui.html: openAutocraftConfirmModal`, `autocraftAmountText` |
 | ETA автокрафта в ходах | `engine.py: autocraft_eta_turns` |
 | Обнуление прогресса / именованные сохранения | `web_ui.py`/`main.py`: `SAVES_DIR`, `list_saves`, `safe_save_name`; `GameState.save_name` |
 
@@ -201,6 +284,56 @@ mouseleave).
   (`storage_capacity`), но НЕ применяется к автокрафту в середине цепочки
   (промежуточные ресурсы оседают и списываются в одном вызове раньше, чем
   наступает конец хода).
+- **Безграничный тир склада**: тир расширения (`resources.*.storage.tiers[]`)
+  может нести `infinite: true` ВМЕСТО `capacity_add` — купленный, он снимает
+  ограничение склада СОВСЕМ (`storage_capacity` возвращает `None`, тот же
+  результат, что у ресурса вовсе без `storage`). Отдельной "числом побольше"
+  механики для этого нет и не нужно: единственный настоящий потолок ресурса,
+  `MAX_RESOURCE_AMOUNT`, и так уже применяется везде в `_add_resource`
+  независимо от `storage` — тем самым "бесконечный" склад на практике и есть
+  «очень большой и постоянно поддерживаемый», просто тем же кодом, что и
+  остальные ресурсы без вместимости. Кламп в конце `advance_turn` обязан
+  пропускать `cap is None` (проверено регрессией) — до этой фичи `cap` для
+  ресурса из `RESOURCE_STORAGE` был всегда числом, наивное `> cap` уронило бы
+  ход `TypeError`.
+- **Энергию ЖДУТ, а не отказывают** (прямое пожелание). Для заказа энергия —
+  не «сырьё без рецепта»: при нехватке `_aggregate_autocraft_demand` помечает её
+  `energy_wait`, шаги заказа каждый ход берут столько, на сколько хватает
+  накопленного. Ручной клик, которому не хватает ТОЛЬКО энергии, становится
+  заказом без шагов (процессор и слот ему не нужны, остальное сырьё — в
+  резерве). Энергия НИКОГДА не причина отказа (прямое пожелание, 2026-09-25): нет
+  ни одного источника или ОДИН платёж больше `energy_capacity` — заказ всё равно
+  оформляется и стоит, статус объясняет почему (`energy_wait_note`). Энергия хода
+  сперва идёт на крафты (заказы раньше обрезки), в хранилища — только остаток,
+  поэтому платёж больше ёмкости проходит, если его покрывает запас + приток хода.
+  Энергия не тратит мощность процессора (`_items_per_fire`).
+- **Место на складе под итог заказа** (прямое пожелание, 2026-09-25): заказ (и
+  «×N», и неявный из клика) не оформляется, если ИТОГОВЫЙ ресурс не влезет
+  (`order["output"]`, `_storage_shortfall`, с учётом места, обещанного другим
+  заказам); кончилось на ходу — заказ стоит «освободи ещё N». Промежуточные
+  не проверяются — они живут в резерве. Побочный выход рецепта с несколькими
+  выходами засчитывается при расчёте спроса (`_aggregate_autocraft_demand`:
+  `byproduct`), второй раз не крафтится.
+- **Рецепты, замкнутые в круг, автокрафт источником не берёт** (прямое пожелание,
+  2026-09-25): «слитки -> блок -> слитки», дюп «1 руда -> 2 руды»
+  (`autocraft_cyclic_recipes`, по контенту: действия, крафт за энергию, ритуалы,
+  репликация). Ресурс, который делается только ими, для заказа сырьё; «не хватает»
+  называет такой рецепт (`cycle_note`). Сам рецепт можно заказать «×N» и поставить
+  в центр автоматизации. Копия правила — `content_editor.html: editorCyclicRecipes`
+  (плашка на карточке), держать в паре. В реальном контенте так исключены
+  `smelt_enriched_metal`, `uranium_from_energy`, `wood_from_energy`, `mana_crystallization`.
+- **Преобразователи — последние потребители энергии в ходу** (прямое
+  пожелание: берут только излишки). Порядок в `advance_turn`: заказы (1-й проход,
+  до тика многоходовых — партия заказа тикает в ход запуска, как клик) →
+  многоходовые/репликации/ритуалы/исследования → автоматизатор → заказы (2-й) →
+  постройки `energy_surplus_only` (генератор материи: предпоследние, прямое
+  пожелание; между собой — порядок content.json, НЕ порядок постройки) →
+  `_process_energy_jobs` → заказы (3-й: подхватить доделанное преобразователем).
+  Поставить постройку «в конец content.json» для этого НЕ хватает: обычные
+  потребители идут в порядке `state.buildings` и ДО заказов/автоматизатора.
+  Лимиты крафтов за ход общие на все проходы. Накопленное под заказы
+  (`energy_reserved`: `order["energy_reserve"]` — самый большой разовый платёж
+  плана) преобразователям не отдаётся — иначе ожидание не кончалось бы.
 - **`advance_turn` — два прохода**: сначала все НЕ-потребители энергии
   (включая генераторов), потом потребители — иначе результат зависел бы от
   порядка вставки в `state.buildings` (dict). Среди потребителей друг с
@@ -249,9 +382,9 @@ mouseleave).
   уровень (не складываются). Квота `0` (не построен/сломан) ≠ `None` (лимита
   нет вовсе) — не путать.
   При нехватке общего пула на несколько типов сразу порядок решает
-  `energy_priority`/`set_energy_priority` (больше → тянет первым). Автокрафт
-  для рецепта с материальной ценой (`energy_recipes.*.consumes`) НЕ докрафчивает
-  её рекурсивно — только ждёт, пока сырьё появится в наличии само.
+  `energy_priority`/`set_energy_priority` (больше → тянет первым). Материальная
+  цена рецепта (`energy_recipes.*.consumes`) в заказе — обычные ингредиенты
+  (резерв, докрафт), см. «Заказы автокрафта».
 - **Многоходовое ручное действие** (`manual_actions.*.duration_turns >= 2`) списывает
   `cost` ОДНИМ платежом целиком в момент клика (как `energy_jobs`), затем просто
   тикает (`state.manual_jobs`, одна активная задача НА action_id) `+1 ход` каждый
@@ -265,7 +398,7 @@ mouseleave).
   локации ограничением не связаны (например, многоходовая добыча в шахте не мешает
   охоте в её подлокации). `cancel_manual_job`
   снимает задачу немедленно (без хода) И ВОЗВРАЩАЕТ игроку весь списанный `cost` —
-  в этом её поведение НАМЕРЕННО отличается от `cancel_energy_job`/`cancel_autocraft_job`
+  в этом её поведение НАМЕРЕННО отличается от `cancel_energy_job`
   (у тех прогресс/прокрутки потрачены по-настоящему на предыдущих ходах, возврату не
   подлежат); накопленные тики (`turns_done`) при отмене всё равно теряются без следа —
   просто потому что сами по себе ничего не стоили. Прогресс виден в двух местах сразу:
@@ -297,30 +430,65 @@ mouseleave).
   тира, что `lab_tier` этой постройки («лаборатория той же эры»), не «лаборатория
   тира N и выше», как у `lab_tier_capacity`. Тир 1 своей лаборатории не имеет
   (см. `lab_tier_capacity`) — тир-1 технологии сократить нельзя в принципе.
-- **Автокрафт выключен по умолчанию** для КАЖДОГО ресурса, включается через
-  `unlocks_autocraft` работающей постройки; ограничен `compute_power`
-  (размер), `autocraft_speed` (скорость/ход), `autocraft_slots` (параллелизм
-  фоновых задач). Действие с ХОТЯ БЫ ОДНИМ вероятностным `cost_chance`/
-  `gain_chance` < 100% целиком исключено из `resource_recipe` — автокрафт
-  видит только детерминированные рецепты. Голое сырьё (пустой `cost`)
-  недостижимо для автокрафта в принципе. Действие со случайным диапазоном
-  (см. ниже) в `gain` исключено из `resource_recipe` по той же причине.
-  Гейты рецепта — `requires_tech` и `requires_building` действия (работающая
-  копия, `_action_building_ok`, причина `building_missing`; уже идущая фоновая
-  задача без механизма простаивает); `requires_tool_tiers` автокрафт НАМЕРЕННО
-  не проверяет (прямое пожелание). Недоступный рецепт не заменяется другим
-  рецептом того же ресурса — выбор по приоритету в `resource_recipe` от
-  доступности не зависит.
-  **Партии** (с 2026-09-24): многоходовое действие (`manual_action_duration > 1`)
-  автокрафт ведёт настоящим `manual_job` (флаг `autocraft`, не растит
-  `action_performed_count`) — по одной партии за раз, по тем же правилам «одна
-  задача на action_id и на локацию»; крафт за энергию — сразу на ВСЕХ свободных
-  преобразователях, сколько нужно (`_start_energy_batches`, диапазон — по `min`).
-  Следующую партию запускает повторная попытка отложенного действия, в тот же ход,
-  когда закончилась предыдущая. Рецепт поверх партий получает статус `waiting` и
-  НЕ заводит свою фоновую задачу (иначе она висела бы вечно: у ресурса с задачей
-  спрос не идёт вниз, и следующую партию никто бы не запустил), см.
-  `_commit_autocraft_plan`. Скорость/слоты автокрафта партии не тратят.
+- **Заказы автокрафта** (с 2026-09-24, вместо `unlocks_autocraft`, скорости,
+  галочки, фоновых задач и очереди `pending_actions`). Рецепт автокрафтится
+  ТОЛЬКО через свой механизм (локацию): **сборщики** (`autocraft_assembler
+  {location, per_turn}` — generic, под ЛЮБУЮ локацию, включая преобразователь)
+  делают его МГНОВЕННО при любой длительности, `per_turn` крафтов за ход на копию
+  (`null` — без лимита); **«Автоматизация»** (апгрейд `type: autocraft` у
+  постройки, открывающей локацию, или у преобразователя) — как игрок у механизма:
+  1 крафт за ход, многоходовой — партией своей длительности (одна задача на
+  локацию). Сборщики и «Автоматизация» складываются. Рецепт вне механизма
+  автокрафту недоступен. **Недоступный рецепт автокрафт не видит вовсе**
+  (прямое пожелание, 2026-09-25): механизм не автоматизирован/сломан, не изучена
+  технология, у крафта за энергию нет автоматизированного преобразователя, у
+  ритуала — сборщика (`_autocraft_action_usable`/`_autocraft_energy_recipe_usable`/
+  `_ritual_autocraft_failure`, отбор в `resource_recipe(usable_only=True)` и
+  `_discover_autocraft_graph`). Такой ресурс для заказа — сырьё: отказ
+  `no_recipe` с `missing` (всё, чего не хватает), текст «Не хватает: Металл 57»,
+  а не «докрафтится 57» с подсказкой про «Автоматизацию». Приоритет рецептов
+  выбирает только среди доступных. Подсказка «нужна Автоматизация» осталась
+  лишь при заказе САМОГО рецепта неавтоматизированного механизма
+  (`_recipe_order_spec`). **Пути ресурса** — `_autocraft_source_options`: список
+  (обычный рецепт, крафт за энергию, ритуал — только если нет первых двух,
+  репликатор) по приоритету игрока, при равенстве в этом порядке; `_route_fallback`
+  переводит ближайший к отказу ресурс на СЛЕДУЮЩИЙ путь списка (`choice`).
+  **Репликатор** — источник только при купленной «Автоматизации» (материю без
+  спроса не тратит), ключ `replicator:<ресурс>` (приоритет и «Заказать ×N», N —
+  единицы), шаг `kind: "replicate"` ведёт ОДНУ репликацию в слоте, как игрок.
+  **Преобразователь в цепочке** (`_order_route`): ресурс
+  делается обычным рецептом, а если его нет или путь не проходит (нет сырья)
+  — крафтом за энергию (`_route_fallback`: ближайший к месту отказа ресурс с
+  обоими доступными рецептами, расчёт повторяется); не помогло — отказ
+  ОСНОВНОГО пути. Игрок может сделать
+  преобразователь основным: приоритет рецепта `energy_recipe:<id>` (тот же
+  `state.action_priority`, по умолчанию 0) СТРОГО выше обычного
+  (`converter_preferred_resources`) — тогда обычный рецепт становится запасным
+  путём; при равенстве побеждает обычный. Предпросмотр
+  (`autocraft_preview`) идёт тем же маршрутом. «Заказать ×N» есть и у рецепта
+  преобразователя (ключ `energy_recipe:<id>`, N — партии, шаг с `batches`,
+  `converter_eta_turns`). **Ритуалы**: механизм — сам алтарь (своей локации нет),
+  сборщик `autocraft_assembler {building: <алтарь>, per_turn}`
+  (`building_assembler_capacity`) — ЕДИНСТВЕННЫЙ способ автокрафта ритуала: мгновенно,
+  без хода у алтаря (`state.ritual_jobs` не занимается) и без
+  `extra_consumes_per_turn`, только детерминированные ритуалы
+  (`is_ritual_recipe_deterministic`). Ритуал — третий источник ресурса в графе
+  (`ritual_recipe_for_resource`, после обычного рецепта и крафта за энергию, без
+  запасного пути), шаг `kind: "ritual"` (`_advance_ritual_step`), «Заказать ×N» по
+  ключу `ritual_recipe:<id>` (`ritual_eta_turns`). Процессоры — «мозг заказов»: `compute_power` —
+  потолок размера одного заказа (предметы всех его крафтов), `autocraft_slots` —
+  сколько заказов идёт сразу (база 1). При оформлении (`_place_order`) всё нужное
+  ФИЗИЧЕСКИ изымается со склада в `order["reserved"]`, промежуточные предметы
+  копятся там же — никто (клик, другой заказ, автоматизатор, постройки) их не
+  перехватит, склад показывает только остаток. Не хватает сырья, которое
+  автокрафт делать не умеет, — отказ сразу. Готово — заказ действия выполняет его
+  (`_ORDER_RETRY`), заказ «рецепт ×N» выдаёт результат на склад; не вышло —
+  резерв остаётся, причина в `order["status"]`, заказ пробует снова. Отмена
+  (`cancel_order`) возвращает резерв; уже запущенные партии доигрывают на склад.
+  Детерминированность рецепта (без шансов и диапазона в `gain`) и гейты
+  `requires_tech`/`requires_building` — как раньше; `requires_tool_tiers` автокрафт
+  НАМЕРЕННО не проверяет. Старые сохранения: `autocraft_jobs`/`pending_actions`
+  отбрасываются, удалённые из контента постройки убирает `drop_removed_content`.
 - **Случайное количество produce** — значение ресурса в `produces`
   (постройки/`energy_recipes`/`soul_recipes`) или `gain` (`manual_actions`)
   может быть объектом `{"min", "max"}` вместо плоского числа — равномерный
@@ -358,11 +526,13 @@ mouseleave).
 - **Windows**: `main.py` принудительно переключает stdin/stdout в UTF-8 —
   без этого кириллица бьётся при неинтерактивном stdin (Git Bash/MSYS).
 - **Автоматизатор** (`buildings.*.automation_hub` + `state.automation_rules`) —
-  правило ссылается на цель ДВУХ возможных видов (`rule["kind"]` +
+  правило ссылается на цель ТРЁХ возможных видов (`rule["kind"]` +
   `rule["target_id"]`, см. `engine.AUTOMATION_TARGET_KINDS`): `"manual_action"`
-  (id из `manual_actions`) или `"energy_recipe"` (id из `energy_recipes`) —
-  архитектурно разные системы (`state.manual_jobs` vs `state.energy_jobs`), но
-  правило и его условия работают с обеими СИММЕТРИЧНО, см.
+  (id из `manual_actions`), `"energy_recipe"` (id из `energy_recipes`) или
+  `"ritual_recipe"` (id из `ritual_recipes`: любой ритуал, срабатывание = клик
+  `start_ritual`, ждёт доступности и свободного алтаря) — архитектурно разные
+  системы (`state.manual_jobs` vs `state.energy_jobs` vs `state.ritual_jobs`), но
+  правило и его условия работают со всеми СИММЕТРИЧНО, см.
   `process_automation_rules`.
   - `manual_action`: допускает только детерминированные действия (та же
     граница, что у автокрафта: без вероятностного `cost_chance`/`gain_chance` и
@@ -396,11 +566,16 @@ mouseleave).
   - ОБЩЕЕ для обоих видов: правило на ещё не открытую цель (тех для действия
     ИЛИ для рецепта) можно настроить заранее — `process_automation_rules`
     молча пропускает его, пока цель не откроется, сработает само после этого.
-    `_process_manual_jobs`/`_process_energy_jobs` идут РАНЬШЕ
-    `process_automation_rules` в `advance_turn` — поэтому правило без условий
-    на завершившийся в этот же ход job (действие или рецепт) видит свободный
-    слот и перезапускает его СРАЗУ, без простоя в один ход ("бесшовный
-    конвейер"). Несколько правил на одну постройку (или на разные постройки)
+    `_process_manual_jobs` идёт РАНЬШЕ `process_automation_rules` в
+    `advance_turn` — поэтому правило без условий на завершившийся в этот же ход
+    job видит свободный слот и перезапускает его СРАЗУ ("бесшовный конвейер").
+    Но между ними — проход заказов: освободившийся механизм сперва достаётся
+    заказу, которому он нужен (иначе правило без условий держало бы механизм
+    вечно, а заказ висел бы «механизм занят»).
+    `_process_energy_jobs` теперь идёт ПОСЛЕ автоматизатора (преобразователи —
+    последние потребители энергии): рецепт освобождает слот в конце хода,
+    правило перезапускает его на следующем, и он тут же получает энергию в
+    том же ходу — пропускная способность та же. Несколько правил на одну постройку (или на разные постройки)
     делят общий ресурс ПОСЛЕДОВАТЕЛЬНО, в порядке списка — тот же осознанный
     компромисс "кто раньше встал, тот раньше взял", что и везде в
     `advance_turn` для разделяемых ресурсов. Правило НЕ привязано к локации
@@ -409,6 +584,29 @@ mouseleave).
     преобразователе) — можно поставить ЛЮБОЕ подходящее действие/рецепт игры
     целиком — это сознательный выбор в пользу универсальности, а не
     "автоматизация только своей мастерской".
+
+## Плавильня
+
+Ручная механика ранних эр (прямое пожелание, 2026-09-25): постройка с `smeltery`
+(жар, слоты плавки и объём тигля; слоты и тигель × рабочие копии, всё + апгрейды
+`smeltery_*`). Состояние — `state.smelteries[building_id]`, агрегат по ТИПУ, как
+`ritual_jobs`.
+- Рецепты не привязаны к постройке: их ведёт любая плавильня с жаром ≥ `recipe.heat`.
+  Клик по руде на складе берёт самый «горячий» доступный рецепт, где она ПЕРВАЯ в `input`.
+- Плавка: загрузка тратит ход и списывает `input`; через `turns` ходов `output` стекает в
+  тигель целиком или ждёт места (не пропадает). Выемка из слота бесплатна, всё возвращается.
+- Тигель: жидкие металлы (`resources.*.molten`, только в тигле, не на складе) слоями по
+  `density`; всё НЕ-металлическое (шлак) всплывает и снимается «Снять шлак» на склад бесплатно.
+- Сплав — только по кнопке (прямое пожелание), тратит ход, результат должен влезть.
+  `hidden` — пропорция скрыта до первой пробы (`state.discovered_alloys`).
+- Литьё: форма — обычный предмет склада, нужна, но НЕ расходуется (прямое пожелание:
+  крафтится один раз, без прочности). Одна отливка на плавильню; `turns <= 1` — сразу.
+- Автокрафт/заказы/автоматизатор плавильню НЕ видят (в эре 1 их нет) — ключи рецептов
+  (`melt_recipe:`/`alloy_recipe:`/`cast_recipe:`) отдельные от `grid_recipe_key`.
+- Модалка — раскладка склада (закреплённые | очаг | справочник), каркас игры, живой огонь
+  только внутри очага; очаг ВСЕГДА одной строкой (прямое пожелание: «не вертикально»).
+- Песочница в контенте: `smelting_pit`/`smelting_forge`, руды `malachite`/`cassiterite`/
+  `native_copper` в шахте, формы `mold_*` на верстаке.
 
 ## Охота, навыки, синтезаторы душ
 
@@ -487,7 +685,7 @@ mouseleave).
   слот-лимит (`farm_instance_slot_capacity`) — апгрейд, купленный на одном
   экземпляре, НЕ действует на другую копию той же постройки.
 - **Заселение** (`house_creature`/`release_creature`) не тратит ход (как
-  `insert_soul`/`toggle_autocraft`) — особь просто числится в
+  `insert_soul`/`toggle_pin`) — особь просто числится в
   `creature["farm_instance_id"]` либо `None` (в "банке").
   `_process_habitat` в `advance_turn` (ДО крафтов за энергию/автокрафта)
   прогоняет только ЗАСЕЛЁННЫХ особей: `produces`/`consumes` её вида (как у
@@ -568,8 +766,18 @@ mouseleave).
   `state.action_performed_count`, растёт при начислении gain: на мгновенном
   клике сразу, на многоходовом — только по завершении job'а, не на старте),
   `building_upgrade_purchased` (апгрейд куплен хоть раз — `building` +
-  `upgrade`, id улучшения уникален только ВНУТРИ постройки), проверяются
-  через И.
+  `upgrade`, id улучшения уникален только ВНУТРИ постройки), `storage_tier_at_least`
+  (`resource` + `amount` — тир расширения склада не ниже, `state.storage_tier`;
+  `resource` обязан иметь настроенный `storage`, иначе отклоняется
+  валидатором), `building_upgrade_level_at_least` (`building` + `upgrade` +
+  `amount` — обобщение `building_upgrade_purchased` НА КОНКРЕТНОЙ постройке:
+  «уровень» = `building_upgrade_purchase_count`, для repeatable-апгрейда это
+  число покупок, для обычного 0/1), `building_upgrade_type_purchased_any`
+  (`upgrade_type` — тип улучшения из `buildings.*.upgrades[].type`, например
+  `"autocraft"` — куплен ли апгрейд ЭТОГО ТИПА хоть у ОДНОЙ постройки в игре,
+  БЕЗ привязки к конкретной постройке/id, см. `building_upgrade_type_purchased_anywhere`;
+  «купить автоматизацию у любого механизма», в отличие от двух условий выше,
+  которые требуют именно указанную постройку), проверяются через И.
 - `requires` — ГЕЙТ ДОСТУПНОСТИ: `is_quest_available` (буквальная копия
   `is_tech_available`, только сверяется с `state.completed_quests`, а не
   `state.techs`) — квест, у которого хоть один prerequisite ещё не выполнен, не
@@ -664,7 +872,11 @@ mouseleave).
 ## Тесты
 
 `tests/fixtures.py` — полностью самодостаточный контент, НЕ связан с реальным
-`content.json` (кроме намеренного совпадения id шахты). `patched_engine_content()`/
+`content.json` (кроме намеренного совпадения id шахты). При импорте ставит
+`GAME_SAVE_ROOT` на временную папку — `web_ui.py` пишет сохранения туда, а не в
+настоящий `saves/` (раньше тесты через `craft_grid_view` → `run_turn` затирали
+автосейв игрока). Тот же `GAME_SAVE_ROOT` годится для Playwright-проверок на
+песочнице. `patched_engine_content()`/
 `patched_content()` — контекст-менеджеры для подмены module-level констант на
 время теста. `tests/test_content_validation.py::RealContentTests` гоняет
 `validate()` на настоящем `game/content.json` — должен быть пуст всегда.
@@ -706,7 +918,7 @@ mouseleave).
 
   Теперь резолвер — три прохода по ДЕРЕВУ РЕЦЕПТОВ ЦЕЛИКОМ, а не рекурсия по
   веткам (`_discover_autocraft_graph` → `_aggregate_autocraft_demand` →
-  `_commit_autocraft_plan`, все три вызываются из `ensure_and_pay`):
+  шаги заказа в `_plan_order`, вызывается из `_place_order`):
   1. `_discover_autocraft_graph` — строит структуру (что из чего, через
      какое действие) ОДИН раз на resource_id (не на каждое его появление в
      дереве), 3-цветным DFS с защитой от циклов; даёт топологический порядок
@@ -719,13 +931,9 @@ mouseleave).
      каждый узел производится (посчитан) ровно один раз на весь запрос, а не
      по разу на ветку. Здесь же все гейты, не зависящие от готовности
      ингредиентов (не_открыт/технология/цикл/мощность процессора).
-  3. `_commit_autocraft_plan` — идёт по графу КАК ЕСТЬ (сырьё раньше), решает
-     то, что зависит от статуса ингредиентов (застрял ли кто-то из них в
-     фоновой задаче → каскадом откладывает и родителя) и от порядка (слоты
-     автокрафта, свободные преобразователи энергии) — тот же порядок, что и
-     раньше, даёт вставку фоновых задач в `state.autocraft_jobs` в правильной
-     последовательности (глубокие сырьевые задачи первыми, см.
-     `_process_autocraft_jobs`).
+  3. `_plan_order` — идёт по графу КАК ЕСТЬ (сырьё раньше) и собирает шаги
+     заказа в этом порядке: `_process_orders` двигает их так же, сырьё
+     раньше потребителя, поэтому сделанное нижним шагом идёт верхнему в тот же ход.
 
   Сложность стала пропорциональна размеру самого дерева рецептов (вершины +
   рёбра), а не числу путей до общего ресурса — та же глубина 14 теперь
@@ -739,23 +947,16 @@ mouseleave).
   прерывают проход, а копятся в `failures`, и в конце выбирается та, что имеет
   наименьший `graph.preorder` — тот же самый порядок, что дал бы старый код.
 
-  Побочный эффект (не баг, специально сохранён) — раньше `compute_power`/
-  `autocraft_speed` проверялись НЕЗАВИСИМО на fires каждой отдельной ветки,
-  так что несколько веток, СОВМЕСТНО делящих ресурс, в СУММЕ могли превысить
-  лимит процессора/скорости за один и тот же вызов, хотя каждая по отдельности
-  укладывалась — теперь проверка идёт на уже АГРЕГИРОВАННЫЙ fires, как и
-  задумано лимитом (то есть заодно и лишний скрытый баг закрыт).
+  Мощность процессора проверяется на уже АГРЕГИРОВАННЫЙ заказ целиком, а не
+  на каждую ветку отдельно.
 
-  `_raw_shortfall`/`autocraft_preview` (сообщение "не хватает сырья"/окно
-  подтверждения) этим фиксом НЕ затронуты — они реактивные (вызываются один
-  раз при неудачном действии или открытии модалки, не каждый ход) и
-  используют свой более старый, per-branch алгоритм
-  (`_accumulate_raw_shortfall`/`_preview_node`), который частично гасит
-  повтор через сохранение остатка округления между вызовами, но при
-  экстремально глубокой рёконвергентной цепочке потенциально тоже мог бы
-  затормозить при ОТКРЫТИИ модалки/тексте ошибки (не при обычной игре). Если
-  когда-нибудь появится жалоба именно на это — тот же трёхпроходный подход
-  применим и здесь.
+  Список нехватки в тексте ошибки (`AutocraftFailure.missing`) берётся из той
+  же агрегации. Предпросмотр (`autocraft_preview`) выбирает рецепты по тому же
+  графу (`_order_route`), но само дерево (`_preview_node`) по-прежнему
+  раскрывается по КАЖДОМУ вхождению ресурса (так его и рисует модалка) — на
+  экстремально глубокой реконвергентной цепочке это могло бы затормозить
+  ОТКРЫТИЕ модалки (не обычную игру). Если появится жалоба именно на это —
+  рисовать дерево по графу, а не по вхождениям.
 - Удаление контента (например, руды из `mining_info`), пока в `save.json` уже
   есть ссылка на неё (`state.veins[...]`), может уронить движок KeyError —
   обратная совместимость сохранений при удалении контента не гарантируется.

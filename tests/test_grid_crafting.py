@@ -27,7 +27,7 @@ class FixtureTestCase(unittest.TestCase):
 
 class LocationCraftingTests(FixtureTestCase):
     def test_grid_location_reports_its_size(self):
-        self.assertEqual(engine.location_crafting("grid_loc"), {"width": 2, "height": 2})
+        self.assertEqual(engine.location_crafting("grid_loc"), {"width": 2, "height": 2, "batch": True})
 
     def test_plain_location_has_no_crafting(self):
         self.assertIsNone(engine.location_crafting("yard"))

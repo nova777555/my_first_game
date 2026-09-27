@@ -76,7 +76,10 @@ class AutocraftTests(FixtureTestCase):
 
     def test_autocraft_does_not_backfill_an_action_flagged_excluded_from_autocraft(self):
         # excluded_from_autocraft делает "final" неотличимым для автокрафта от ресурса
-        # без рецепта - заказ отклоняется сразу, ничего не изъято.
+        # без рецепта - заказ отклоняется сразу, ничего не изъято. Ритуалы фикстуры тоже
+        # дают "final" (ритуал - запасной источник для автокрафта) - убираем их, чтобы
+        # проверять только само действие.
+        engine.RITUAL_RECIPES = {}
         s = GameState(resources={"raw_a": 100, "raw_b": 100}, buildings={"automation_hub": 1})
         engine.MANUAL_ACTIONS["craft_final"]["excluded_from_autocraft"] = True
         self.addCleanup(lambda: engine.MANUAL_ACTIONS["craft_final"].pop("excluded_from_autocraft", None))
@@ -115,15 +118,13 @@ class AutocraftTests(FixtureTestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.message, "Не хватает ресурсов на «Собрать изделие». Не хватает: Полуфабрикат 2.")
 
-    def test_autocraft_reason_reverts_to_specific_once_a_processor_exists(self):
-        # Тот же craft_final, но теперь в игре есть bare_processor (мощности с
-        # избытком, mid он не разблокирует) - сообщение снова становится конкретным
-        # ("автокрафт ещё не открыт"), т.к. автокрафт для игрока уже "существует".
+    def test_processor_alone_does_not_make_an_unautomated_recipe_visible(self):
+        # Тот же craft_final, но в игре есть bare_processor (мощности с избытком) -
+        # рецепт mid не автоматизирован, автокрафт его не видит: та же простая нехватка.
         s = GameState(resources={"raw_b": 100}, buildings={"bare_processor": 1})
         result = engine.do_manual_action(s, "craft_final")
         self.assertFalse(result.ok)
-        self.assertIn("автокрафт", result.message)
-        self.assertIn("Полуфабрикат", result.message)
+        self.assertEqual(result.message, "Не хватает ресурсов на «Собрать изделие». Не хватает: Полуфабрикат 2.")
 
     def test_manual_action_failure_lists_all_missing_resources_directly_without_processor(self):
         # Без единого процессора недостача считается ПРЯМО по cost действия - оба
@@ -246,7 +247,7 @@ class AutocraftReconvergentGraphTests(unittest.TestCase):
         )
         s = GameState(buildings={"processor": 1}, resources={})
         failure = _order_now(s, {"x": 1})
-        self.assertEqual(failure, self.engine.AutocraftFailure("x", "no_recipe"))
+        self.assertEqual(failure, self.engine.AutocraftFailure("x", "no_recipe", missing={"x": 1}))
         self.assertEqual(s.resources, {})
 
 
@@ -1395,6 +1396,20 @@ class ResourceStorageTests(FixtureTestCase):
         self.assertIsNone(engine.next_storage_tier_info(s, "limited_res"))
         result = engine.upgrade_storage(s, "limited_res")
         self.assertFalse(result.ok)
+
+    def test_infinite_storage_tier_removes_cap_entirely(self):
+        # fixtures.RESOURCE_STORAGE["vault_res"] - тир 1 обычный (+20), тир 2 -
+        # "infinite": True вместо capacity_add (game/engine.py:storage_capacity).
+        s = GameState(resources={"raw_a": 100})
+        self.assertEqual(engine.storage_capacity(s, "vault_res"), 10)
+        engine.upgrade_storage(s, "vault_res")
+        self.assertEqual(engine.storage_capacity(s, "vault_res"), 30)  # 10 + 20
+        result = engine.upgrade_storage(s, "vault_res")
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("без ограничений", result.message)
+        # Тот же None, что у ресурса вообще без storage - клампа в конце хода нет.
+        self.assertIsNone(engine.storage_capacity(s, "vault_res"))
+        self.assertIsNone(engine.next_storage_tier_info(s, "vault_res"))
 
     def test_upgradable_storage_excludes_tech_locked_tier(self):
         s = GameState(resources={"raw_a": 100})
@@ -2723,6 +2738,56 @@ class QuestTests(FixtureTestCase):
             self.assertNotIn("upgrader", engine.check_quests(s))
             engine.purchase_building_upgrade(s, "flaky_typed", "flaky_typed_immune")
             self.assertIn("upgrader", engine.check_quests(s))
+
+    def test_storage_tier_at_least_quest(self):
+        s = GameState(resources={"raw_a": 100})
+        quest = {
+            "name": "Складовщик", "description": "Расширь склад дважды.",
+            "tier": 1,
+            "conditions": [{"type": "storage_tier_at_least", "resource": "limited_res", "amount": 2}],
+            "reward_case": "test_case",
+        }
+        with mock.patch.dict(engine.QUESTS, {"storage_quest": quest}):
+            self.assertNotIn("storage_quest", engine.check_quests(s))
+            engine.upgrade_storage(s, "limited_res")
+            self.assertNotIn("storage_quest", engine.check_quests(s))  # тир 1 < 2
+            s.techs.add("tech1")
+            engine.upgrade_storage(s, "limited_res")
+            self.assertIn("storage_quest", engine.check_quests(s))
+
+    def test_building_upgrade_level_at_least_quest(self):
+        # fixtures.BUILDINGS["apiary"]["upgrades"][0] == "apiary_slot_bonus" -
+        # repeatable, покупается многократно (game/engine.py:building_upgrade_purchase_count).
+        s = GameState(buildings={"apiary": 1}, resources={"raw_a": 100})
+        quest = {
+            "name": "Пчеловод", "description": "Купи доп. слот пасеки дважды.",
+            "tier": 1,
+            "conditions": [{"type": "building_upgrade_level_at_least", "building": "apiary", "upgrade": "apiary_slot_bonus", "amount": 2}],
+            "reward_case": "test_case",
+        }
+        with mock.patch.dict(engine.QUESTS, {"level_quest": quest}):
+            engine.purchase_building_upgrade(s, "apiary", "apiary_slot_bonus")
+            self.assertNotIn("level_quest", engine.check_quests(s))  # уровень 1 < 2
+            engine.purchase_building_upgrade(s, "apiary", "apiary_slot_bonus")
+            self.assertIn("level_quest", engine.check_quests(s))
+
+    def test_building_upgrade_type_purchased_any_quest(self):
+        # fixtures.BUILDINGS["matter_generator"]["upgrades"][1] == "matter_auto"
+        # (type "autocraft") - условие не привязано к конкретной постройке, сработает
+        # от покупки этого типа улучшения у ЛЮБОЙ постройки в игре.
+        s = GameState(buildings={"matter_generator": 1}, resources={"raw_a": 100})
+        quest = {
+            "name": "Автоматизатор", "description": "Купи автоматизацию хоть где-нибудь.",
+            "tier": 1,
+            "conditions": [{"type": "building_upgrade_type_purchased_any", "upgrade_type": "autocraft"}],
+            "reward_case": "test_case",
+        }
+        with mock.patch.dict(engine.QUESTS, {"auto_quest": quest}):
+            self.assertFalse(engine.building_upgrade_type_purchased_anywhere(s, "autocraft"))
+            self.assertNotIn("auto_quest", engine.check_quests(s))
+            engine.purchase_building_upgrade(s, "matter_generator", "matter_auto")
+            self.assertTrue(engine.building_upgrade_type_purchased_anywhere(s, "autocraft"))
+            self.assertIn("auto_quest", engine.check_quests(s))
 
 
 class HistoryAndStatsTests(FixtureTestCase):

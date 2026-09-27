@@ -36,7 +36,7 @@ class SkillTests(FixtureTestCase):
         self.assertEqual(engine.skill_level(s, "combat"), 1)
         s.skill_xp["combat"] = 10
         self.assertEqual(engine.skill_level(s, "combat"), 2)
-        self.assertEqual(engine.skill_level_effects(s, "combat"), {"damage": 100})
+        self.assertEqual(engine.skill_level_effects(s, "combat"), {"damage": 100, "max_hp": 15})
 
     def test_unknown_skill_defaults_to_level_1_empty_effects(self):
         s = GameState()
@@ -285,6 +285,149 @@ class CombatMovesTests(FixtureTestCase):
         self.assertEqual(s.active_encounter["remaining_hp"], 41)
 
 
+class PlayerHpAndArmorTests(FixtureTestCase):
+    """HP игрока/броня/дебафф "Ранен" (game/engine.py:player_max_hp/
+    current_player_hp/is_wounded/_armor_bonuses, attack_encounter - ответный
+    удар моба). fixtures.COMBAT_SETTINGS: player_base_hp=20, hp_regen_per_turn=3,
+    wounded_turns=5, wounded_damage_multiplier=0.5. fixtures.MOBS: test_mob.damage=4,
+    test_boss.damage=15. fixtures.SKILLS["combat"] level 2 (xp>=10) добавляет
+    max_hp=15. fixtures.TOOLS["armor"] тир 2: max_hp_bonus=10, damage_reduction=2."""
+
+    def test_player_max_hp_is_base_by_default(self):
+        s = GameState()
+        self.assertEqual(engine.player_max_hp(s), 20)
+
+    def test_player_max_hp_adds_skill_bonus(self):
+        s = GameState(skill_xp={"combat": 10})  # уровень 2
+        self.assertEqual(engine.player_max_hp(s), 35)
+
+    def test_player_max_hp_adds_armor_bonus(self):
+        s = GameState(tool_tiers={"armor": 2})
+        self.assertEqual(engine.player_max_hp(s), 30)
+
+    def test_player_max_hp_combines_skill_and_armor(self):
+        s = GameState(skill_xp={"combat": 10}, tool_tiers={"armor": 2})
+        self.assertEqual(engine.player_max_hp(s), 45)
+
+    def test_current_player_hp_defaults_to_max_when_none(self):
+        s = GameState()
+        self.assertIsNone(s.player_hp)
+        self.assertEqual(engine.current_player_hp(s), 20)
+
+    def test_current_player_hp_clamps_into_valid_range(self):
+        s = GameState(player_hp=999)
+        self.assertEqual(engine.current_player_hp(s), 20)
+        s2 = GameState(player_hp=-5)
+        self.assertEqual(engine.current_player_hp(s2), 0)
+
+    def test_is_wounded_false_without_debuff(self):
+        s = GameState()
+        self.assertFalse(engine.is_wounded(s))
+
+    def test_is_wounded_true_while_turn_within_deadline(self):
+        s = GameState(wounded_until_turn=1)  # state.turn по умолчанию 1
+        self.assertTrue(engine.is_wounded(s))
+
+    def test_non_lethal_hit_deals_retaliation_damage(self):
+        s = GameState()
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        result = engine.attack_encounter(s)
+        self.assertTrue(result.ok, result.message)
+        self.assertFalse(result.combat["killed"])
+        self.assertEqual(result.combat["player_damage_taken"], 4)
+        self.assertEqual(result.combat["player_hp"], 16)
+        self.assertEqual(result.combat["player_max_hp"], 20)
+        self.assertFalse(result.combat["defeated"])
+        self.assertEqual(s.player_hp, 16)
+
+    def test_armor_reduces_retaliation_damage(self):
+        s = GameState(tool_tiers={"armor": 2})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        result = engine.attack_encounter(s)
+        self.assertTrue(result.ok, result.message)
+        # damage_reduction=2 -> 4 - 2 = 2, а не 4 без брони.
+        self.assertEqual(result.combat["player_damage_taken"], 2)
+        self.assertEqual(s.player_hp, 28)  # max_hp 30 (база 20 + броня 10) - 2
+
+    def test_killing_blow_grants_no_retaliation(self):
+        # Уровень навыка 2 -> урон 100, test_mob (hp=10) убит одним ударом -
+        # ответка не считается вовсе, player_hp/state.player_hp не трогаются.
+        s = GameState(skill_xp={"combat": 10})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        result = engine.attack_encounter(s)
+        self.assertTrue(result.ok, result.message)
+        self.assertTrue(result.combat["killed"])
+        self.assertEqual(result.combat["player_damage_taken"], 0)
+        self.assertFalse(result.combat["defeated"])
+        self.assertEqual(result.combat["player_max_hp"], 35)  # база 20 + навык 15
+        self.assertEqual(result.combat["player_hp"], 35)
+        self.assertIsNone(s.player_hp)
+
+    def test_instant_kill_grants_no_retaliation(self):
+        s = GameState(tool_tiers={"sword": 2})  # instant_kill_max_hp=8
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 8}
+        result = engine.attack_encounter(s)
+        self.assertTrue(result.ok, result.message)
+        self.assertTrue(result.combat["instant_kill"])
+        self.assertEqual(result.combat["player_damage_taken"], 0)
+        self.assertIsNone(s.player_hp)
+
+    def test_defeat_at_zero_hp_ends_encounter_and_applies_wounded_debuff(self):
+        s = GameState(player_hp=3)
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        result = engine.attack_encounter(s)
+        self.assertTrue(result.ok, result.message)
+        self.assertTrue(result.combat["defeated"])
+        self.assertEqual(result.combat["player_hp"], 0)
+        self.assertIsNone(s.active_encounter)
+        self.assertEqual(s.player_hp, 0)
+        self.assertEqual(s.wounded_until_turn, s.turn + 5)
+        self.assertIn("Ранен", result.message)
+        # Поражение - НЕ убийство: лут/опыт/душа не выданы.
+        self.assertEqual(s.resources.get("raw_a", 0), 0)
+        self.assertNotIn("test_soul", s.resources)
+
+    def test_search_mob_any_blocked_at_zero_hp(self):
+        s = GameState(player_hp=0)
+        result = engine.search_mob_any(s, "hunting_loc")
+        self.assertFalse(result.ok)
+        self.assertIsNone(s.active_encounter)
+
+    def test_summon_boss_blocked_at_zero_hp_before_paying_cost(self):
+        s = GameState(player_hp=0, resources={"raw_a": 5})
+        result = engine.summon_boss(s, "test_boss")
+        self.assertFalse(result.ok)
+        self.assertIsNone(s.active_encounter)
+        self.assertEqual(s.resources["raw_a"], 5)  # цена НЕ списана
+
+    def test_wounded_debuff_halves_player_damage_output(self):
+        s = GameState(wounded_until_turn=1)  # state.turn=1 по умолчанию -> ранен
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        result = engine.attack_encounter(s)
+        self.assertTrue(result.ok, result.message)
+        # Обычный урон 3 (навык 1) * 0.5 -> ceil(1.5) = 2, а не 3.
+        self.assertEqual(result.combat["damage"], 2)
+
+    def test_process_combat_regenerates_hp_only_outside_encounter(self):
+        s = GameState(player_hp=10)
+        engine.advance_turn(s)
+        self.assertEqual(s.player_hp, 13)  # +3/ход вне схватки
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 5}
+        engine.advance_turn(s)
+        self.assertEqual(s.player_hp, 13)  # не регенерирует во время схватки
+
+    def test_process_combat_clears_wounded_debuff_once_turn_passes(self):
+        s = GameState(wounded_until_turn=2)
+        engine.advance_turn(s)
+        self.assertEqual(s.turn, 2)
+        self.assertTrue(engine.is_wounded(s))
+        self.assertEqual(s.wounded_until_turn, 2)
+        engine.advance_turn(s)
+        self.assertEqual(s.turn, 3)
+        self.assertIsNone(s.wounded_until_turn)
+        self.assertFalse(engine.is_wounded(s))
+
+
 class BossTurnLimitTests(FixtureTestCase):
     def test_summon_sets_deadline_when_turn_limit_present(self):
         s = GameState(resources={"raw_a": 5})
@@ -324,15 +467,48 @@ class BossTurnLimitTests(FixtureTestCase):
 
 
 class SoulCollectorTests(FixtureTestCase):
+    """С перехода на per-instance слоты (2026-09-18, см. state.py:
+    soul_collector_instances) синтезатор душ - зеркало пасек: у каждого
+    ФИЗИЧЕСКОГО экземпляра свой пул слотов/апгрейдов, insert_soul/remove_soul
+    берут instance_id (как house_creature/release_creature - farm_instance_id),
+    не id типа постройки. _instance(s) - хелпер, достающий id единственного
+    экземпляра soul_synth в фикстуре (мирроит паттерн
+    test_repeatable_farm_instance_upgrade_stacks_per_instance)."""
+
+    def _instance(self, s):
+        engine._ensure_soul_collector_instances(s)
+        return next(iter(s.soul_collector_instances))
+
     def test_capacity_zero_without_building(self):
         s = GameState()
         self.assertEqual(engine.soul_collector_capacity(s, "soul_synth"), 0)
 
+    def test_deferred_soul_instance_upgrade_is_registered_in_pending_retry(self):
+        # Регрессия: тот же баг, что у reactor_instance_upgrade (см.
+        # tests/test_reactor.py) - таблица выполнения заказов (_ORDER_RETRY) не знала
+        # kind "soul_instance_upgrade" (см. purchase_soul_collector_instance_upgrade),
+        # заказ по готовности падал бы KeyError.
+        s = GameState(buildings={"soul_synth": 1}, resources={"raw_a": 100})
+        instance_id = self._instance(s)
+        s.orders.append({
+            "id": 1, "kind": "soul_instance_upgrade", "target_id": f"{instance_id}:soul_synth_slot", "label": "улучшение (тест)",
+            "reserved": {}, "steps": [], "energy_reserve": 0, "final_energy": 0, "status": None, "waits_energy": False,
+        })
+        report = engine.ProductionReport()
+        engine._process_orders(s, report, {})  # не должно бросить KeyError
+        self.assertIn("soul_synth_slot", s.soul_collector_instances[instance_id]["upgrades"])
+        self.assertEqual(s.orders, [])
+        self.assertIn("улучшение (тест)", report.pending_finished)
+
     def test_capacity_scales_with_working_copies_and_upgrade(self):
         s = GameState(buildings={"soul_synth": 2}, resources={"raw_a": 100})
         self.assertEqual(engine.soul_collector_capacity(s, "soul_synth"), 2)
-        engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_slot")
+        engine._ensure_soul_collector_instances(s)
+        instance_id = next(iter(s.soul_collector_instances))
+        engine.purchase_soul_collector_instance_upgrade(s, instance_id, "soul_synth_slot")
         self.assertEqual(engine.soul_collector_capacity(s, "soul_synth"), 3)
+        # Апгрейд куплен только на ОДИН экземпляр - у второго capacity не изменилась.
+        self.assertEqual(engine.soul_collector_instance_capacity(s, instance_id), 2)
 
     def test_capacity_ignores_broken_copies(self):
         s = GameState(buildings={"soul_synth": 2}, broken={"soul_synth": 1})
@@ -340,9 +516,11 @@ class SoulCollectorTests(FixtureTestCase):
 
     def test_capacity_zero_when_all_broken_even_with_upgrade(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"raw_a": 100, "test_soul": 1})
-        engine.insert_soul(s, "soul_synth", "test_soul")
-        engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_slot")
+        instance_id = self._instance(s)
+        engine.insert_soul(s, instance_id, "test_soul")
+        engine.purchase_soul_collector_instance_upgrade(s, instance_id, "soul_synth_slot")
         s.broken["soul_synth"] = 1
+        s.soul_collector_instances[instance_id]["broken"] = True
         self.assertEqual(engine.soul_collector_capacity(s, "soul_synth"), 0)
         with mock.patch("random.random", return_value=0.9):  # chance 0.5 fails
             engine.advance_turn(s)
@@ -350,44 +528,48 @@ class SoulCollectorTests(FixtureTestCase):
 
     def test_insert_rejects_unaccepted_soul(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"raw_b": 1})
-        result = engine.insert_soul(s, "soul_synth", "raw_b")
+        result = engine.insert_soul(s, self._instance(s), "raw_b")
         self.assertFalse(result.ok)
 
     def test_insert_rejects_without_stock(self):
         s = GameState(buildings={"soul_synth": 1})
-        result = engine.insert_soul(s, "soul_synth", "test_soul")
+        result = engine.insert_soul(s, self._instance(s), "test_soul")
         self.assertFalse(result.ok)
 
     def test_insert_rejects_when_no_free_slot(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"test_soul": 2})
-        engine.insert_soul(s, "soul_synth", "test_soul")
-        result = engine.insert_soul(s, "soul_synth", "test_soul")
+        instance_id = self._instance(s)
+        engine.insert_soul(s, instance_id, "test_soul")
+        result = engine.insert_soul(s, instance_id, "test_soul")
         self.assertFalse(result.ok)
         self.assertEqual(s.resources["test_soul"], 1)
 
     def test_insert_and_remove_round_trip(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"test_soul": 1})
-        engine.insert_soul(s, "soul_synth", "test_soul")
+        instance_id = self._instance(s)
+        engine.insert_soul(s, instance_id, "test_soul")
         self.assertEqual(s.resources["test_soul"], 0)
-        self.assertEqual(s.soul_slots["soul_synth"], ["test_soul"])
-        result = engine.remove_soul(s, "soul_synth", 0)
+        self.assertEqual(s.soul_collector_instances[instance_id]["installed"], ["test_soul"])
+        result = engine.remove_soul(s, instance_id, 0)
         self.assertTrue(result.ok)
         self.assertEqual(s.resources["test_soul"], 1)
-        self.assertEqual(s.soul_slots["soul_synth"], [])
+        self.assertEqual(s.soul_collector_instances[instance_id]["installed"], [])
 
     def test_soul_is_eternal_and_keeps_producing_across_turns(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"test_soul": 1})
-        engine.insert_soul(s, "soul_synth", "test_soul")
+        instance_id = self._instance(s)
+        engine.insert_soul(s, instance_id, "test_soul")
         with mock.patch("random.random", return_value=0.9):  # chance 0.5 fails
             engine.advance_turn(s)
             engine.advance_turn(s)
         self.assertEqual(s.resources["raw_a"], 6)  # 3/ход * 2 хода, гарантированная часть
-        self.assertEqual(s.soul_slots["soul_synth"], ["test_soul"])  # душа никуда не делась
+        self.assertEqual(s.soul_collector_instances[instance_id]["installed"], ["test_soul"])  # душа никуда не делась
 
     def test_soul_production_chance_part_and_efficiency_upgrade(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"test_soul": 1, "raw_a": 100})
-        engine.insert_soul(s, "soul_synth", "test_soul")
-        engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_eff")  # -5 raw_a -> 95
+        instance_id = self._instance(s)
+        engine.insert_soul(s, instance_id, "test_soul")
+        engine.purchase_soul_collector_instance_upgrade(s, instance_id, "soul_synth_eff")  # -5 raw_a -> 95
         with mock.patch("random.random", return_value=0.1):  # chance 0.5 succeeds
             engine.advance_turn(s)
         # (raw_a: 3, raw_b: 1) * efficiency(2) = raw_a +6, raw_b +2
@@ -396,36 +578,77 @@ class SoulCollectorTests(FixtureTestCase):
 
     def test_souls_beyond_capacity_do_not_produce(self):
         s = GameState(buildings={"soul_synth": 1}, resources={"test_soul": 2})
-        engine.insert_soul(s, "soul_synth", "test_soul")
-        s.soul_slots["soul_synth"].append("test_soul")  # обходим лимит слотов напрямую
+        instance_id = self._instance(s)
+        engine.insert_soul(s, instance_id, "test_soul")
+        s.soul_collector_instances[instance_id]["installed"].append("test_soul")  # обходим лимит слотов напрямую
         with mock.patch("random.random", return_value=0.9):
             engine.advance_turn(s)
         self.assertEqual(s.resources.get("raw_a", 0), 3)  # только 1 (capacity) из 2 произвёл
 
+    def test_upgrade_does_not_leak_into_other_instance(self):
+        s = GameState(buildings={"soul_synth": 2}, resources={"raw_a": 100})
+        engine._ensure_soul_collector_instances(s)
+        ids = list(s.soul_collector_instances)
+        engine.purchase_soul_collector_instance_upgrade(s, ids[0], "soul_synth_slot")
+        self.assertEqual(engine.soul_collector_instance_capacity(s, ids[0]), 2)
+        self.assertEqual(engine.soul_collector_instance_capacity(s, ids[1]), 1)
+
+    def test_old_save_migrates_legacy_soul_slots_into_instances(self):
+        # Имитация сохранения СТАРШЕ перехода на per-instance слоты (2026-09-18,
+        # см. CLAUDE.md/state.py:soul_collector_instances) - state.soul_slots
+        # хранит души ПО ТИПУ постройки, state.soul_collector_instances ещё пуст.
+        # _ensure_soul_collector_instances обязана разложить их round-robin по
+        # новосозданным экземплярам, ничего не потеряв.
+        s = GameState(buildings={"soul_synth": 2}, soul_slots={"soul_synth": ["test_soul", "test_soul"]})
+        engine._ensure_soul_collector_instances(s)
+        self.assertEqual(len(s.soul_collector_instances), 2)
+        installed_total = sum(len(inst["installed"]) for inst in s.soul_collector_instances.values())
+        self.assertEqual(installed_total, 2)
+        self.assertTrue(all(inst["installed"] == ["test_soul"] for inst in s.soul_collector_instances.values()))
+        self.assertEqual(s.soul_slots["soul_synth"], [])
+
+    def test_demolish_removes_the_physical_instance_and_its_installed_soul(self):
+        # Снос постройки-синтезатора (engine.demolish_building) удаляет ЦЕЛИКОМ
+        # физический экземпляр вместе со вставленной душой - без возврата чего-либо
+        # (тот же принцип, что у обычных построек, см. CLAUDE.md).
+        s = GameState(buildings={"soul_synth": 1})
+        instance_id = self._instance(s)
+        engine.insert_soul(s, instance_id, "test_soul")
+        result = engine.demolish_building(s, "soul_synth")
+        self.assertTrue(result.ok, result.message)
+        self.assertEqual(s.buildings["soul_synth"], 0)
+        self.assertNotIn(instance_id, s.soul_collector_instances)
+
 
 class RepeatableUpgradeTests(FixtureTestCase):
+    """Апгрейды soul_collector переехали на per-instance (см. SoulCollectorTests
+    выше) - эти тесты проверяют ОБЩУЮ механику purchase_building_upgrade/
+    repeatable_upgrade_cost (по-прежнему ПО ТИПУ постройки для построек без
+    физических экземпляров), поэтому переведены на energy_converter/automator -
+    те же самые числа cost/growth, что были у soul_synth_eff/soul_synth_slot."""
+
     def test_non_repeatable_upgrade_rejects_second_purchase(self):
-        s = GameState(buildings={"soul_synth": 1}, resources={"raw_a": 100})
-        engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_eff")
-        result = engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_eff")
+        s = GameState(buildings={"energy_converter": 1}, resources={"raw_a": 100})
+        engine.purchase_building_upgrade(s, "energy_converter", "conv_cap_1")
+        result = engine.purchase_building_upgrade(s, "energy_converter", "conv_cap_1")
         self.assertFalse(result.ok)
-        self.assertEqual(engine.building_upgrade_purchase_count(s, "soul_synth", "soul_synth_eff"), 1)
+        self.assertEqual(engine.building_upgrade_purchase_count(s, "energy_converter", "conv_cap_1"), 1)
 
     def test_repeatable_building_upgrade_stacks_value_and_cost_grows(self):
-        s = GameState(buildings={"soul_synth": 1}, resources={"raw_a": 100})
-        r1 = engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_slot")
+        s = GameState(buildings={"automator": 1}, resources={"raw_a": 100})
+        r1 = engine.purchase_building_upgrade(s, "automator", "automator_slot")
         self.assertTrue(r1.ok, r1.message)
         self.assertEqual(s.resources["raw_a"], 98)  # cost 2 * growth^0 = 2
-        r2 = engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_slot")
+        r2 = engine.purchase_building_upgrade(s, "automator", "automator_slot")
         self.assertTrue(r2.ok, r2.message)
         self.assertEqual(s.resources["raw_a"], 94)  # cost 2 * growth^1 = 4
-        self.assertEqual(engine.building_upgrade_purchase_count(s, "soul_synth", "soul_synth_slot"), 2)
-        self.assertEqual(engine.soul_collector_capacity(s, "soul_synth"), 3)  # base 1 + 2*1
+        self.assertEqual(engine.building_upgrade_purchase_count(s, "automator", "automator_slot"), 2)
+        self.assertEqual(engine.automation_slots_capacity(s, "automator"), 3)  # base 1 + 2*1
 
     def test_resolve_action_cost_reflects_current_repeatable_price(self):
-        s = GameState(buildings={"soul_synth": 1}, resources={"raw_a": 100})
-        engine.purchase_building_upgrade(s, "soul_synth", "soul_synth_slot")
-        cost = engine.resolve_action_cost(s, "building_upgrade", "soul_synth:soul_synth_slot")
+        s = GameState(buildings={"automator": 1}, resources={"raw_a": 100})
+        engine.purchase_building_upgrade(s, "automator", "automator_slot")
+        cost = engine.resolve_action_cost(s, "building_upgrade", "automator:automator_slot")
         self.assertEqual(cost, {"raw_a": 4})
 
     def test_repeatable_farm_instance_upgrade_stacks_per_instance(self):

@@ -323,6 +323,20 @@ class GameState:
     # от "pinned" (это уже занято ресурсами на главной панели, см. выше) - тот же
     # принцип "закреплённое переживает закрытие модалки", что автоматизация/души.
     pinned_recipes: list[str] = field(default_factory=list)
+    # Репликации в репликаторах (buildings.*.replicator) - см. game/engine.py:
+    # replicate/_process_replicator_jobs. Материя списана целиком при запуске,
+    # job перерабатывает её не быстрее лимита за ход и выдаёт ресурс по мере
+    # переработки. Каждый элемент - {"id", "building_id", "resource_id", "qty",
+    # "cost", "progress", "delivered"} (+ "order_id"/"order_resource" у партии заказа).
+    replicator_jobs: list[dict] = field(default_factory=list)
+    # Плавильни (buildings.*.smeltery) - building_id -> {"slots": [None | {"recipe_id",
+    # "turns_done", "cost"}], "tank": {resource_id: amount}, "cast": None | {"recipe_id",
+    # "turns_done", "turns_total"}}. Агрегация по ТИПУ постройки, как ritual_jobs. cost
+    # слота - то, что списано при загрузке (возвращается при выемке). Слот с turns_done >=
+    # длительности рецепта просто ждёт места в тигле. См. game/engine.py: smeltery_*.
+    smelteries: dict[str, dict] = field(default_factory=dict)
+    # id сплавов с alloy_recipes.*.hidden, которые игрок уже открыл пробой (alloy_smeltery).
+    discovered_alloys: set[str] = field(default_factory=set)
 
     def to_dict(self) -> dict:
         return {
@@ -393,6 +407,16 @@ class GameState:
             },
             "ritual_jobs": self.ritual_jobs,
             "pinned_recipes": self.pinned_recipes,
+            "replicator_jobs": self.replicator_jobs,
+            "smelteries": {
+                bid: {
+                    "slots": [dict(s) if s else None for s in sm.get("slots", [])],
+                    "tank": dict(sm.get("tank", {})),
+                    "cast": dict(sm["cast"]) if sm.get("cast") else None,
+                }
+                for bid, sm in self.smelteries.items()
+            },
+            "discovered_alloys": sorted(self.discovered_alloys),
         }
 
     @classmethod
@@ -476,6 +500,16 @@ class GameState:
             },
             ritual_jobs={k: dict(v) for k, v in data.get("ritual_jobs", {}).items()},
             pinned_recipes=list(data.get("pinned_recipes", [])),
+            replicator_jobs=[dict(j) for j in data.get("replicator_jobs", [])],
+            smelteries={
+                bid: {
+                    "slots": [dict(s) if s else None for s in sm.get("slots", [])],
+                    "tank": dict(sm.get("tank", {})),
+                    "cast": dict(sm["cast"]) if sm.get("cast") else None,
+                }
+                for bid, sm in data.get("smelteries", {}).items()
+            },
+            discovered_alloys=set(data.get("discovered_alloys", [])),
         )
 
     def save(self, path: str) -> None:

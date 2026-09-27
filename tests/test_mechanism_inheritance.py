@@ -89,14 +89,19 @@ class InheritedMechanismTests(unittest.TestCase):
         cost, _ = engine.effective_manual_action_stats("mechanism_a_energy_action", s)
         self.assertEqual(cost, {"energy": 5, "raw_a": 1})
 
-    def test_autocraft_names_the_inherited_mechanism(self):
-        for hub in ("automation_hub", "trickle_hub"):
-            engine.BUILDINGS[hub]["unlocks_autocraft"].append("mech_output")
-        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1})
-        failure = engine.ensure_and_pay(s, {"mech_output": 3})
-        self.assertEqual((failure.reason, failure.building_id), ("building_missing", "mechanism_a"))
+    def test_autocraft_needs_the_inherited_mechanism(self):
+        # Рецепт наследует mechanism_a от локации: без постройки автокрафт его не видит
+        # (mech_output просто не хватает), с постройкой и её «Автоматизацией» - оформляется.
+        engine.BUILDINGS["mechanism_a"]["upgrades"].append({
+            "id": "mech_a_auto", "name": "Автоматизация", "description": ".",
+            "type": "autocraft", "value": 1, "requires_tech": None, "cost": {},
+        })
+        s = GameState(resources={"raw_a": 10}, buildings={"automation_hub": 1}, building_upgrades={"mechanism_a": ["mech_a_auto"]})
+        failure, _ = engine._place_order(s, "recipe", "x", "тест", {"mech_output": 3})
+        self.assertEqual((failure.reason, failure.missing), ("no_recipe", {"mech_output": 3}))
         s.buildings["mechanism_a"] = 1
-        self.assertIsNone(engine.ensure_and_pay(s, {"mech_output": 3}))
+        failure, order = engine._place_order(s, "recipe", "x", "тест", {"mech_output": 3})
+        self.assertIsNone(failure)
 
 
 class InheritedMechanismWebUiTests(unittest.TestCase):
@@ -115,6 +120,33 @@ class InheritedMechanismWebUiTests(unittest.TestCase):
         self.assertIn("mechanism_a_action", deps)
         self.assertIn("mechanism_a_energy_action", deps)
 
+    def test_converter_opens_as_a_button_in_its_parent(self):
+        # Преобразователь - механизм, в котором нет ничего, кроме рецептов за энергию.
+        self.assertTrue(self.web_ui._location_opens_as_button("converter"))
+
+    def test_grid_location_with_a_plain_action_stays_a_room(self):
+        # grid_loc: кроме сеточных рецептов в нём есть обычное действие без узора.
+        self.assertFalse(self.web_ui._location_opens_as_button("grid_loc"))
+        self.web_ui.MANUAL_ACTIONS = {
+            aid: a for aid, a in self.web_ui.MANUAL_ACTIONS.items()
+            if a.get("location") != "grid_loc" or a.get("pattern")
+        }
+        self.assertTrue(self.web_ui._location_opens_as_button("grid_loc"))
+
+    def test_location_without_a_mechanism_is_never_a_button(self):
+        self.assertFalse(self.web_ui._location_opens_as_button("mechanism_a_loc"))
+        self.assertFalse(self.web_ui._location_opens_as_button("yard"))
+
+    def test_view_carries_both_location_flags(self):
+        self.web_ui.LOCATIONS = copy.deepcopy(self.web_ui.LOCATIONS)
+        self.web_ui.LOCATIONS["mechanisms"]["shows_building_mechanisms"] = True
+        view = self.web_ui.build_view(GameState())
+        locs = {l["id"]: l for l in view["locations"]}
+        self.assertTrue(locs["mechanisms"]["shows_building_mechanisms"])
+        self.assertFalse(locs["yard"]["shows_building_mechanisms"])
+        self.assertTrue(locs["converter"]["as_button"])
+        self.assertFalse(locs["yard"]["as_button"])
+
 
 class InheritedMechanismValidationTests(unittest.TestCase):
     def test_duration_reduction_counts_recipes_inherited_from_the_location(self):
@@ -122,6 +154,13 @@ class InheritedMechanismValidationTests(unittest.TestCase):
         del data["manual_actions"]["mechanism_a_delayed_action"]["requires_building"]
         errors = cv.validate(data)
         self.assertFalse([e for e in errors if "action_duration_reduction" in e], errors)
+
+    def test_shows_building_mechanisms_must_be_a_bool(self):
+        data = fixtures.as_content_dict()
+        data["locations"]["mechanisms"]["shows_building_mechanisms"] = True
+        self.assertEqual(cv.validate(copy.deepcopy(data)), [])
+        data["locations"]["mechanisms"]["shows_building_mechanisms"] = "да"
+        self.assertTrue(any("shows_building_mechanisms" in e for e in cv.validate(data)))
 
 
 if __name__ == "__main__":

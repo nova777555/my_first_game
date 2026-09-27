@@ -62,23 +62,28 @@
             "requires_tech": "woodworking"
           }
         ]
-      }
+      },
+      "replication_cost": 0.05
     },
     {
       "id": "stone",
-      "name": "Камень"
+      "name": "Камень",
+      "replication_cost": 0.05
     },
     {
       "id": "planks",
-      "name": "Доски"
+      "name": "Доски",
+      "replication_cost": 0.15
     },
     {
       "id": "tools",
-      "name": "Инструменты"
+      "name": "Инструменты",
+      "replication_cost": 1.5
     },
     {
       "id": "charcoal",
-      "name": "Уголь"
+      "name": "Уголь",
+      "replication_cost": 0.2
     },
     {
       "id": "ore",
@@ -127,11 +132,13 @@
           "F": "#cba686",
           "G": "#9b714c"
         }
-      }
+      },
+      "replication_cost": 0.5
     },
     {
       "id": "metal",
-      "name": "Металл"
+      "name": "Металл",
+      "replication_cost": 1.2
     },
     {
       "id": "uranium",
@@ -178,7 +185,8 @@
           "D": "#b0e860",
           "E": "#ceff8c"
         }
-      }
+      },
+      "replication_cost": 6
     },
     {
       "id": "bee",
@@ -186,7 +194,8 @@
     },
     {
       "id": "honey",
-      "name": "Мёд"
+      "name": "Мёд",
+      "replication_cost": 0.8
     },
     {
       "id": "royal_jelly",
@@ -198,11 +207,13 @@
     },
     {
       "id": "bone",
-      "name": "Кость"
+      "name": "Кость",
+      "replication_cost": 0.4
     },
     {
       "id": "wolf_pelt",
-      "name": "Волчья шкура"
+      "name": "Волчья шкура",
+      "replication_cost": 1
     },
     {
       "id": "wolf_soul",
@@ -283,6 +294,724 @@
           "C": "#8a5a34"
         }
       }
+    },
+    {
+      "id": "fuel_rod_crude",
+      "name": "Сырой топливный стержень",
+      "reactor_component": {
+        "role": "fuel",
+        "heat": 3.5,
+        "output": 5.0,
+        "burnup_per_turn": 1,
+        "charge_max": 10,
+        "spent_result": "spent_fuel_rod"
+      }
+    },
+    {
+      "id": "fuel_rod_uranium",
+      "name": "Урановый топливный стержень",
+      "reactor_component": {
+        "role": "fuel",
+        "heat": 5.6,
+        "output": 7.0,
+        "burnup_per_turn": 1,
+        "charge_max": 20,
+        "spent_result": "spent_fuel_rod"
+      }
+    },
+    {
+      "id": "spent_fuel_rod",
+      "name": "Отработанный топливный стержень"
+    },
+    {
+      "id": "reactor_moderator",
+      "name": "Замедлитель нейтронов",
+      "reactor_component": {
+        "role": "moderator",
+        "power": 1.1
+      }
+    },
+    {
+      "id": "reactor_coolant",
+      "name": "Теплоноситель",
+      "reactor_component": {
+        "role": "coolant",
+        "power": 2.5
+      }
+    },
+    {
+      "id": "reactor_absorber",
+      "name": "Поглотитель",
+      "reactor_component": {
+        "role": "absorber",
+        "power": 1.0
+      }
+    },
+    {
+      "id": "reactor_radiator",
+      "name": "Радиатор",
+      "reactor_component": {
+        "role": "shield",
+        "power": 1.0
+      }
+    },
+    {
+      "id": "reactor_reflector",
+      "name": "Нейтронный отражатель",
+      "reactor_component": {
+        "role": "reflector",
+        "power": 1.5
+      }
+    },
+    {
+      "id": "reactor_reflector_improved",
+      "name": "Улучшенный отражатель",
+      "reactor_component": {
+        "role": "reflector",
+        "power": 2.5
+      }
+    },
+    {
+      "id": "reactor_coolant_improved",
+      "name": "Улучшенный теплоноситель",
+      "reactor_component": {
+        "role": "coolant",
+        "power": 6.0
+      }
+    },
+    {
+      "id": "reactor_moderator_improved",
+      "name": "Улучшенный замедлитель",
+      "reactor_component": {
+        "role": "moderator",
+        "power": 2.0
+      }
+    },
+    {
+      "id": "reactor_absorber_improved",
+      "name": "Улучшенный поглотитель",
+      "reactor_component": {
+        "role": "absorber",
+        "power": 1.6
+      }
+    },
+    {
+      "id": "reactor_radiator_improved",
+      "name": "Улучшенный радиатор",
+      "reactor_component": {
+        "role": "shield",
+        "power": 1.8
+      }
+    },
+    {
+      "id": "fuel_rod_enriched",
+      "name": "Обогащённый топливный стержень",
+      "reactor_component": {
+        "role": "fuel",
+        "heat": 10.0,
+        "output": 11.0,
+        "burnup_per_turn": 1,
+        "charge_max": 10,
+        "spent_result": "spent_fuel_rod"
+      }
+    },
+    {
+      "id": "fuel_rod_natural",
+      "name": "Природный топливный стержень",
+      "reactor_component": {
+        "role": "fuel",
+        "heat": 2.0,
+        "output": 4.0,
+        "burnup_per_turn": 1,
+        "charge_max": 45,
+        "spent_result": "spent_fuel_rod"
+      }
+    },
+    {
+      "id": "reactor_catalyst_overdrive",
+      "name": "Катализатор форсажа",
+      "reactor_catalyst": {
+        "applies_to": [
+          "fuel"
+        ],
+        "self_stat": "heat_output",
+        "self_pct": 0.6,
+        "neighbor_malus_pct": 0.06
+      }
+    },
+    {
+      "id": "reactor_catalyst_stabilizer",
+      "name": "Катализатор стабилизации",
+      "reactor_catalyst": {
+        "applies_to": [
+          "fuel"
+        ],
+        "self_stat": "burnup",
+        "self_pct": 0.6,
+        "neighbor_malus_pct": 0.06
+      }
+    },
+    {
+      "id": "reactor_catalyst_field",
+      "name": "Катализатор поля",
+      "reactor_catalyst": {
+        "applies_to": [
+          "fuel"
+        ],
+        "self_stat": "field",
+        "self_pct": 0.9,
+        "self_pct_heat": -0.6,
+        "neighbor_malus_pct": 0.06
+      }
+    },
+    {
+      "id": "reactor_catalyst_amplifier",
+      "name": "Катализатор усиления",
+      "reactor_catalyst": {
+        "applies_to": [
+          "moderator",
+          "coolant",
+          "absorber",
+          "reflector",
+          "shield"
+        ],
+        "self_stat": "power",
+        "self_pct": 0.6,
+        "neighbor_malus_pct": 0.06
+      }
+    },
+    {
+      "id": "coolant_water",
+      "name": "Вода",
+      "reactor_coolant_fluid": {
+        "cooling_mult": 0.6,
+        "units_per_power": 0.8
+      },
+      "replication_cost": 0.1
+    },
+    {
+      "id": "coolant_antifreeze",
+      "name": "Антифриз",
+      "reactor_coolant_fluid": {
+        "cooling_mult": 1.0,
+        "units_per_power": 0.5
+      }
+    },
+    {
+      "id": "coolant_liquid_metal",
+      "name": "Жидкий металл",
+      "reactor_coolant_fluid": {
+        "cooling_mult": 1.8,
+        "units_per_power": 0.3
+      }
+    },
+    {
+      "id": "tempered_ingot",
+      "name": "Закалённый слиток",
+      "icon": {
+        "grid": [
+          "............",
+          "............",
+          "............",
+          "...AAAAAAA..",
+          "..ABBBBBBCA.",
+          ".ABBBBBBBCA.",
+          ".ADDDDDDDDA.",
+          ".AEEEEEEEEA.",
+          "..AAAAAAAA..",
+          "............",
+          "............",
+          "............"
+        ],
+        "palette": {
+          "A": "#2c3e50",
+          "B": "#8fa8bf",
+          "C": "#e8f1f8",
+          "D": "#5f7d96",
+          "E": "#e07b2a"
+        }
+      }
+    },
+    {
+      "id": "spark_rivet",
+      "name": "Искровая заклёпка",
+      "icon": {
+        "grid": [
+          "........F...",
+          ".......FF...",
+          "......FF....",
+          "...AAAAA....",
+          "..ABBBBBA...",
+          "..ABCCBBA...",
+          "..AAAAAAA...",
+          "....ADA.....",
+          "....ADA.....",
+          "....ADA.....",
+          ".....A......",
+          "............"
+        ],
+        "palette": {
+          "A": "#3a3f45",
+          "B": "#9aa3ab",
+          "C": "#dfe5ea",
+          "D": "#6c747c",
+          "F": "#f4c430"
+        }
+      }
+    },
+    {
+      "id": "energy_core",
+      "name": "Энергоядро",
+      "icon": {
+        "grid": [
+          "............",
+          "....AAAA....",
+          "...ABBBBA...",
+          "..ABCCCCBA..",
+          ".ABCCDDCCBA.",
+          ".ABCDEEDCBA.",
+          ".ABCDEEDCBA.",
+          ".ABCCDDCCBA.",
+          "..ABCCCCBA..",
+          "...ABBBBA...",
+          "....AAAA....",
+          "............"
+        ],
+        "palette": {
+          "A": "#3a3f45",
+          "B": "#9aa3ab",
+          "C": "#6b3fa0",
+          "D": "#a472e0",
+          "E": "#f4c430"
+        }
+      }
+    },
+    {
+      "id": "superconductor",
+      "name": "Сверхпроводник",
+      "icon": {
+        "grid": [
+          "............",
+          "..AAAAAAAA..",
+          "..ABCBCBCA..",
+          "..ABCBCBCA..",
+          "..ABCBCBCA..",
+          "..ABCBCBCA..",
+          "..ABCBCBCA..",
+          "..ABCBCBCA..",
+          "..AAAAAAAA..",
+          "....D..D....",
+          "....D..D....",
+          "............"
+        ],
+        "palette": {
+          "A": "#1f4e5f",
+          "B": "#5fd3f3",
+          "C": "#e8fbff",
+          "D": "#9aa3ab"
+        }
+      }
+    },
+    {
+      "id": "liquid_matter",
+      "name": "Жидкая материя",
+      "fractional": true,
+      "icon": {
+        "grid": [
+          "........................",
+          "..........CCCC..........",
+          "..........CCCC..........",
+          ".........GGGGGG.........",
+          "..........G..G..........",
+          "..........GH.G..........",
+          "..........GH.G..........",
+          "..........G..G..........",
+          ".........GG..GG.........",
+          "........GG....GG........",
+          ".......GG......GG.......",
+          "......GLLLLLLLLLLG......",
+          ".....GLLSLLLLLLLLLG.....",
+          ".....GHLLLLLLLSLLLG.....",
+          "....GHMLLLLLLLLLLLLG....",
+          "....GHMMLLLSLLLLLLMG....",
+          "....GMMMMLLLLLLLLMMG....",
+          "....GDMMMMMLLLLMMMMG....",
+          "....GDDMMMMMMMMMMMDG....",
+          ".....GDDMMMSMMMMMDG.....",
+          ".....GDDDDMMMMMDDDG.....",
+          "......GGDDDDDDDDGG......",
+          "........GGGGGGGG........",
+          "........................"
+        ],
+        "palette": {
+          "C": "#8a5a34",
+          "G": "#9fb4bf",
+          "H": "#e8f6f8",
+          "L": "#6fe3d0",
+          "M": "#2fb3a3",
+          "D": "#1a6f68",
+          "S": "#e8fffb"
+        }
+      }
+    },
+    {
+      "id": "malachite",
+      "name": "Малахит",
+      "icon": {
+        "grid": [
+          "..........",
+          "...DDDD...",
+          "..DAAABD..",
+          ".DABAAACD.",
+          ".DAAACBAD.",
+          ".DBAAAABD.",
+          ".DAACABAD.",
+          "..DABAAD..",
+          "...DDDD...",
+          ".........."
+        ],
+        "palette": {
+          "A": "#2f9a66",
+          "B": "#8fe5b8",
+          "C": "#1f6e48",
+          "D": "#153f2c"
+        }
+      }
+    },
+    {
+      "id": "cassiterite",
+      "name": "Касситерит",
+      "icon": {
+        "grid": [
+          "..........",
+          "...DDDD...",
+          "..DAAABD..",
+          ".DABAAACD.",
+          ".DAAACBAD.",
+          ".DBAAAABD.",
+          ".DAACABAD.",
+          "..DABAAD..",
+          "...DDDD...",
+          ".........."
+        ],
+        "palette": {
+          "A": "#3b2d25",
+          "B": "#6e5646",
+          "C": "#d6c3a5",
+          "D": "#17110d"
+        }
+      }
+    },
+    {
+      "id": "native_copper",
+      "name": "Самородная медь",
+      "icon": {
+        "grid": [
+          "..........",
+          "..........",
+          "...DDD....",
+          "..DABCD...",
+          ".DAABAAD..",
+          ".DABAAABD.",
+          "..DAAABD..",
+          "...DDDD...",
+          "..........",
+          ".........."
+        ],
+        "palette": {
+          "A": "#c46a33",
+          "B": "#e8955a",
+          "C": "#ffd0a0",
+          "D": "#5e2c10"
+        }
+      }
+    },
+    {
+      "id": "slag",
+      "name": "Шлак",
+      "icon": {
+        "grid": [
+          "..........",
+          "...DDDD...",
+          "..DAAABD..",
+          ".DABAAACD.",
+          ".DAAACBAD.",
+          ".DBAAAABD.",
+          ".DAACABAD.",
+          "..DABAAD..",
+          "...DDDD...",
+          ".........."
+        ],
+        "palette": {
+          "A": "#5b524a",
+          "B": "#3a332e",
+          "C": "#8a7f74",
+          "D": "#1f1b18"
+        }
+      }
+    },
+    {
+      "id": "molten_copper",
+      "name": "Жидкая медь",
+      "molten": {
+        "color": "#e07a3f",
+        "density": 8.9
+      }
+    },
+    {
+      "id": "molten_tin",
+      "name": "Жидкое олово",
+      "molten": {
+        "color": "#b9c4c9",
+        "density": 7.3
+      }
+    },
+    {
+      "id": "molten_bronze",
+      "name": "Жидкая бронза",
+      "molten": {
+        "color": "#c8903a",
+        "density": 8.8
+      }
+    },
+    {
+      "id": "copper_ingot",
+      "name": "Медный слиток",
+      "icon": {
+        "grid": [
+          "..........",
+          "..........",
+          "....LLLLL.",
+          "...LMMMMMD",
+          "..LMMMMMDD",
+          ".LMMMMMDD.",
+          "LMMMMMDD..",
+          "DDDDDDD...",
+          "..........",
+          ".........."
+        ],
+        "palette": {
+          "M": "#e07a3f",
+          "L": "#ffb884",
+          "D": "#86401c"
+        }
+      }
+    },
+    {
+      "id": "tin_ingot",
+      "name": "Оловянный слиток",
+      "icon": {
+        "grid": [
+          "..........",
+          "..........",
+          "....LLLLL.",
+          "...LMMMMMD",
+          "..LMMMMMDD",
+          ".LMMMMMDD.",
+          "LMMMMMDD..",
+          "DDDDDDD...",
+          "..........",
+          ".........."
+        ],
+        "palette": {
+          "M": "#b9c4c9",
+          "L": "#f1f5f7",
+          "D": "#667075"
+        }
+      }
+    },
+    {
+      "id": "bronze_ingot",
+      "name": "Бронзовый слиток",
+      "icon": {
+        "grid": [
+          "..........",
+          "..........",
+          "....LLLLL.",
+          "...LMMMMMD",
+          "..LMMMMMDD",
+          ".LMMMMMDD.",
+          "LMMMMMDD..",
+          "DDDDDDD...",
+          "..........",
+          ".........."
+        ],
+        "palette": {
+          "M": "#c8903a",
+          "L": "#f3cf86",
+          "D": "#6f4a1c"
+        }
+      }
+    },
+    {
+      "id": "mold_ingot",
+      "name": "Форма слитка",
+      "icon": {
+        "grid": [
+          "LLLLLLLLLLLL",
+          "LAAAAAAAAAAD",
+          "LAAAAAAAAAAD",
+          "LAAAACCCCCAD",
+          "LAAACCCCCCCD",
+          "LAACCCCCCCCD",
+          "LACCCCCCCCAD",
+          "LCCCCCCCCAAD",
+          "LCCCCCCCAAAD",
+          "LAAAAAAAAAAD",
+          "LAAAAAAAAAAD",
+          "LDDDDDDDDDDD"
+        ],
+        "palette": {
+          "L": "#aab0b6",
+          "A": "#7f858b",
+          "D": "#474c52",
+          "C": "#25282c"
+        }
+      }
+    },
+    {
+      "id": "mold_axe",
+      "name": "Форма топора",
+      "icon": {
+        "grid": [
+          "LLLLLLLLLLLL",
+          "LAAACCCCAAAD",
+          "LAAACCCCAAAD",
+          "LAAACCCCAAAD",
+          "LAACCCCCCAAD",
+          "LAACCCCCCAAD",
+          "LACCCCCCCCAD",
+          "LACCCCCCCCAD",
+          "LCCCCCCCCCCD",
+          "LCCCCCCCCCCD",
+          "LACCCCCCCCAD",
+          "LDDDDDDDDDDD"
+        ],
+        "palette": {
+          "L": "#aab0b6",
+          "A": "#7f858b",
+          "D": "#474c52",
+          "C": "#25282c"
+        }
+      }
+    },
+    {
+      "id": "mold_pick",
+      "name": "Форма кирки",
+      "icon": {
+        "grid": [
+          "LLLLLLLLLLLL",
+          "LAAAAAAAAAAD",
+          "LAAAAAAAAAAD",
+          "LAAACCCCAAAD",
+          "LACCCCCCCCAD",
+          "LCCCCCCCCCCD",
+          "LCCCAAAACCCD",
+          "LCCAAAAAACCD",
+          "LCAAAAAAAACD",
+          "LAAAAAAAAAAD",
+          "LAAAAAAAAAAD",
+          "LDDDDDDDDDDD"
+        ],
+        "palette": {
+          "L": "#aab0b6",
+          "A": "#7f858b",
+          "D": "#474c52",
+          "C": "#25282c"
+        }
+      }
+    },
+    {
+      "id": "copper_axe_head",
+      "name": "Медная заготовка топора",
+      "icon": {
+        "grid": [
+          "...DDDD...",
+          "...DMMD...",
+          "...DMMD...",
+          "..DMMMMD..",
+          "..DMMMMD..",
+          ".DMMMMMMD.",
+          ".DMMMMMMD.",
+          "DMMMMMMMMD",
+          "DLLLLLLLLD",
+          ".DDDDDDDD."
+        ],
+        "palette": {
+          "M": "#e07a3f",
+          "L": "#ffb884",
+          "D": "#86401c"
+        }
+      }
+    },
+    {
+      "id": "bronze_axe_head",
+      "name": "Бронзовая заготовка топора",
+      "icon": {
+        "grid": [
+          "...DDDD...",
+          "...DMMD...",
+          "...DMMD...",
+          "..DMMMMD..",
+          "..DMMMMD..",
+          ".DMMMMMMD.",
+          ".DMMMMMMD.",
+          "DMMMMMMMMD",
+          "DLLLLLLLLD",
+          ".DDDDDDDD."
+        ],
+        "palette": {
+          "M": "#c8903a",
+          "L": "#f3cf86",
+          "D": "#6f4a1c"
+        }
+      }
+    },
+    {
+      "id": "copper_pick_head",
+      "name": "Медная заготовка кирки",
+      "icon": {
+        "grid": [
+          "..........",
+          "..........",
+          "...DDDD...",
+          ".DDMMMMDD.",
+          "DMMLLLLMMD",
+          "DMD....DMD",
+          "DD......DD",
+          "D........D",
+          "..........",
+          ".........."
+        ],
+        "palette": {
+          "M": "#e07a3f",
+          "L": "#ffb884",
+          "D": "#86401c"
+        }
+      }
+    },
+    {
+      "id": "bronze_pick_head",
+      "name": "Бронзовая заготовка кирки",
+      "icon": {
+        "grid": [
+          "..........",
+          "..........",
+          "...DDDD...",
+          ".DDMMMMDD.",
+          "DMMLLLLMMD",
+          "DMD....DMD",
+          "DD......DD",
+          "D........D",
+          "..........",
+          ".........."
+        ],
+        "palette": {
+          "M": "#c8903a",
+          "L": "#f3cf86",
+          "D": "#6f4a1c"
+        }
+      }
     }
   ],
   "locations": {
@@ -305,19 +1034,40 @@
     "workbench": {
       "name": "Верстак",
       "requires_tech": null,
-      "icon_label": "ВС"
+      "icon_label": "ВС",
+      "crafting": {
+        "width": 3,
+        "height": 3,
+        "batch": true
+      }
+    },
+    "smelter": {
+      "name": "Плавильная печь",
+      "requires_tech": "metallurgy",
+      "icon_label": "ПП",
+      "crafting": {
+        "width": 2,
+        "height": 1
+      },
+      "requires_building": "smelting_furnace",
+      "parent_location": "mechanisms"
     },
     "mechanisms": {
       "name": "Механизмы",
-      "requires_tech": "resource_synthesis",
-      "icon_label": "МХ"
+      "requires_tech": null,
+      "icon_label": "МХ",
+      "shows_building_mechanisms": true
     },
     "converter": {
       "name": "Преобразователь",
       "requires_tech": "resource_synthesis",
       "requires_building": "energy_converter",
       "icon_label": "ПР",
-      "parent_location": "mechanisms"
+      "parent_location": "mechanisms",
+      "crafting": {
+        "width": 2,
+        "height": 1
+      }
     }
   },
   "manual_actions": {
@@ -344,7 +1094,17 @@
       "gain": {
         "planks": 1
       },
-      "sound": "wood_saw.ogg"
+      "sound": "wood_saw.ogg",
+      "pattern": {
+        "rows": [
+          ".A.",
+          "A.A",
+          ".A."
+        ],
+        "key": {
+          "A": "wood"
+        }
+      }
     },
     "craft_tools": {
       "name": "Сделать инструменты вручную",
@@ -357,7 +1117,18 @@
       "gain": {
         "tools": 1
       },
-      "sound": "anvil_hit.ogg"
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          ".A.",
+          "AAB",
+          ".B."
+        ],
+        "key": {
+          "A": "planks",
+          "B": "stone"
+        }
+      }
     },
     "make_charcoal": {
       "name": "Жечь уголь вручную",
@@ -369,7 +1140,17 @@
       "gain": {
         "charcoal": 1
       },
-      "sound": "fire_crackle.wav"
+      "sound": "fire_crackle.wav",
+      "pattern": {
+        "rows": [
+          "...",
+          "AAA",
+          "..."
+        ],
+        "key": {
+          "A": "wood"
+        }
+      }
     },
     "smelt_metal": {
       "name": "Плавить металл вручную",
@@ -382,7 +1163,61 @@
       "gain": {
         "metal": 1
       },
-      "sound": "metal_melt.ogg"
+      "sound": "metal_melt.ogg",
+      "pattern": {
+        "rows": [
+          "...",
+          "AAB",
+          "..."
+        ],
+        "key": {
+          "A": "ore",
+          "B": "charcoal"
+        }
+      }
+    },
+    "smelt_metal_smelter": {
+      "name": "Плавить металл в печи",
+      "requires_tech": "metallurgy",
+      "location": "smelter",
+      "cost": {
+        "ore": 1,
+        "charcoal": 1
+      },
+      "gain": {
+        "metal": 1
+      },
+      "duration_turns": 3,
+      "sound": "metal_melt.ogg",
+      "pattern": {
+        "rows": [
+          "AB"
+        ],
+        "key": {
+          "A": "ore",
+          "B": "charcoal"
+        }
+      }
+    },
+    "burn_charcoal_smelter": {
+      "name": "Выжечь уголь в печи",
+      "requires_tech": "charcoal_burning",
+      "location": "smelter",
+      "cost": {
+        "wood": 2
+      },
+      "gain": {
+        "charcoal": 1
+      },
+      "sound": "fire_crackle.wav",
+      "pattern": {
+        "rows": [
+          "AA"
+        ],
+        "key": {
+          "A": "wood"
+        }
+      }
     },
     "forge_rivet": {
       "name": "Расклепать заклёпку",
@@ -395,7 +1230,17 @@
       "gain": {
         "tools": 1
       },
-      "sound": "hammer_hit.wav"
+      "sound": "hammer_hit.wav",
+      "pattern": {
+        "rows": [
+          "...",
+          ".A.",
+          "..."
+        ],
+        "key": {
+          "A": "metal"
+        }
+      }
     },
     "smelt_enriched_metal": {
       "name": "Выплавить обогащённый металл",
@@ -409,7 +1254,18 @@
       "gain": {
         "metal": 6
       },
-      "sound": "metal_melt_2.ogg"
+      "sound": "metal_melt_2.ogg",
+      "pattern": {
+        "rows": [
+          ".A.",
+          "AAA",
+          ".B."
+        ],
+        "key": {
+          "A": "ore",
+          "B": "uranium"
+        }
+      }
     },
     "catch_wild_swarm": {
       "name": "Поймать дикий рой",
@@ -425,14 +1281,26 @@
       "requires_tech": "toolmaking",
       "location": "workbench",
       "cost": {
-        "wood": 100,
-        "stone": 60,
-        "tools": 20
+        "wood": 5,
+        "stone": 3,
+        "tools": 1
       },
       "gain": {
         "boss_totem": 1
       },
-      "sound": "stone_totem.ogg"
+      "sound": "stone_totem.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAB",
+          "BBC"
+        ],
+        "key": {
+          "A": "wood",
+          "B": "stone",
+          "C": "tools"
+        }
+      }
     },
     "craft_guardian_soul": {
       "name": "Заключить душу Стража",
@@ -459,13 +1327,24 @@
       "requires_tech": "woodworking",
       "location": "workbench",
       "cost": {
-        "mana": 20,
-        "stone": 5
+        "mana": 7,
+        "stone": 2
       },
       "gain": {
         "mana_crystal": 1
       },
-      "sound": "mana_crystal.ogg"
+      "sound": "mana_crystal.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAA",
+          "ABB"
+        ],
+        "key": {
+          "A": "mana",
+          "B": "stone"
+        }
+      }
     },
     "craft_enchant_book": {
       "name": "Написать книгу зачарований",
@@ -473,13 +1352,720 @@
       "location": "workbench",
       "requires_building": "enchanting_table",
       "cost": {
-        "planks": 8,
-        "wolf_pelt": 2
+        "planks": 4,
+        "wolf_pelt": 1
       },
       "gain": {
         "enchant_book": 1
       },
-      "sound": "hammer_hit.wav"
+      "sound": "hammer_hit.wav",
+      "pattern": {
+        "rows": [
+          ".A.",
+          "AAA",
+          ".B."
+        ],
+        "key": {
+          "A": "planks",
+          "B": "wolf_pelt"
+        }
+      }
+    },
+    "craft_fuel_rod_crude": {
+      "name": "Собрать сырой стержень",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "uranium": 1,
+        "metal": 5
+      },
+      "gain": {
+        "fuel_rod_crude": 1
+      },
+      "sound": "metal_melt.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "...",
+          "AAB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "uranium"
+        }
+      }
+    },
+    "craft_fuel_rod_uranium": {
+      "name": "Собрать топливный стержень",
+      "requires_tech": "reactor_fuel_standardization",
+      "location": "workbench",
+      "cost": {
+        "uranium": 3,
+        "metal": 5
+      },
+      "gain": {
+        "fuel_rod_uranium": 1
+      },
+      "sound": "metal_melt.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "A.A",
+          "BBB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "uranium"
+        }
+      }
+    },
+    "craft_reactor_moderator": {
+      "name": "Собрать замедлитель",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 3,
+        "stone": 2
+      },
+      "gain": {
+        "reactor_moderator": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          ".A.",
+          "AAB",
+          ".B."
+        ],
+        "key": {
+          "A": "metal",
+          "B": "stone"
+        }
+      }
+    },
+    "craft_reactor_coolant": {
+      "name": "Собрать теплоноситель",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 4,
+        "tools": 1
+      },
+      "gain": {
+        "reactor_coolant": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          ".A.",
+          "AAA",
+          ".B."
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "draw_coolant_water": {
+      "name": "Набрать воды",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {},
+      "gain": {
+        "coolant_water": 12
+      },
+      "sound": "anvil_hit.ogg"
+    },
+    "craft_coolant_antifreeze": {
+      "name": "Сварить антифриз",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "coolant_water": 4,
+        "charcoal": 1
+      },
+      "gain": {
+        "coolant_antifreeze": 8
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          ".A.",
+          "AAA",
+          ".B."
+        ],
+        "key": {
+          "A": "coolant_water",
+          "B": "charcoal"
+        }
+      }
+    },
+    "craft_coolant_liquid_metal": {
+      "name": "Расплавить жидкий металл",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 4,
+        "charcoal": 3
+      },
+      "gain": {
+        "coolant_liquid_metal": 8
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "ABB",
+          ".B."
+        ],
+        "key": {
+          "A": "metal",
+          "B": "charcoal"
+        }
+      }
+    },
+    "craft_reactor_absorber": {
+      "name": "Собрать поглотитель",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 3,
+        "stone": 3
+      },
+      "gain": {
+        "reactor_absorber": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "...",
+          "BBB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "stone"
+        }
+      }
+    },
+    "craft_reactor_radiator": {
+      "name": "Собрать радиатор",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 5,
+        "stone": 4
+      },
+      "gain": {
+        "reactor_radiator": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAB",
+          "BBB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "stone"
+        }
+      }
+    },
+    "craft_reactor_reflector": {
+      "name": "Собрать отражатель",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 5,
+        "tools": 2
+      },
+      "gain": {
+        "reactor_reflector": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAB",
+          ".B."
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "craft_reactor_reflector_improved": {
+      "name": "Собрать улучшенный отражатель",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 6,
+        "tools": 2
+      },
+      "gain": {
+        "reactor_reflector_improved": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "A.A",
+          "ABB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "craft_reactor_coolant_improved": {
+      "name": "Собрать улучшенный теплоноситель",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 6,
+        "tools": 3
+      },
+      "gain": {
+        "reactor_coolant_improved": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAA",
+          "BBB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "craft_reactor_moderator_improved": {
+      "name": "Собрать улучшенный замедлитель",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 5,
+        "stone": 3,
+        "tools": 1
+      },
+      "gain": {
+        "reactor_moderator_improved": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAB",
+          "BBC"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "stone",
+          "C": "tools"
+        }
+      }
+    },
+    "craft_reactor_absorber_improved": {
+      "name": "Собрать улучшенный поглотитель",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 4,
+        "stone": 3,
+        "tools": 1
+      },
+      "gain": {
+        "reactor_absorber_improved": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "A.B",
+          "BBC"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "stone",
+          "C": "tools"
+        }
+      }
+    },
+    "craft_reactor_radiator_improved": {
+      "name": "Собрать улучшенный радиатор",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 4,
+        "stone": 4,
+        "tools": 1
+      },
+      "gain": {
+        "reactor_radiator_improved": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "ABB",
+          "BBC"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "stone",
+          "C": "tools"
+        }
+      }
+    },
+    "craft_fuel_rod_enriched": {
+      "name": "Собрать обогащённый стержень",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "uranium": 3,
+        "metal": 2,
+        "tools": 2
+      },
+      "gain": {
+        "fuel_rod_enriched": 1
+      },
+      "sound": "metal_melt.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "BBC",
+          ".C."
+        ],
+        "key": {
+          "A": "uranium",
+          "B": "metal",
+          "C": "tools"
+        }
+      }
+    },
+    "craft_fuel_rod_natural": {
+      "name": "Собрать природный стержень",
+      "requires_tech": "advanced_reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "uranium": 2,
+        "metal": 5
+      },
+      "gain": {
+        "fuel_rod_natural": 1
+      },
+      "sound": "metal_melt.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAB",
+          ".B."
+        ],
+        "key": {
+          "A": "metal",
+          "B": "uranium"
+        }
+      }
+    },
+    "craft_reactor_catalyst_overdrive": {
+      "name": "Собрать катализатор форсажа",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 5,
+        "tools": 3
+      },
+      "gain": {
+        "reactor_catalyst_overdrive": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "A.A",
+          "BBB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "craft_reactor_catalyst_stabilizer": {
+      "name": "Собрать катализатор стабилизации",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 7,
+        "tools": 2
+      },
+      "gain": {
+        "reactor_catalyst_stabilizer": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "AAA",
+          "ABB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "craft_reactor_catalyst_field": {
+      "name": "Собрать катализатор поля",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 7,
+        "tools": 1
+      },
+      "gain": {
+        "reactor_catalyst_field": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "A.A",
+          "AAB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "craft_reactor_catalyst_amplifier": {
+      "name": "Собрать катализатор усиления",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "metal": 4,
+        "tools": 3
+      },
+      "gain": {
+        "reactor_catalyst_amplifier": 1
+      },
+      "sound": "anvil_hit.ogg",
+      "pattern": {
+        "rows": [
+          "AAA",
+          "ABB",
+          ".B."
+        ],
+        "key": {
+          "A": "metal",
+          "B": "tools"
+        }
+      }
+    },
+    "reprocess_spent_fuel": {
+      "name": "Переработать отработанное топливо",
+      "requires_tech": "reactor_engineering",
+      "location": "workbench",
+      "cost": {
+        "spent_fuel_rod": 1
+      },
+      "gain": {
+        "uranium": 1
+      },
+      "sound": "metal_melt.ogg",
+      "pattern": {
+        "rows": [
+          "...",
+          ".A.",
+          "..."
+        ],
+        "key": {
+          "A": "spent_fuel_rod"
+        }
+      }
+    },
+    "temper_ingot": {
+      "name": "Закалить слиток",
+      "requires_tech": "electrification",
+      "location": "smelter",
+      "cost": {
+        "metal": 1,
+        "charcoal": 1,
+        "energy": 10
+      },
+      "gain": {
+        "tempered_ingot": 1
+      },
+      "pattern": {
+        "rows": [
+          "AB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "charcoal"
+        }
+      }
+    },
+    "induction_smelt": {
+      "name": "Индукционная плавка",
+      "requires_tech": "electrification",
+      "location": "smelter",
+      "cost": {
+        "ore": 2,
+        "energy": 15
+      },
+      "gain": {
+        "metal": 2
+      },
+      "duration_turns": 3,
+      "pattern": {
+        "rows": [
+          "AA"
+        ],
+        "key": {
+          "A": "ore"
+        }
+      }
+    },
+    "craft_spark_rivet": {
+      "name": "Собрать искровые заклёпки",
+      "requires_tech": "electrification",
+      "location": "workbench",
+      "cost": {
+        "metal": 1,
+        "tempered_ingot": 1,
+        "energy": 2.5
+      },
+      "gain": {
+        "spark_rivet": 4
+      },
+      "pattern": {
+        "rows": [
+          ".A.",
+          ".B.",
+          "..."
+        ],
+        "key": {
+          "A": "tempered_ingot",
+          "B": "metal"
+        }
+      }
+    },
+    "craft_energy_core": {
+      "name": "Собрать энергоядро",
+      "requires_tech": "electrification",
+      "location": "workbench",
+      "cost": {
+        "tempered_ingot": 4,
+        "metal": 1,
+        "energy": 25
+      },
+      "gain": {
+        "energy_core": 1
+      },
+      "pattern": {
+        "rows": [
+          ".T.",
+          "TMT",
+          ".T."
+        ],
+        "key": {
+          "T": "tempered_ingot",
+          "M": "metal"
+        }
+      }
+    },
+    "craft_superconductor": {
+      "name": "Собрать сверхпроводник",
+      "requires_tech": "electrification",
+      "location": "workbench",
+      "cost": {
+        "energy_core": 3,
+        "energy": 2000
+      },
+      "gain": {
+        "superconductor": 1
+      },
+      "pattern": {
+        "rows": [
+          "CCC",
+          "...",
+          "..."
+        ],
+        "key": {
+          "C": "energy_core"
+        }
+      }
+    },
+    "craft_mold_ingot": {
+      "name": "Вырезать форму слитка",
+      "requires_tech": "mining",
+      "location": "workbench",
+      "cost": {
+        "stone": 5
+      },
+      "gain": {
+        "mold_ingot": 1
+      },
+      "pattern": {
+        "rows": [
+          "...",
+          "A.A",
+          "AAA"
+        ],
+        "key": {
+          "A": "stone"
+        }
+      }
+    },
+    "craft_mold_axe": {
+      "name": "Вырезать форму топора",
+      "requires_tech": "mining",
+      "location": "workbench",
+      "cost": {
+        "stone": 7
+      },
+      "gain": {
+        "mold_axe": 1
+      },
+      "pattern": {
+        "rows": [
+          "A.A",
+          "A.A",
+          "AAA"
+        ],
+        "key": {
+          "A": "stone"
+        }
+      }
+    },
+    "craft_mold_pick": {
+      "name": "Вырезать форму кирки",
+      "requires_tech": "mining",
+      "location": "workbench",
+      "cost": {
+        "stone": 7
+      },
+      "gain": {
+        "mold_pick": 1
+      },
+      "pattern": {
+        "rows": [
+          "AAA",
+          "A.A",
+          "A.A"
+        ],
+        "key": {
+          "A": "stone"
+        }
+      }
     }
   },
   "buildings": {
@@ -501,7 +2087,6 @@
         "wood": 2
       },
       "icon_label": "ДГ",
-      "unlocks_autocraft": [],
       "tags": [
         "генератор"
       ]
@@ -525,7 +2110,6 @@
       },
       "icon_label": "С1",
       "active_period": "day",
-      "unlocks_autocraft": [],
       "tags": [
         "генератор"
       ]
@@ -547,7 +2131,6 @@
       },
       "icon_label": "АК",
       "energy_storage": 20,
-      "unlocks_autocraft": [],
       "tags": [
         "накопитель энергии"
       ]
@@ -570,7 +2153,6 @@
         "wood": 3
       },
       "icon_label": "ЛЗ",
-      "unlocks_autocraft": [],
       "tags": [
         "добыча"
       ]
@@ -593,14 +2175,13 @@
         "wood": 3
       },
       "icon_label": "КМ",
-      "unlocks_autocraft": [],
       "tags": [
         "добыча"
       ]
     },
     "sawmill": {
       "name": "Лесопилка",
-      "description": "Автоматически превращает дрова в доски и, пока работает хотя бы одна копия, разрешает автокрафт досок - можно больше не пилить их вручную.",
+      "description": "Автоматически превращает дрова в доски - можно больше не пилить их вручную.",
       "requires_tech": "woodworking",
       "cost": {
         "wood": 25,
@@ -619,9 +2200,6 @@
         "tools": 1
       },
       "icon_label": "ЛП",
-      "unlocks_autocraft": [
-        "planks"
-      ],
       "upgrades": [
         {
           "id": "sawmill_scale_2",
@@ -666,7 +2244,7 @@
     },
     "charcoal_pit": {
       "name": "Угольная яма",
-      "description": "Автоматически жжёт уголь из дерева и, пока работает хотя бы одна копия, разрешает автокрафт угля - основа для выплавки металла и мощных генераторов.",
+      "description": "Автоматически жжёт уголь из дерева - основа для выплавки металла и мощных генераторов.",
       "requires_tech": "charcoal_burning",
       "cost": {
         "wood": 15
@@ -683,16 +2261,13 @@
         "wood": 3
       },
       "icon_label": "УЯ",
-      "unlocks_autocraft": [
-        "charcoal"
-      ],
       "tags": [
         "переработка"
       ]
     },
     "workshop": {
       "name": "Мастерская",
-      "description": "Автоматически делает инструменты и, пока работает хотя бы одна копия, разрешает их автокрафт - инструменты нужны почти для всех построек и ремонтов дальше по дереву.",
+      "description": "Автоматически делает инструменты - они нужны почти для всех построек и ремонтов дальше по дереву.",
       "requires_tech": "workshop_automation",
       "cost": {
         "planks": 20,
@@ -712,9 +2287,6 @@
         "tools": 1
       },
       "icon_label": "МС",
-      "unlocks_autocraft": [
-        "tools"
-      ],
       "tags": [
         "переработка"
       ]
@@ -732,14 +2304,13 @@
       "breakdown_chance": 0,
       "repair_cost": {},
       "icon_label": "РК",
-      "unlocks_autocraft": [],
       "tags": [
         "механизм"
       ]
     },
     "processor": {
       "name": "Процессор",
-      "description": "Ничего не производит сам - даёт вычислительную мощность, без которой автокрафт вообще не может докрафтить недостающие ресурсы, даже если рецепт открыт и постройка-разблокировщик работает.",
+      "description": "Ничего не производит сам - «мозг заказов» автокрафта: вычислительная мощность задаёт, насколько большой заказ можно оформить за раз (сколько предметов съедят все его крафты). Без процессора заказов нет вовсе. Сами крафты делают молекулярные сборщики и механизмы с улучшением «Автоматизация».",
       "requires_tech": "workshop_automation",
       "cost": {
         "planks": 15,
@@ -755,30 +2326,50 @@
       },
       "icon_label": "ЦП",
       "compute_power": 5,
-      "unlocks_autocraft": [],
       "tags": [
         "автокрафт"
       ]
     },
-    "autocraft_accelerator": {
-      "name": "Ускоритель автокрафта",
-      "description": "Увеличивает скорость автокрафта - сколько операций он может выполнить за один ход. Без неё автокрафт всё равно работает, но крупные партии растягиваются на много ходов фоновой задачей вместо мгновенного результата.",
-      "requires_tech": "precision_engineering",
+    "molecular_assembler": {
+      "name": "Молекулярный сборщик",
+      "description": "Делает для заказов автокрафта рецепты верстака: 1 крафт за ход с каждой копии (32 сборщика - 32 крафта за ход). Крафт мгновенный, какой бы долгий ни был рецепт.",
+      "requires_tech": "workshop_automation",
       "cost": {
-        "metal": 12,
-        "tools": 8
+        "planks": 10,
+        "tools": 5,
+        "metal": 5
       },
       "produces": {},
-      "consumes": {
-        "energy": 2
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "МС",
+      "autocraft_assembler": {
+        "location": "workbench",
+        "per_turn": 1
       },
-      "breakdown_chance": 0.03,
-      "repair_cost": {
-        "tools": 2
+      "tags": [
+        "автокрафт"
+      ]
+    },
+    "accelerated_molecular_assembler": {
+      "name": "Ускоренный молекулярный сборщик",
+      "description": "Делает для заказов автокрафта ЛЮБОЕ число рецептов верстака за ход - все мгновенно.",
+      "requires_tech": "advanced_photonics",
+      "cost": {
+        "metal": 40,
+        "tools": 20
       },
-      "icon_label": "УА",
-      "autocraft_speed": 8,
-      "unlocks_autocraft": [],
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "УМС",
+      "autocraft_assembler": {
+        "location": "workbench",
+        "per_turn": null
+      },
+      "max_count": 1,
       "tags": [
         "автокрафт"
       ]
@@ -797,7 +2388,6 @@
       "breakdown_chance": 0,
       "repair_cost": {},
       "icon_label": "ПМ",
-      "unlocks_autocraft": [],
       "upgrades": [
         {
           "id": "precision_workshop_scale_2",
@@ -860,7 +2450,6 @@
         "stone": 3
       },
       "icon_label": "УГ",
-      "unlocks_autocraft": [],
       "upgrades": [
         {
           "id": "coal_generator_boost",
@@ -896,7 +2485,6 @@
       },
       "icon_label": "ББ",
       "energy_storage": 60,
-      "unlocks_autocraft": [],
       "tags": [
         "накопитель энергии"
       ]
@@ -920,14 +2508,80 @@
         "tools": 2
       },
       "icon_label": "ШХ",
-      "unlocks_autocraft": [],
       "tags": [
         "добыча"
       ]
     },
+    "smelting_furnace": {
+      "name": "Плавильная печь",
+      "description": "Сама по себе ничего не производит - открывает в «Механизмах» печь с сеткой 2×1: плавка металла из руды и угля (дешевле по руде, чем на верстаке, но идёт несколько ходов) и выжиг угля из дров. Улучшения печи действуют сразу на все рецепты внутри неё.",
+      "requires_tech": "metallurgy",
+      "cost": {
+        "stone": 20,
+        "charcoal": 5
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "ПП",
+      "max_count": 1,
+      "upgrades": [
+        {
+          "id": "smelting_furnace_bellows",
+          "name": "Кузнечные мехи",
+          "description": "Раздувают жар: многоходовые рецепты этой печи идут на треть быстрее (плавка металла - 2 хода вместо 3).",
+          "type": "action_duration_reduction",
+          "value": 0.34,
+          "requires_tech": null,
+          "cost": {
+            "planks": 10,
+            "tools": 3
+          }
+        },
+        {
+          "id": "smelting_furnace_lining",
+          "name": "Шамотная футеровка",
+          "description": "Печь держит жар постоянно: плавка металла становится мгновенной. Не складывается с «Кузнечными мехами» - действует более сильное улучшение.",
+          "type": "action_duration_reduction",
+          "value": 0.67,
+          "requires_tech": "industrial_smelting",
+          "cost": {
+            "metal": 10,
+            "stone": 20
+          }
+        },
+        {
+          "id": "smelting_furnace_insulation",
+          "name": "Теплоизоляция плавильной печи",
+          "description": "Вдвое снижает энергию, которую тратят рецепты этой печи (закалка слитка, индукционная плавка). (Тестовая песочница механики «энергия в цене рецепта».)",
+          "type": "energy_efficiency",
+          "value": 0.5,
+          "requires_tech": null,
+          "cost": {
+            "metal": 5
+          }
+        },
+        {
+          "id": "smelting_furnace_autocraft",
+          "name": "Автоматизация",
+          "description": "Автокрафт может сам запускать рецепты плавильной печи - как игрок у механизма: по одному за ход, многоходовые - своей длительностью. Для мгновенного крафта нужен сборщик.",
+          "type": "autocraft",
+          "value": 1,
+          "requires_tech": "workshop_automation",
+          "cost": {
+            "tools": 5,
+            "metal": 5
+          }
+        }
+      ],
+      "tags": [
+        "механизм"
+      ]
+    },
     "furnace": {
       "name": "Печь",
-      "description": "Автоматически плавит металл из руды и угля и, пока работает хотя бы одна копия, разрешает автокрафт металла - ключевое сырьё для построек позднего дерева.",
+      "description": "Автоматически плавит металл из руды и угля - ключевое сырьё для построек позднего дерева.",
       "requires_tech": "industrial_smelting",
       "cost": {
         "stone": 30,
@@ -947,9 +2601,6 @@
         "stone": 3
       },
       "icon_label": "ПЧ",
-      "unlocks_autocraft": [
-        "metal"
-      ],
       "upgrades": [
         {
           "id": "furnace_energy_efficiency",
@@ -987,7 +2638,6 @@
       },
       "icon_label": "С2",
       "active_period": "day",
-      "unlocks_autocraft": [],
       "tags": [
         "генератор"
       ]
@@ -1012,7 +2662,6 @@
         "tools": 2
       },
       "icon_label": "СР",
-      "unlocks_autocraft": [],
       "tags": [
         "добыча"
       ]
@@ -1034,14 +2683,13 @@
       },
       "icon_label": "ПН",
       "energy_storage": 200,
-      "unlocks_autocraft": [],
       "tags": [
         "накопитель энергии"
       ]
     },
     "processor_mk2": {
       "name": "Процессор Мк2",
-      "description": "Более мощная версия процессора - та же роль (без неё автокрафт не прокрутится), но вычислительной мощности с одной копии в 4 раза больше.",
+      "description": "Более мощная версия процессора - та же роль «мозга заказов», но вычислительной мощности с одной копии в 4 раза больше.",
       "requires_tech": "resource_synthesis",
       "cost": {
         "metal": 15,
@@ -1058,14 +2706,13 @@
       },
       "icon_label": "Ц2",
       "compute_power": 20,
-      "unlocks_autocraft": [],
       "tags": [
         "автокрафт"
       ]
     },
     "energy_converter": {
       "name": "Энергетический преобразователь",
-      "description": "Копит энергию про запас (а не тратит фиксированную порцию каждый ход) и превращает её в предмет по рецепту, который игрок выбирает вручную в локации «Преобразователь» (вложена в «Механизмы») - или который сам запустит автокрафт, если результат кому-то нужен. Строится только один раз и ведёт единственный рецепт за раз, зато его пропускную способность (энергии за ход) можно наращивать улучшениями прямо на этой постройке.",
+      "description": "Копит энергию про запас (а не тратит фиксированную порцию каждый ход) и превращает её в предмет по рецепту, который игрок раскладывает в сетке преобразователя (в «Механизмах»). С улучшением «Автоматизация» рецепты может запускать и автокрафт. Один преобразователь ведёт один рецепт за раз.",
       "requires_tech": "resource_synthesis",
       "cost": {
         "metal": 25,
@@ -1082,7 +2729,6 @@
       "energy_converter": {
         "max_energy_per_turn": 20
       },
-      "unlocks_autocraft": [],
       "max_count": 1,
       "upgrades": [
         {
@@ -1120,10 +2766,101 @@
             "metal": 160,
             "tools": 80
           }
+        },
+        {
+          "id": "energy_converter_autocraft",
+          "name": "Автоматизация",
+          "description": "Автокрафт может сам запускать рецепты преобразователя - как игрок у механизма: по одному за ход, многоходовые - своей длительностью. Для мгновенного крафта нужен сборщик.",
+          "type": "autocraft",
+          "value": 1,
+          "requires_tech": "resource_synthesis",
+          "cost": {
+            "tools": 10,
+            "metal": 20
+          }
         }
       ],
       "tags": [
         "преобразователь энергии"
+      ]
+    },
+    "matter_generator": {
+      "name": "Генератор жидкой материи",
+      "description": "Сгущает излишки энергии в жидкую материю - сырьё репликатора. Берёт энергию в последнюю очередь, только ту, что осталась после всех остальных построек, заказов и автоматики (но до преобразователя), и не трогает то, что копят ждущие энергию заказы.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 30,
+        "tools": 20
+      },
+      "produces": {
+        "liquid_matter": 1
+      },
+      "consumes": {
+        "energy": 10
+      },
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 3,
+        "tools": 2
+      },
+      "icon_label": "ГМ",
+      "energy_surplus_only": true,
+      "tags": [
+        "материя"
+      ]
+    },
+    "replicator": {
+      "name": "Репликатор",
+      "description": "Делает почти любой ресурс из жидкой материи: выбираешь ресурс и количество, материя списывается сразу, ресурс приходит по мере переработки - не быстрее лимита материи за ход. С улучшением «Автоматизация» репликатор подключается к автокрафту.",
+      "requires_tech": "resource_synthesis",
+      "cost": {
+        "metal": 50,
+        "tools": 30
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "metal": 4,
+        "tools": 3
+      },
+      "icon_label": "РП",
+      "replicator": {
+        "matter": "liquid_matter",
+        "max_matter_per_turn": 2,
+        "slots": 1
+      },
+      "upgrades": [
+        {
+          "id": "replicator_pump",
+          "name": "Насос материи",
+          "description": "+1 материи/ход к пропускной способности репликатора. Можно покупать повторно.",
+          "type": "replicator_throughput",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "metal": 20,
+            "tools": 10
+          },
+          "repeatable": true,
+          "cost_growth": 1.5,
+          "max_purchases": 10
+        },
+        {
+          "id": "replicator_autocraft",
+          "name": "Автоматизация",
+          "description": "Автокрафт может сам запускать репликацию: сырьё без рецепта, запасной путь, когда обычный рецепт упёрся в нехватку, и основной путь, если поднять приоритет репликации ресурса.",
+          "type": "autocraft",
+          "value": 1,
+          "requires_tech": "resource_synthesis",
+          "cost": {
+            "metal": 40,
+            "tools": 20
+          }
+        }
+      ],
+      "tags": [
+        "материя"
       ]
     },
     "uranium_mine": {
@@ -1145,7 +2882,6 @@
         "tools": 2
       },
       "icon_label": "УР",
-      "unlocks_autocraft": [],
       "tags": [
         "добыча"
       ]
@@ -1171,7 +2907,6 @@
         "tools": 5
       },
       "icon_label": "ЯР",
-      "unlocks_autocraft": [],
       "tags": [
         "генератор"
       ]
@@ -1195,7 +2930,6 @@
       },
       "icon_label": "С3",
       "active_period": "day",
-      "unlocks_autocraft": [],
       "tags": [
         "генератор"
       ]
@@ -1219,14 +2953,13 @@
       },
       "icon_label": "С4",
       "active_period": "day",
-      "unlocks_autocraft": [],
       "tags": [
         "генератор"
       ]
     },
     "autocraft_dispatcher": {
       "name": "Диспетчерская автокрафта",
-      "description": "Очень дорогая штучная постройка (можно построить только одну) - даёт +1 к числу одновременно работающих фоновых автокрафт-задач, так что несколько ресурсов в цепочке смогут докрафтываться параллельно, а не по очереди друг за другом.",
+      "description": "Очень дорогая штучная постройка (можно построить только одну) - даёт +1 к числу заказов автокрафта, которые могут идти одновременно.",
       "requires_tech": "advanced_photonics",
       "cost": {
         "metal": 80,
@@ -1245,7 +2978,6 @@
       "icon_label": "ДА",
       "autocraft_slots": 1,
       "max_count": 1,
-      "unlocks_autocraft": [],
       "tags": [
         "автокрафт"
       ]
@@ -1266,7 +2998,6 @@
       "icon_label": "Л2",
       "lab_tier": 2,
       "max_count": 1,
-      "unlocks_autocraft": [],
       "tags": [
         "лаборатория"
       ],
@@ -1301,7 +3032,6 @@
       "icon_label": "Л3",
       "lab_tier": 3,
       "max_count": 1,
-      "unlocks_autocraft": [],
       "tags": [
         "лаборатория"
       ],
@@ -1316,6 +3046,41 @@
           "cost": {
             "metal": 15,
             "tools": 10
+          }
+        }
+      ]
+    },
+    "lab_tier4": {
+      "name": "Лаборатория IV тира",
+      "description": "Открывает возможность исследовать технологии IV тира - без неё они остаются недоступны для изучения, даже если все остальные условия уже выполнены.",
+      "requires_tech": "advanced_photonics",
+      "cost": {
+        "metal": 40,
+        "tools": 25,
+        "planks": 20,
+        "uranium": 5
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "Л4",
+      "lab_tier": 4,
+      "max_count": 1,
+      "tags": [
+        "лаборатория"
+      ],
+      "upgrades": [
+        {
+          "id": "lab_tier4_research_speed",
+          "name": "Ускоренные испытания IV",
+          "description": "Сокращает исследование технологий IV тира на 4 хода.",
+          "type": "research_speed",
+          "value": 4,
+          "requires_tech": null,
+          "cost": {
+            "metal": 30,
+            "tools": 20
           }
         }
       ]
@@ -1693,7 +3458,7 @@
         {
           "id": "soul_synthesizer_slot",
           "name": "Дополнительный слот",
-          "description": "+1 слот для душ в этом синтезаторе. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "description": "+1 слот для душ в этом синтезаторе (максимум 5 слотов на экземпляр). Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
           "type": "soul_collector_slots",
           "value": 1,
           "requires_tech": null,
@@ -1702,7 +3467,8 @@
             "stone": 20
           },
           "repeatable": true,
-          "cost_growth": 1.6
+          "cost_growth": 1.6,
+          "max_purchases": 4
         },
         {
           "id": "soul_synthesizer_efficiency",
@@ -1743,7 +3509,7 @@
         {
           "id": "guardian_altar_slot",
           "name": "Дополнительный слот",
-          "description": "+1 слот для душ в этом алтаре. Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
+          "description": "+1 слот для душ в этом алтаре (максимум 5 слотов на экземпляр). Можно покупать многократно подряд - каждая следующая покупка дороже предыдущей.",
           "type": "soul_collector_slots",
           "value": 1,
           "requires_tech": null,
@@ -1752,7 +3518,8 @@
             "metal": 15
           },
           "repeatable": true,
-          "cost_growth": 1.7
+          "cost_growth": 1.7,
+          "max_purchases": 4
         }
       ],
       "tags": [
@@ -1821,6 +3588,371 @@
       },
       "tags": [
         "зачарование"
+      ]
+    },
+    "ritual_altar": {
+      "name": "Ритуальный алтарь",
+      "description": "Магический алтарь - разложи ингредиенты по кольцу пьедесталов и один особый предмет в центр, произнеси ритуал (мгновенно или растянутый на несколько ходов) и получи результат. Число пьедесталов в кольце можно нарастить апгрейдом.",
+      "requires_tech": "toolmaking",
+      "cost": {
+        "wood": 70,
+        "stone": 50
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.02,
+      "repair_cost": {
+        "wood": 6
+      },
+      "icon_label": "РА",
+      "ritual_circle": {
+        "ring_pedestals": 3
+      },
+      "upgrades": [
+        {
+          "id": "ritual_altar_ring_6",
+          "name": "Расширение круга (6)",
+          "description": "Кольцо алтаря вмещает уже 6 пьедесталов вместо 3.",
+          "type": "ritual_pedestals",
+          "value": 3,
+          "requires_tech": null,
+          "cost": {
+            "wood": 40,
+            "stone": 30
+          }
+        },
+        {
+          "id": "ritual_altar_ring_9",
+          "name": "Расширение круга (9)",
+          "description": "Кольцо алтаря вмещает уже 9 пьедесталов - максимум для этого алтаря.",
+          "type": "ritual_pedestals",
+          "value": 6,
+          "requires_tech": null,
+          "cost": {
+            "wood": 90,
+            "stone": 70,
+            "metal": 20
+          }
+        }
+      ],
+      "tags": [
+        "ритуальный круг"
+      ]
+    },
+    "ritual_assembler": {
+      "name": "Ритуальный сборщик",
+      "description": "Проводит для заказов автокрафта ритуалы Ритуального алтаря: 1 ритуал за ход с каждой копии, любой ритуал - за один ход, без ожидания у алтаря и без расхода за ход. Сам алтарь при этом остаётся свободным. Ритуалы со случайным результатом не проводит.",
+      "requires_tech": "workshop_automation",
+      "requires_building": "ritual_altar",
+      "cost": {
+        "stone": 30,
+        "planks": 10,
+        "mana_crystal": 3
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "РС",
+      "autocraft_assembler": {
+        "building": "ritual_altar",
+        "per_turn": 1
+      },
+      "tags": [
+        "автокрафт",
+        "ритуальный круг"
+      ]
+    },
+    "accelerated_ritual_assembler": {
+      "name": "Ускоренный ритуальный сборщик",
+      "description": "Проводит для заказов автокрафта ЛЮБОЕ число ритуалов Ритуального алтаря за ход - все мгновенно.",
+      "requires_tech": "advanced_photonics",
+      "requires_building": "ritual_altar",
+      "cost": {
+        "metal": 40,
+        "tools": 20,
+        "mana_crystal": 15
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "УРС",
+      "autocraft_assembler": {
+        "building": "ritual_altar",
+        "per_turn": null
+      },
+      "max_count": 1,
+      "tags": [
+        "автокрафт",
+        "ритуальный круг"
+      ]
+    },
+    "modular_reactor": {
+      "name": "Модульный реактор",
+      "description": "Эндгейм-источник энергии - решётка ячеек, в которую вручную расставляются топливные стержни, замедлители, теплоносители и поглотители. Каждая зона решётки управляется отдельно (глубина стержней + поток охлаждения); при перегреве зоны растёт риск аварии. Деление на зоны само по себе не увеличивает выход - это способ ограничить ущерб от аварии одной зоной и задать разным частям решётки разную политику риска, а не источник дополнительной мощности.",
+      "requires_tech": "reactor_engineering",
+      "cost": {
+        "metal": 300,
+        "tools": 150,
+        "stone": 100,
+        "uranium": 20
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.03,
+      "repair_cost": {
+        "metal": 30,
+        "tools": 15
+      },
+      "icon_label": "МР",
+      "max_count": 1,
+      "reactor": {
+        "grid_width": 3,
+        "grid_height": 3,
+        "zones_default": 1,
+        "accepts_roles": [
+          "fuel",
+          "moderator",
+          "coolant",
+          "absorber",
+          "reflector",
+          "shield"
+        ],
+        "heat_cap_per_cell": 15,
+        "soft_threshold_pct": 0.6,
+        "fuel_adjacency_heat_step": 0.35,
+        "fuel_adjacency_output_step": 0.15,
+        "fuel_min_heat_mult": 0.25,
+        "moderator_adjacency_output_bonus": 1.0,
+        "absorber_adjacency_reduction": 0.36,
+        "absorber_adjacency_output_reduction": 0.12,
+        "shield_adjacency_reduction": 0.18,
+        "reflector_adjacency_output_mult_step": 0.15,
+        "reflector_adjacency_heat_mult_step": 0.1,
+        "control_rod_burnup_factor": 1.0,
+        "control_rod_heat_damp_exponent": 2.0,
+        "catalyst_malus_radius": 1,
+        "thermal_shock_flow_delta_pct": 40,
+        "thermal_shock_heat_bonus_pct": 0.15,
+        "accident_table": "reactor_meltdown_small"
+      },
+      "upgrades": [
+        {
+          "id": "modular_reactor_zoning_3",
+          "name": "Разделение на 3 зоны",
+          "description": "Решётка делится на 3 независимые зоны (по строкам) - у каждой свой рычаг глубины стержней и клапан охлаждения, вместо одного общего на весь реактор. Не прибавляет выхода сама по себе - зато авария рушит только одну зону, а не всю решётку. Важно: тепло и охлаждение считаются отдельно по зонам - у каждой зоны с топливом должен быть свой теплоноситель, иначе она обречена на аварию.",
+          "type": "reactor_zoning",
+          "value": 3,
+          "requires_tech": null,
+          "cost": {
+            "metal": 60,
+            "tools": 30
+          }
+        },
+        {
+          "id": "modular_reactor_grid_4x4",
+          "name": "Расширение решётки (4x4)",
+          "description": "Решётка реактора расширяется с 3x3 до 4x4 ячеек.",
+          "type": "reactor_grid_size",
+          "value": {
+            "width": 4,
+            "height": 4
+          },
+          "requires_tech": null,
+          "cost": {
+            "metal": 150,
+            "tools": 60,
+            "stone": 80
+          }
+        },
+        {
+          "id": "modular_reactor_grid_5x5",
+          "name": "Расширение решётки (5x5)",
+          "description": "Решётка реактора расширяется с 4x4 до 5x5 ячеек.",
+          "type": "reactor_grid_size",
+          "value": {
+            "width": 5,
+            "height": 5
+          },
+          "requires_tech": null,
+          "cost": {
+            "metal": 220,
+            "tools": 90,
+            "stone": 120
+          }
+        },
+        {
+          "id": "modular_reactor_grid_6x6",
+          "name": "Расширение решётки (6x6)",
+          "description": "Решётка реактора расширяется с 5x5 до 6x6 ячеек - требует продвинутой реакторной инженерии.",
+          "type": "reactor_grid_size",
+          "value": {
+            "width": 6,
+            "height": 6
+          },
+          "requires_tech": "advanced_reactor_engineering",
+          "cost": {
+            "metal": 300,
+            "tools": 120,
+            "stone": 160
+          }
+        },
+        {
+          "id": "modular_reactor_grid_7x7",
+          "name": "Расширение решётки (7x7)",
+          "description": "Решётка реактора расширяется с 6x6 до 7x7 ячеек - требует продвинутой реакторной инженерии.",
+          "type": "reactor_grid_size",
+          "value": {
+            "width": 7,
+            "height": 7
+          },
+          "requires_tech": "advanced_reactor_engineering",
+          "cost": {
+            "metal": 400,
+            "tools": 150,
+            "stone": 200
+          }
+        },
+        {
+          "id": "modular_reactor_telemetry",
+          "name": "Точная телеметрия",
+          "description": "Показывает точные цифры тепла/выхода по каждой зоне вместо грубого статуса «норм/перегрев».",
+          "type": "reactor_telemetry",
+          "value": true,
+          "requires_tech": null,
+          "cost": {
+            "tools": 40,
+            "metal": 20
+          }
+        },
+        {
+          "id": "modular_reactor_zoning_4",
+          "name": "Разделение на 4 зоны",
+          "description": "Решётка делится на 4 независимые зоны (по строкам) вместо 3 - требует продвинутой реакторной инженерии. На решётке уже 4×4 каждая зона получает ровно одну строку. Как и «Разделение на 3 зоны» - это контроль над риском (меньше зона аварии, гибче политика), а не прирост выхода; каждой зоне с топливом всё ещё нужен собственный теплоноситель.",
+          "type": "reactor_zoning",
+          "value": 4,
+          "requires_tech": "advanced_reactor_engineering",
+          "cost": {
+            "metal": 100,
+            "tools": 50
+          }
+        }
+      ],
+      "tags": [
+        "реактор"
+      ]
+    },
+    "energy_workshop": {
+      "name": "Энергомастерская",
+      "description": "Процессор песочницы: мощность 30 и 2 слота заказов - чтобы заказы с энергией в цене (закалённые слитки, искровые заклёпки, энергоядра) можно было проверять без лишних построек. Если энергии не хватает, заказ ждёт её притока. (Тестовая песочница механики «энергия в цене рецепта».)",
+      "requires_tech": "electrification",
+      "cost": {
+        "metal": 10,
+        "stone": 10
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "ЭМ",
+      "max_count": 1,
+      "tags": [
+        "механизм"
+      ],
+      "compute_power": 30,
+      "autocraft_slots": 2
+    },
+    "energy_beacon": {
+      "name": "Энергомаяк",
+      "description": "Ничего не делает - стоит энергоядро и 20 энергии: проверка постройки, цена которой тянет автокрафт по цепочке с энергией и сама ждёт энергию. (Тестовая песочница механики «энергия в цене рецепта».)",
+      "requires_tech": "electrification",
+      "cost": {
+        "energy_core": 1,
+        "energy": 20
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0,
+      "repair_cost": {},
+      "icon_label": "ЭМК",
+      "tags": [
+        "механизм"
+      ]
+    },
+    "smelting_pit": {
+      "name": "Плавильная яма",
+      "description": "Яма с тиглем и дутьём через трубки: жара хватает на самородную медь и малахит (из малахита выходит вдвое меньше меди, чем в горне). Одна порция за раз, тигель на 4 единицы, сплавов нет. Металл из тигля льётся в каменные формы.",
+      "requires_tech": "mining",
+      "cost": {
+        "stone": 20,
+        "wood": 10
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.0,
+      "repair_cost": {
+        "stone": 2
+      },
+      "icon_label": "ПЯ",
+      "smeltery": {
+        "slots": 1,
+        "capacity": 4,
+        "heat": 1
+      },
+      "tags": [
+        "плавильня"
+      ]
+    },
+    "smelting_forge": {
+      "name": "Горн с мехами",
+      "description": "Горн, мехи и литейный стол в одном месте: жар плавит и касситерит, из малахита выходит вдвое больше меди, чем в яме. Три порции сразу, тигель на 12 единиц, сплав бронзы по кнопке, литьё в формы.",
+      "requires_tech": "mining",
+      "cost": {
+        "stone": 40,
+        "planks": 10,
+        "tools": 2
+      },
+      "produces": {},
+      "consumes": {},
+      "breakdown_chance": 0.0,
+      "repair_cost": {
+        "stone": 4
+      },
+      "icon_label": "ГМ",
+      "smeltery": {
+        "slots": 3,
+        "capacity": 12,
+        "heat": 2
+      },
+      "upgrades": [
+        {
+          "id": "forge_crucible_18",
+          "name": "Большой тигель",
+          "description": "Тигель вмещает на 6 единиц больше - 18 вместо 12.",
+          "type": "smeltery_capacity",
+          "value": 6,
+          "requires_tech": null,
+          "cost": {
+            "stone": 30,
+            "charcoal": 10
+          }
+        },
+        {
+          "id": "forge_fourth_slot",
+          "name": "Четвёртый слот плавки",
+          "description": "В горне плавятся сразу четыре порции вместо трёх.",
+          "type": "smeltery_slots",
+          "value": 1,
+          "requires_tech": null,
+          "cost": {
+            "stone": 20,
+            "planks": 10
+          }
+        }
+      ],
+      "tags": [
+        "плавильня"
       ]
     }
   },
@@ -2121,6 +4253,50 @@
         "tools": 20
       },
       "effects": []
+    },
+    "reactor_engineering": {
+      "name": "Реакторная инженерия",
+      "tier": 4,
+      "research_turns": 12,
+      "description": "Открывает модульный реактор - решётчатый источник энергии с ручной балансировкой зон, топливными стержнями и риском аварии при перегреве. Пока доступен только сырой, кустарно собранный стержень - чтобы получить нормальный урановый, нужно ещё немного доработать процесс.",
+      "requires": [
+        "advanced_photonics"
+      ],
+      "cost": {
+        "metal": 80,
+        "tools": 40,
+        "uranium": 10
+      },
+      "effects": []
+    },
+    "reactor_fuel_standardization": {
+      "name": "Стандартизация топлива",
+      "tier": 4,
+      "research_turns": 4,
+      "description": "Открывает нормальный урановый топливный стержень взамен кустарного сырого - выше эффективность и заряд, придётся пересобрать решётку под новые числа.",
+      "requires": [
+        "reactor_engineering"
+      ],
+      "cost": {
+        "metal": 20,
+        "tools": 10
+      },
+      "effects": []
+    },
+    "advanced_reactor_engineering": {
+      "name": "Продвинутая реакторная инженерия",
+      "tier": 4,
+      "research_turns": 14,
+      "description": "Открывает улучшенные версии компонентов решётки реактора (вдвое эффективнее базовых) и новые архетипы топлива - обогащённый (горячее и мощнее, но выгорает быстро) и природный (слабее, зато почти вечный).",
+      "requires": [
+        "reactor_fuel_standardization"
+      ],
+      "cost": {
+        "metal": 120,
+        "tools": 60,
+        "uranium": 15
+      },
+      "effects": []
     }
   },
   "mining_info": {
@@ -2147,6 +4323,42 @@
       "base_yield": 2,
       "required_tool": "pickaxe",
       "required_tier": 3
+    },
+    "malachite": {
+      "requires_tech": "mining",
+      "rarity": 2,
+      "toughness": 3,
+      "field_cluster_size": [
+        2,
+        5
+      ],
+      "base_yield": 2,
+      "required_tool": "pickaxe",
+      "required_tier": 1
+    },
+    "cassiterite": {
+      "requires_tech": "mining",
+      "rarity": 2,
+      "toughness": 3,
+      "field_cluster_size": [
+        2,
+        4
+      ],
+      "base_yield": 2,
+      "required_tool": "pickaxe",
+      "required_tier": 1
+    },
+    "native_copper": {
+      "requires_tech": "mining",
+      "rarity": 3,
+      "toughness": 2,
+      "field_cluster_size": [
+        1,
+        3
+      ],
+      "base_yield": 1,
+      "required_tool": "pickaxe",
+      "required_tier": 1
     }
   },
   "mine_field": {
@@ -2248,7 +4460,17 @@
     "scanner_tool": "ore_scanner",
     "scanner_types_tier": 2,
     "scanner_counts_tier": 3,
-    "scanner_reveal_all_tier": 4
+    "scanner_radius_tiers": [
+      {
+        "tier": 4,
+        "radius": 5
+      },
+      {
+        "tier": 5,
+        "radius": 8
+      }
+    ],
+    "scanner_reveal_all_tier": 6
   },
   "mobs": {
     "wolf": {
@@ -2524,6 +4746,22 @@
       ]
     }
   },
+  "reactor_accidents": {
+    "reactor_meltdown_small": {
+      "entries": [
+        {
+          "result": "destroy_one_fuel_cell",
+          "weight": 70,
+          "message": "Один стержень оплавился - зона остыла."
+        },
+        {
+          "result": "destroy_zone_grid",
+          "weight": 10,
+          "message": "Решётка зоны разрушена аварией."
+        }
+      ]
+    }
+  },
   "eras": {
     "1": {
       "name": "Эра 1",
@@ -2627,33 +4865,69 @@
   "energy_recipes": {
     "metal_from_energy": {
       "name": "Расплавка металла",
-      "description": "Превращает накопленную энергию в металл - удобно для избытка энергии, который иначе просто сгорал бы без хранилищ.",
+      "description": "Переплавляет руду с камнем в металл за счёт накопленной энергии, без угля - удобно для избытка энергии, который иначе просто сгорал бы без хранилищ.",
       "requires_tech": null,
       "threshold": 100,
       "produces": {
         "metal": 5
       },
-      "consumes": {}
+      "consumes": {
+        "ore": 1,
+        "stone": 1
+      },
+      "pattern": {
+        "rows": [
+          "AB"
+        ],
+        "key": {
+          "A": "ore",
+          "B": "stone"
+        }
+      },
+      "pattern_mirror": true
     },
     "wood_from_energy": {
       "name": "Синтез древесины",
-      "description": "Дешёвый рецепт крафта за энергию - невысокий порог, партия готовится за один-два хода даже на одном преобразователе.",
+      "description": "Дешёвый рецепт крафта за энергию: одно полено разрастается в пять - невысокий порог, партия готовится за один-два хода даже на одном преобразователе.",
       "requires_tech": null,
       "threshold": 20,
       "produces": {
         "wood": 5
       },
-      "consumes": {}
+      "consumes": {
+        "wood": 1
+      },
+      "pattern": {
+        "rows": [
+          "A."
+        ],
+        "key": {
+          "A": "wood"
+        }
+      }
     },
     "uranium_from_energy": {
       "name": "Синтез урана",
-      "description": "Дорогой рецепт крафта за энергию - порог намеренно завышен (больше 5000), чтобы проверить долгое накопление и параллельную работу нескольких преобразователей.",
+      "description": "Дорогой рецепт крафта за энергию: металл с рудой превращается в уран - порог намеренно завышен (больше 5000), чтобы проверить долгое накопление и параллельную работу нескольких преобразователей.",
       "requires_tech": null,
       "threshold": 6000,
       "produces": {
         "uranium": 1
       },
-      "consumes": {}
+      "consumes": {
+        "metal": 1,
+        "ore": 1
+      },
+      "pattern": {
+        "rows": [
+          "AB"
+        ],
+        "key": {
+          "A": "metal",
+          "B": "ore"
+        }
+      },
+      "pattern_mirror": true
     }
   },
   "tools": {
@@ -2898,12 +5172,30 @@
           "requires_tech": "mechanized_mining"
         },
         {
-          "name": "Глубинный сканер",
+          "name": "Направленный щуп",
           "cost": {
-            "metal": 15,
-            "tools": 10
+            "metal": 12,
+            "tools": 8
+          },
+          "requires_tech": "mine_conveyor"
+        },
+        {
+          "name": "Дальний щуп",
+          "cost": {
+            "metal": 20,
+            "tools": 12,
+            "uranium": 3
           },
           "requires_tech": "uranium_prospecting"
+        },
+        {
+          "name": "Глубинный сканер",
+          "cost": {
+            "metal": 25,
+            "tools": 15,
+            "uranium": 8
+          },
+          "requires_tech": "nuclear_engineering"
         }
       ]
     }
@@ -3428,5 +5720,252 @@
     "wounded_turns": 5,
     "wounded_damage_multiplier": 0.5
   },
-  "breakdown_types": {}
+  "breakdown_types": {},
+  "ritual_recipes": {
+    "awakening_seal": {
+      "name": "Печать пробуждения",
+      "description": "Простейший ритуал - сжигает дерево и камень вокруг обожжённой кости, высвобождая немного маны, скопившейся в них.",
+      "requires_tech": null,
+      "requires_building": "ritual_altar",
+      "ring_cost": {
+        "wood": 2,
+        "stone": 1
+      },
+      "center_cost": "bone",
+      "extra_cost": {},
+      "duration_turns": 1,
+      "extra_consumes_per_turn": {},
+      "extra_consumes_chance": {},
+      "produces": {
+        "mana": 15
+      },
+      "produces_chance": {},
+      "sound": "ritual_ignite.ogg"
+    },
+    "mana_crystallization": {
+      "name": "Кристаллизация маны",
+      "description": "Кристалл маны в центре круга служит затравкой - обряд напитывает его свежей маной, и затравка тут же прорастает в два новых кристалла.",
+      "requires_tech": "metallurgy",
+      "requires_building": "ritual_altar",
+      "ring_cost": {
+        "mana": 6
+      },
+      "center_cost": "mana_crystal",
+      "extra_cost": {},
+      "duration_turns": 1,
+      "extra_consumes_per_turn": {},
+      "extra_consumes_chance": {},
+      "produces": {
+        "mana_crystal": 2
+      },
+      "produces_chance": {},
+      "sound": "ritual_crystal.ogg"
+    },
+    "tool_awakening": {
+      "name": "Пробуждение инструмента",
+      "description": "Дерево и камень по бокам круга насыщают инструмент в центре - тот вспыхивает и рассыпается, высвобождая накопленную в работе ману.",
+      "requires_tech": null,
+      "requires_building": "ritual_altar",
+      "ring_cost": {
+        "wood": 1,
+        "stone": 1
+      },
+      "center_cost": "tools",
+      "extra_cost": {},
+      "duration_turns": 1,
+      "extra_consumes_per_turn": {},
+      "extra_consumes_chance": {},
+      "produces": {
+        "mana": 20
+      },
+      "produces_chance": {},
+      "sound": "ritual_flash.ogg"
+    }
+  },
+  "melt_recipes": {
+    "melt_native_copper": {
+      "name": "Самородная медь",
+      "requires_tech": null,
+      "heat": 1,
+      "input": {
+        "native_copper": 1,
+        "charcoal": 1
+      },
+      "output": {
+        "molten_copper": 1
+      },
+      "turns": 1
+    },
+    "melt_malachite_pit": {
+      "name": "Малахит в яме",
+      "requires_tech": null,
+      "heat": 1,
+      "input": {
+        "malachite": 2,
+        "charcoal": 1
+      },
+      "output": {
+        "molten_copper": 1,
+        "slag": 1
+      },
+      "turns": 3
+    },
+    "melt_malachite_forge": {
+      "name": "Малахит в горне",
+      "requires_tech": null,
+      "heat": 2,
+      "input": {
+        "malachite": 2,
+        "charcoal": 1
+      },
+      "output": {
+        "molten_copper": 2,
+        "slag": 1
+      },
+      "turns": 2
+    },
+    "melt_cassiterite": {
+      "name": "Касситерит",
+      "requires_tech": null,
+      "heat": 2,
+      "input": {
+        "cassiterite": 2,
+        "charcoal": 1
+      },
+      "output": {
+        "molten_tin": 1,
+        "slag": 1
+      },
+      "turns": 3
+    },
+    "remelt_copper_ingot": {
+      "name": "Переплавка медного слитка",
+      "requires_tech": null,
+      "heat": 1,
+      "input": {
+        "copper_ingot": 1
+      },
+      "output": {
+        "molten_copper": 1
+      },
+      "turns": 1
+    },
+    "remelt_tin_ingot": {
+      "name": "Переплавка оловянного слитка",
+      "requires_tech": null,
+      "heat": 1,
+      "input": {
+        "tin_ingot": 1
+      },
+      "output": {
+        "molten_tin": 1
+      },
+      "turns": 1
+    },
+    "remelt_bronze_ingot": {
+      "name": "Переплавка бронзового слитка",
+      "requires_tech": null,
+      "heat": 2,
+      "input": {
+        "bronze_ingot": 1
+      },
+      "output": {
+        "molten_bronze": 1
+      },
+      "turns": 1
+    }
+  },
+  "alloy_recipes": {
+    "alloy_bronze": {
+      "name": "Бронза",
+      "requires_tech": null,
+      "heat": 2,
+      "input": {
+        "molten_copper": 8,
+        "molten_tin": 1
+      },
+      "output": {
+        "molten_bronze": 9
+      }
+    }
+  },
+  "cast_recipes": {
+    "cast_copper_ingot": {
+      "name": "Медный слиток",
+      "requires_tech": null,
+      "form": "mold_ingot",
+      "metal": "molten_copper",
+      "amount": 1,
+      "output": {
+        "copper_ingot": 1
+      },
+      "turns": 1
+    },
+    "cast_tin_ingot": {
+      "name": "Оловянный слиток",
+      "requires_tech": null,
+      "form": "mold_ingot",
+      "metal": "molten_tin",
+      "amount": 1,
+      "output": {
+        "tin_ingot": 1
+      },
+      "turns": 1
+    },
+    "cast_bronze_ingot": {
+      "name": "Бронзовый слиток",
+      "requires_tech": null,
+      "form": "mold_ingot",
+      "metal": "molten_bronze",
+      "amount": 1,
+      "output": {
+        "bronze_ingot": 1
+      },
+      "turns": 1
+    },
+    "cast_copper_axe": {
+      "name": "Медная заготовка топора",
+      "requires_tech": null,
+      "form": "mold_axe",
+      "metal": "molten_copper",
+      "amount": 2,
+      "output": {
+        "copper_axe_head": 1
+      },
+      "turns": 2
+    },
+    "cast_bronze_axe": {
+      "name": "Бронзовая заготовка топора",
+      "requires_tech": null,
+      "form": "mold_axe",
+      "metal": "molten_bronze",
+      "amount": 2,
+      "output": {
+        "bronze_axe_head": 1
+      },
+      "turns": 2
+    },
+    "cast_copper_pick": {
+      "name": "Медная заготовка кирки",
+      "requires_tech": null,
+      "form": "mold_pick",
+      "metal": "molten_copper",
+      "amount": 2,
+      "output": {
+        "copper_pick_head": 1
+      },
+      "turns": 2
+    },
+    "cast_bronze_pick": {
+      "name": "Бронзовая заготовка кирки",
+      "requires_tech": null,
+      "form": "mold_pick",
+      "metal": "molten_bronze",
+      "amount": 2,
+      "output": {
+        "bronze_pick_head": 1
+      },
+      "turns": 2
+    }
+  }
 }

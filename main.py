@@ -24,10 +24,25 @@ if sys.platform == "win32":
         except (AttributeError, ValueError):
             pass
 
-SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.json")
-# Именованные сохранения (папка saves/) - отдельная от постоянного автосохранения
-# SAVE_PATH возможность: "Сохранить как"/"Открыть" по явному выбору игрока.
+# Именованные сохранения (папка saves/) - та же папка, где лежит и постоянное
+# автосохранение (SAVE_PATH, файл autosave.json внутри неё) - раньше автосейв
+# лежал прямо в корне репозитория отдельно от saves/, что было неочевидно и
+# путало игрока при поиске файлов сохранений.
 SAVES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saves")
+SAVE_PATH = os.path.join(SAVES_DIR, "autosave.json")
+# Старое место автосохранения (до переноса в saves/) - если оно ещё лежит в
+# корне у игрока, при первом запуске переносим его на новое место, а не
+# тихо теряем прогресс, подсовывая вместо него новую пустую игру.
+_LEGACY_SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.json")
+
+
+def _migrate_legacy_save() -> None:
+    if os.path.exists(SAVE_PATH) or not os.path.exists(_LEGACY_SAVE_PATH):
+        return
+    os.makedirs(SAVES_DIR, exist_ok=True)
+    os.replace(_LEGACY_SAVE_PATH, SAVE_PATH)
+
+
 _UNSAFE_SAVE_NAME_CHARS = set('\\/:*?"<>|') | {chr(c) for c in range(32)}
 
 NAME_COL = max(len(name) for name in RESOURCE_NAMES.values()) + 2
@@ -122,9 +137,10 @@ def print_status(state: GameState) -> None:
     for tool_id, tool in TOOLS.items():
         tier = engine.tool_tier(state, tool_id)
         print(f"{tool['name']}: {engine.tool_tier_name(state, tool_id)} (тир {tier} из {len(tool['tiers'])})")
-    if state.veins:
-        veins_line = ", ".join(f"{RESOURCE_NAMES[r]} (осталось {n})" for r, n in state.veins.items())
-        print(f"Найденные жилы: {veins_line}")
+    if state.active_mine_field:
+        broken = sum(1 for c in state.active_mine_field["cells"] if c["broken"])
+        total = len(state.active_mine_field["cells"])
+        print(f"Поле шахты: пройдено {broken}/{total} клеток (консольная версия не поддерживает добычу - см. web_ui)")
 
     rates = engine.theoretical_rates(state)
     if state.pinned:
@@ -249,14 +265,9 @@ def location_action_items(state: GameState, location_id: str | None):
         text = f"{action['name']} (цена: {format_cost(action['cost'])}) -> {format_gain(action['gain'])}"
         items.append((("manual", action_id), text))
 
-    if location_id == engine.MINE_LOCATION_ID:
-        for resource_id, remaining in state.veins.items():
-            per_turn = engine.mining_yield_per_turn(resource_id, state)
-            name = RESOURCE_NAMES[resource_id]
-            text = f"Добывать: {name} (в жиле осталось: {remaining}, добыча: {per_turn}/ход)"
-            items.append((("mine", resource_id), text))
-        if engine.can_search_for_vein(state):
-            items.append((("search_any", None), "Искать жилу (активна всегда одна - новый поиск заменит текущую)"))
+    # Шахта (engine.MINE_LOCATION_ID) - fog-of-war сетка, есть только в web_ui
+    # (клик по клетке поля, не сводится к пункту меню) - консольная версия
+    # официально не поддерживается как играбельная, см. CLAUDE.md.
     if location_id == engine.CONVERTER_LOCATION_ID:
         capacity = engine.energy_converter_capacity(state)
         busy = len(state.energy_jobs)
@@ -280,11 +291,7 @@ def run_location_item(state: GameState, item_id) -> tuple[engine.ActionResult, s
     kind, payload = item_id
     if kind == "manual":
         return engine.do_manual_action(state, payload), "manual", payload
-    if kind == "search_any":
-        return engine.search_vein_any(state), "mining_search", None
-    if kind == "start_energy_recipe":
-        return engine.start_energy_recipe(state, payload), "start_energy_recipe", payload
-    return engine.mine_vein(state, payload), "mining_mine", payload
+    return engine.start_energy_recipe(state, payload), "start_energy_recipe", payload
 
 
 def location_entry_count(state: GameState, location_id: str | None) -> int:
@@ -515,9 +522,15 @@ def confirm_reset() -> bool:
 def safe_save_name(raw: str) -> str | None:
     # Имя приходит от игрока в свободной форме - защищаемся от пустого имени и от
     # символов, недопустимых в именах файлов на Windows (заодно от "..", чтобы
-    # нельзя было промахнуться мимо SAVES_DIR).
+    # нельзя было промахнуться мимо SAVES_DIR). "autosave" зарезервировано под
+    # SAVE_PATH (файл autosave.json в той же SAVES_DIR).
     name = raw.strip()
-    if not name or name in (".", "..") or any(ch in _UNSAFE_SAVE_NAME_CHARS for ch in name):
+    if (
+        not name
+        or name in (".", "..")
+        or any(ch in _UNSAFE_SAVE_NAME_CHARS for ch in name)
+        or name.lower() == "autosave"
+    ):
         return None
     return name
 
@@ -525,7 +538,10 @@ def safe_save_name(raw: str) -> str | None:
 def list_saves() -> list[str]:
     if not os.path.isdir(SAVES_DIR):
         return []
-    return sorted(f[:-5] for f in os.listdir(SAVES_DIR) if f.endswith(".json"))
+    return sorted(
+        f[:-5] for f in os.listdir(SAVES_DIR)
+        if f.endswith(".json") and f[:-5].lower() != "autosave"
+    )
 
 
 def manage_saves(state: GameState):
@@ -755,6 +771,7 @@ def take_turn(state: GameState):
 
 
 def main() -> None:
+    _migrate_legacy_save()
     if os.path.exists(SAVE_PATH):
         state = GameState.load(SAVE_PATH)
         print("Сохранение найдено, продолжаем игру.")

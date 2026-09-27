@@ -288,7 +288,7 @@
   .icon-btn .pixel-icon { image-rendering: pixelated; shape-rendering: crispEdges; background: var(--bg); border-radius: 3px; }
   .icon-btn .custom-tag { color: var(--accent); font-size: 10px; }
 
-  .icon-modal { max-width: 520px; }
+  .icon-modal { max-width: 600px; max-height: 92vh; }
   .tech-picker-modal { max-width: 92vw; }
   .tech-pick-btn { text-align: left; min-width: 220px; }
 
@@ -319,13 +319,42 @@
   }
   .tech-multi-chip-rm:hover { color: var(--accent); }
   .icon-editor-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
-  .icon-palette-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; }
-  .icon-palette-row .swatch {
-    width: 22px; height: 22px; border-radius: 4px; border: 2px solid var(--border); cursor: pointer;
-  }
-  .icon-palette-row .swatch.active { border-color: var(--accent); }
-  .icon-palette-row input[type=color] { width: 30px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 4px; }
+  .icon-palette-row { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; justify-content: center; }
   .icon-palette-row button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .icon-palette-row .custom-color-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px; border-radius: 6px;
+    border: 2px solid transparent;
+  }
+  .icon-palette-row .custom-color-wrap.active { border-color: var(--accent); }
+  .icon-palette-row .custom-color-wrap input.hex-input {
+    width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; padding: 4px 6px;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--text);
+  }
+  .color-picker { display: flex; flex-direction: column; gap: 6px; }
+  .color-picker-sv {
+    position: relative; width: 180px; height: 120px; border-radius: 4px;
+    border: 1px solid var(--border); cursor: crosshair; user-select: none;
+  }
+  .color-picker-sv-thumb {
+    position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6);
+    transform: translate(-50%, -50%); pointer-events: none;
+  }
+  .color-picker-hue {
+    position: relative; width: 180px; height: 14px; border-radius: 4px;
+    border: 1px solid var(--border); cursor: pointer; user-select: none;
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  }
+  .color-picker-hue-thumb {
+    position: absolute; top: -2px; width: 4px; height: 18px; background: #fff;
+    border: 1px solid #333; transform: translateX(-50%); pointer-events: none;
+  }
+  .icon-swatch-table { display: grid; grid-template-columns: repeat(5, 32px); gap: 6px; align-content: start; }
+  .icon-swatch-table .swatch {
+    width: 32px; height: 32px; border-radius: 4px; border: 2px solid var(--border); cursor: pointer;
+  }
+  .icon-swatch-table .swatch.active { border-color: var(--accent); }
+  .icon-swatch-table button.small { grid-column: span 2; padding: 4px 2px; font-size: 11px; }
 
   .icon-grid { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); user-select: none; }
   .icon-cell { width: 14px; height: 14px; background: var(--panel); cursor: crosshair; }
@@ -335,7 +364,10 @@
   .icon-preview .pixel-icon { image-rendering: pixelated; shape-rendering: crispEdges; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
   .icon-preview span { font-size: 11px; color: var(--muted); }
 
-  .icon-editor-footer { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--border); justify-content: flex-end; }
+  .icon-editor-footer {
+    display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--border);
+    justify-content: flex-end; position: sticky; bottom: 0; background: var(--panel);
+  }
 
   .view-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
   .view-toggle button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
@@ -446,6 +478,38 @@
   .tech-edge.dim { opacity: .15; }
   .tech-edge-hit { stroke: transparent; stroke-width: 14; fill: none; pointer-events: stroke; cursor: pointer; }
   .tech-edge-drag { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
+
+  /* ---------- Редактор узора крафта (openPatternModal) ----------
+     Сетка рисуется теми же пиксельными иконками ресурсов, что и игра, чтобы
+     нарисованный тут узор выглядел ровно так же, как его увидит игрок. */
+  .modal.pattern-modal { max-width: 860px; }
+  .pattern-body { display: flex; gap: 14px; padding: 14px 16px; align-items: flex-start; }
+  .pattern-side { width: 220px; flex: none; display: flex; flex-direction: column; gap: 8px; }
+  .pattern-center { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  /* Палитра - именно СПИСОК, а не плитка иконок: у части ресурсов своей
+     пиксельной иконки нет, и без подписи такие плитки неразличимы. */
+  .pattern-palette { display: flex; flex-direction: column; gap: 3px; max-height: 340px; overflow-y: auto; }
+  .pattern-swatch {
+    border: 1px solid var(--border); border-radius: 6px; background: #faf8f4; cursor: pointer;
+    padding: 4px 8px; display: flex; align-items: center; gap: 8px; text-align: left; font-size: 12px;
+  }
+  .pattern-swatch .swatch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pattern-swatch .pixel-icon { flex: none; }
+  .pattern-swatch:hover { border-color: var(--accent); }
+  .pattern-swatch.selected { border: 2px solid var(--accent); }
+  .pattern-grid { display: grid; gap: 6px; padding: 12px; background: #faf8f4; border: 1px solid var(--border); border-radius: 8px; }
+  .pattern-cell {
+    width: 64px; height: 64px; border: 1px dashed var(--border); border-radius: 6px; background: var(--panel);
+    cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .pattern-cell:hover { border-color: var(--accent); }
+  .pattern-cell.filled { border: 1px solid var(--accent); }
+  .pattern-cost-row { display: flex; align-items: center; gap: 8px; }
+  .pattern-cost-row .amount { margin-left: auto; font-weight: 700; color: var(--accent); }
+  .pattern-note { border-radius: 6px; padding: 9px 11px; font-size: 12px; line-height: 1.45; }
+  .pattern-note.ok { background: #f2f7f0; border: 1px solid #b7cdb0; color: var(--ok); }
+  .pattern-note.err { background: #fdf1ef; border: 1px solid #e0b3ac; color: var(--danger); }
+  .pattern-note.warn { background: #fbf4e4; border: 1px solid #e3cf9c; color: #7a5a12; margin: 6px 0 10px; }
 </style>
 </head>
 <body>
@@ -484,6 +548,9 @@
   <div id="tab-combat-moves" class="tab"></div>
   <div id="tab-skills" class="tab"></div>
   <div id="tab-enchantments" class="tab"></div>
+  <div id="tab-rituals" class="tab"></div>
+  <div id="tab-smeltery" class="tab"></div>
+  <div id="tab-reactor" class="tab"></div>
   <div id="tab-quests" class="tab"></div>
   <div id="tab-settings" class="tab"></div>
   <div id="tab-raw" class="tab">
@@ -518,6 +585,9 @@ const TABS = [
   ["combat-moves", "Приёмы боя"],
   ["skills", "Навыки"],
   ["enchantments", "Зачарования"],
+  ["rituals", "Ритуалы"],
+  ["smeltery", "Плавильня"],
+  ["reactor", "Реактор"],
   ["quests", "Квесты"],
   ["settings", "Настройки"],
   ["raw", "JSON"],
@@ -539,6 +609,72 @@ const CONVERTER_LOCATION_ID = "converter";
 // участвует в автокрафте. Его тоже нельзя удалить в редакторе - без него игра
 // упадёт в первом же месте, которое к нему обращается.
 const ENERGY_RESOURCE_ID = "energy";
+
+// Рецепты, замкнутые в круг («9 слитков -> блок -> 9 слитков», «1 руда -> 2 руды»):
+// автокрафт не берёт их источником для других заказов. ДЕРЖАТЬ В ПАРЕ с
+// game/engine.py: autocraft_cyclic_recipes (редактор не импортирует game/*). Ключи - как
+// grid_recipe_key: id действия, "energy_recipe:<id>", "ritual_recipe:<id>", "replicator:<ресурс>".
+function editorCyclicRecipes() {
+  const isRange = (v) => v !== null && typeof v === "object";
+  const edges = [];
+  for (const [aid, a] of Object.entries(DATA.manual_actions || {})) {
+    if (!a.cost || !Object.keys(a.cost).length || a.excluded_from_autocraft) continue;
+    const chances = [...Object.values(a.cost_chance || {}), ...Object.values(a.gain_chance || {})];
+    if (chances.some((c) => c < 1) || Object.values(a.gain || {}).some(isRange)) continue;
+    for (const ing of Object.keys(a.cost)) for (const out of Object.keys(a.gain || {})) edges.push([ing, out, aid]);
+  }
+  const energyFor = {};
+  for (const [rid, r] of Object.entries(DATA.energy_recipes || {})) {
+    for (const out of Object.keys(r.produces || {})) if (!(out in energyFor)) energyFor[out] = rid;
+  }
+  for (const [out, rid] of Object.entries(energyFor)) {
+    for (const ing of Object.keys(DATA.energy_recipes[rid].consumes || {})) edges.push([ing, out, "energy_recipe:" + rid]);
+  }
+  const ritualFor = {};
+  for (const [rid, r] of Object.entries(DATA.ritual_recipes || {})) {
+    const produces = r.produces || {};
+    if (!Object.keys(produces).length || Object.values(produces).some(isRange)) continue;
+    if (Object.values(r.produces_chance || {}).some((c) => c < 1)) continue;
+    for (const out of Object.keys(produces)) if (!(out in ritualFor)) ritualFor[out] = rid;
+  }
+  for (const [out, rid] of Object.entries(ritualFor)) {
+    const r = DATA.ritual_recipes[rid];
+    const ings = new Set([...Object.keys(r.ring_cost || {}), ...(r.center_cost ? [r.center_cost] : []), ...Object.keys(r.extra_cost || {})]);
+    for (const ing of ings) edges.push([ing, out, "ritual_recipe:" + rid]);
+  }
+  const replicable = (DATA.resources || []).filter((r) => r.replication_cost).map((r) => r.id);
+  const matters = new Set(Object.values(DATA.buildings || {}).map((b) => b.replicator && b.replicator.matter).filter(Boolean));
+  for (const matter of matters) for (const out of replicable) if (out !== matter) edges.push([matter, out, "replicator:" + out]);
+  const live = edges.filter(([ing]) => ing !== ENERGY_RESOURCE_ID);
+  const graph = {};
+  for (const [ing, out] of live) (graph[ing] = graph[ing] || new Set()).add(out);
+  const reachOf = {};
+  const reach = (start) => {
+    if (!reachOf[start]) {
+      const seen = new Set();
+      const stack = [start];
+      while (stack.length) {
+        for (const next of graph[stack.pop()] || []) {
+          if (!seen.has(next)) { seen.add(next); stack.push(next); }
+        }
+      }
+      reachOf[start] = seen;
+    }
+    return reachOf[start];
+  };
+  const result = new Set();
+  for (const [ing, out, key] of live) if (ing === out || reach(out).has(ing)) result.add(key);
+  return result;
+}
+
+// Плашка на карточке рецепта из круга (editorCyclicRecipes) - null, если рецепт не в круге.
+function cycleNote(key) {
+  if (!editorCyclicRecipes().has(key)) return null;
+  return el("div", { class: "pattern-note warn", text:
+    "⟲ Рецепт замкнут в круг (с другими рецептами или сам с собой) - автокрафт не берёт его "
+    + "источником для других заказов: ресурс, который делается только им, для заказа - сырьё. "
+    + "Заказать сам рецепт «×N» и поставить его в центр автоматизации можно." });
+}
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -728,6 +864,103 @@ function rgbToHex([r, g, b]) {
   return "#" + [r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
 }
 
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || "");
+  if (!m) return [0, 0, 0];
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [h, max === 0 ? 0 : d / max, max];
+}
+
+function hsvToRgb(h, s, v) {
+  const c = v * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = v - c;
+  let r1, g1, b1;
+  if (h < 60) [r1, g1, b1] = [c, x, 0];
+  else if (h < 120) [r1, g1, b1] = [x, c, 0];
+  else if (h < 180) [r1, g1, b1] = [0, c, x];
+  else if (h < 240) [r1, g1, b1] = [0, x, c];
+  else if (h < 300) [r1, g1, b1] = [x, 0, c];
+  else [r1, g1, b1] = [c, 0, x];
+  return [(r1 + m) * 255, (g1 + m) * 255, (b1 + m) * 255];
+}
+
+// Свой цвет в редакторе иконок собран на голых div'ах (drag через mousedown/mousemove/
+// mouseup) вместо нативного <input type=color> - в pywebview/WebView2 системный попап
+// цветовой палитры закрывается прямо во время перетаскивания слайдера (mouseup внутри
+// попапа не долетает туда, куда должен), так что выбрать цвет иначе, чем кликом по
+// самой палитре без протяжки, было физически невозможно.
+function buildColorPicker(initialHex, onChange) {
+  const wrap = el("div", { class: "color-picker" });
+  const sv = el("div", { class: "color-picker-sv" });
+  const svThumb = el("div", { class: "color-picker-sv-thumb" });
+  sv.appendChild(svThumb);
+  const hue = el("div", { class: "color-picker-hue" });
+  const hueThumb = el("div", { class: "color-picker-hue-thumb" });
+  hue.appendChild(hueThumb);
+  wrap.appendChild(sv);
+  wrap.appendChild(hue);
+
+  let [h, s, v] = rgbToHsv(...hexToRgb(initialHex));
+
+  function updateVisuals() {
+    sv.style.background = `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${h},100%,50%))`;
+    svThumb.style.left = (s * 100) + "%";
+    svThumb.style.top = ((1 - v) * 100) + "%";
+    hueThumb.style.left = (h / 360 * 100) + "%";
+  }
+  updateVisuals();
+
+  function dragSv(clientX, clientY) {
+    const rect = sv.getBoundingClientRect();
+    s = Math.min(Math.max(clientX - rect.left, 0), rect.width) / rect.width;
+    v = 1 - Math.min(Math.max(clientY - rect.top, 0), rect.height) / rect.height;
+    updateVisuals();
+    onChange(rgbToHex(hsvToRgb(h, s, v)));
+  }
+  function dragHue(clientX) {
+    const rect = hue.getBoundingClientRect();
+    h = Math.min(Math.max(clientX - rect.left, 0), rect.width) / rect.width * 360;
+    updateVisuals();
+    onChange(rgbToHex(hsvToRgb(h, s, v)));
+  }
+  let draggingSv = false, draggingHue = false;
+  sv.addEventListener("mousedown", (e) => { e.preventDefault(); draggingSv = true; dragSv(e.clientX, e.clientY); });
+  hue.addEventListener("mousedown", (e) => { e.preventDefault(); draggingHue = true; dragHue(e.clientX); });
+  const onMove = (e) => {
+    if (draggingSv) dragSv(e.clientX, e.clientY);
+    if (draggingHue) dragHue(e.clientX);
+  };
+  const onUp = () => { draggingSv = false; draggingHue = false; };
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
+
+  return {
+    el: wrap,
+    setColor(hex) {
+      [h, s, v] = rgbToHsv(...hexToRgb(hex));
+      updateVisuals();
+    },
+    destroy() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    },
+  };
+}
+
 // Простой k-means по RGB - сводит произвольное число цветов картинки к k "центрам",
 // чтобы получить палитру пиксель-иконки (буква -> hex), а не тысячи оттенков из фото.
 function kmeansColors(pixels, k, iterations = 8) {
@@ -874,7 +1107,12 @@ function openIconEditor(title, currentIcon, fallbackIcon, onApply) {
   const charOf = new Map(Object.entries(palette).map(([c, col]) => [col, c]));
   let nextCharCode = 65 + Object.keys(palette).length;
   let currentColor = ICON_PRESET_COLORS[3];
-  let tool = "paint";
+  let tool = "paint"; // "paint" | "erase" | "pipette"
+  // colorPicker создаётся один раз и переиспользуется между перерисовками палитры -
+  // иначе drag посреди перетаскивания слайдера обрывался бы пересозданием DOM-узла.
+  let colorPicker = null;
+  let hexInputEl = null;
+  let customWrapEl = null;
 
   function colorChar(color) {
     if (charOf.has(color)) return charOf.get(color);
@@ -899,19 +1137,52 @@ function openIconEditor(title, currentIcon, fallbackIcon, onApply) {
 
   const body = el("div", { class: "icon-editor-body" });
 
+  // Слева - увеличенное окно свободного выбора цвета (SV-градиент + оттенок + hex),
+  // справа - готовые цвета и инструменты (ластик/пипетка) таблицей-сеткой.
   const paletteRow = el("div", { class: "icon-palette-row" });
   function renderPaletteRow() {
     paletteRow.innerHTML = "";
+
+    // Левая колонка: собственный drag-виджет (палитра SV + слайдер оттенка) + hex-поле
+    // для точного значения - оба держат один и тот же currentColor синхронно. См.
+    // buildColorPicker: НЕ нативный <input type=color> - его системный попап рвётся
+    // посреди перетаскивания в pywebview/WebView2.
+    const isCustom = tool === "paint" && !ICON_PRESET_COLORS.includes(currentColor);
+    const customWrap = el("div", { class: "custom-color-wrap" + (isCustom ? " active" : "") });
+    customWrapEl = customWrap;
+    if (!colorPicker) {
+      colorPicker = buildColorPicker(currentColor, (hex) => {
+        currentColor = hex;
+        tool = "paint";
+        if (hexInputEl) hexInputEl.value = currentColor;
+        if (customWrapEl) customWrapEl.classList.add("active");
+      });
+    } else {
+      colorPicker.setColor(currentColor);
+    }
+    customWrap.appendChild(colorPicker.el);
+    const hexInput = el("input", { type: "text", class: "hex-input", value: currentColor, placeholder: "#rrggbb" });
+    hexInputEl = hexInput;
+    hexInput.addEventListener("change", () => {
+      const v = hexInput.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) { currentColor = v; tool = "paint"; colorPicker.setColor(v); renderPaletteRow(); }
+      else { hexInput.value = currentColor; }
+    });
+    customWrap.appendChild(hexInput);
+    paletteRow.appendChild(customWrap);
+
+    // Правая колонка: готовые цвета + ластик/пипетка одной сеткой-таблицей.
+    const table = el("div", { class: "icon-swatch-table" });
     ICON_PRESET_COLORS.forEach(c => {
       const sw = el("div", { class: "swatch" + (tool === "paint" && currentColor === c ? " active" : ""), style: `background:${c}` });
       sw.addEventListener("click", () => { currentColor = c; tool = "paint"; renderPaletteRow(); });
-      paletteRow.appendChild(sw);
+      table.appendChild(sw);
     });
-    const customInput = el("input", { type: "color", value: currentColor });
-    customInput.addEventListener("input", () => { currentColor = customInput.value; tool = "paint"; renderPaletteRow(); });
-    paletteRow.appendChild(customInput);
     const eraseBtn = el("button", { class: "small" + (tool === "erase" ? " active" : ""), text: "Ластик", onclick: () => { tool = "erase"; renderPaletteRow(); } });
-    paletteRow.appendChild(eraseBtn);
+    table.appendChild(eraseBtn);
+    const pipetteBtn = el("button", { class: "small" + (tool === "pipette" ? " active" : ""), text: "Пипетка", onclick: () => { tool = "pipette"; renderPaletteRow(); } });
+    table.appendChild(pipetteBtn);
+    paletteRow.appendChild(table);
   }
   renderPaletteRow();
   body.appendChild(paletteRow);
@@ -928,6 +1199,13 @@ function openIconEditor(title, currentIcon, fallbackIcon, onApply) {
     for (let x = 0; x < ICON_EDITOR_SIZE; x++) {
       const cell = el("div", { class: "icon-cell" });
       const paint = () => {
+        if (tool === "pipette") {
+          const ch = grid[y][x];
+          if (ch !== ".") currentColor = palette[ch] || currentColor;
+          tool = "paint";
+          renderPaletteRow();
+          return;
+        }
         setCell(x, y, tool === "erase" ? "." : colorChar(currentColor));
         updateCell(x, y);
         updatePreview();
@@ -1008,6 +1286,7 @@ function openIconEditor(title, currentIcon, fallbackIcon, onApply) {
 
   function close() {
     document.removeEventListener("mouseup", stopPainting);
+    if (colorPicker) colorPicker.destroy();
     overlay.remove();
   }
 
@@ -1112,7 +1391,7 @@ function iconEditButton(title, entity, fallbackIcon, onChanged) {
 
 // ---------- фильтрация внутри вкладки ----------
 
-const filters = { resources: "", storage: "", locations: "", manual: "", buildings: "", "breakdown-types": "", techs: "", "energy-recipes": "", species: "", breeding: "", mining: "", tools: "", mobs: "", "combat-moves": "", skills: "", enchantments: "", quests: "" };
+const filters = { resources: "", storage: "", locations: "", manual: "", buildings: "", "breakdown-types": "", techs: "", "energy-recipes": "", species: "", breeding: "", mining: "", tools: "", mobs: "", "combat-moves": "", skills: "", enchantments: "", quests: "", "smelt-melt": "", "smelt-alloy": "", "smelt-cast": "" };
 
 // Оборачивает контейнер карточек строкой поиска. Каждая карточка/строка должна иметь
 // data-search (текст для сравнения) - см. вызовы ниже. Вызови вернувшуюся apply() один
@@ -1394,7 +1673,7 @@ async function resetSave() {
   const res = await fetch("/api/reset_save", { method: "POST" });
   const payload = await res.json();
   if (res.ok) {
-    toast("ok", payload.existed ? "Прогресс обнулён: save.json удалён." : "Прогресс уже был пуст: save.json не существовал.");
+    toast("ok", payload.existed ? "Прогресс обнулён: автосохранение удалено." : "Прогресс уже был пуст: автосохранения не было.");
   } else {
     toast("error", "Не получилось обнулить прогресс.");
   }
@@ -1418,6 +1697,9 @@ function renderAll() {
   renderCombatMoves();
   renderSkills();
   renderEnchantments();
+  renderRituals();
+  renderSmeltery();
+  renderReactor();
   renderQuests();
   renderSettings();
   document.getElementById("rawJson").value = JSON.stringify(DATA, null, 2);
@@ -1425,14 +1707,95 @@ function renderAll() {
 
 // ---------- общие виджеты ----------
 
-function resourceSelect(selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
-  DATA.resources.forEach(r => {
-    const o = el("option", { value: r.id, text: r.name });
-    if (r.id === selected) o.selected = true;
-    select.appendChild(o);
+// Общий "выпадающий список с поиском" для ЛЮБОГО контентного списка, который
+// со временем может разрастись (ресурсы/постройки/техи/инструменты/локации/
+// лутбоксы/...) - кнопка, открывающая модалку со строкой фильтра по названию
+// или id, тот же приём, что уже был у buildingRequirementSelect/speciesSelect/
+// techMultiSelect ниже, но параметризованный списком вариантов - чтобы не
+// плодить ещё одну копию той же модалки под каждый новый список. Голый
+// <select> без поиска остаётся только у ЗАКРЫТЫХ фиксированных перечислений
+// (тип апгрейда, режим приёма боя и т.п. - десяток-другой значений, заданных в
+// коде, а не растущих вместе с контентом) - там поиск не нужен и не решает
+// никакой реальной проблемы.
+// entries - [{value, label, id?}] (id - если отличается от label, показывается
+// отдельным моноширинным подзаголовком, как id постройки/техи рядом с именем).
+// opts.noneLabel - непустая строка разрешает "не выбрано" (value -> null),
+// показывается кнопкой в шапке модалки, как у techSelect/buildingRequirementSelect.
+function genericPickerSelect(entries, selected, onchange, opts = {}) {
+  const { title = "Выбрать", noneLabel = null, placeholder = "— выбрать —", emptyText = "Список пуст." } = opts;
+  const btn = el("button", { class: "tech-pick-btn", type: "button" });
+  const render = () => {
+    const found = entries.find(e => e.value === selected);
+    btn.textContent = found ? found.label : (selected == null ? (noneLabel || placeholder) : String(selected));
+  };
+  render();
+  btn.addEventListener("click", () => {
+    openGenericPicker(title, entries, selected, noneLabel, emptyText, (newValue) => {
+      selected = newValue;
+      render();
+      onchange(newValue);
+    });
   });
-  return select;
+  return btn;
+}
+
+function openGenericPicker(title, entries, currentValue, noneLabel, emptyText, onPick) {
+  closeGenericPicker();
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeGenericPicker(); });
+
+  const modal = el("div", { class: "modal building-picker-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: title }));
+  if (noneLabel) {
+    head.appendChild(el("button", { class: "small", text: noneLabel, onclick: () => { onPick(null); closeGenericPicker(); } }));
+  }
+  head.appendChild(el("button", { text: "Закрыть", onclick: closeGenericPicker }));
+  modal.appendChild(head);
+
+  const body = el("div", { class: "building-picker-body" });
+  const search = el("input", { type: "text", placeholder: "Фильтр по названию или id…", class: "building-picker-search" });
+  body.appendChild(search);
+
+  const list = el("div", { class: "building-picker-list" });
+  if (!entries.length) {
+    list.appendChild(el("p", { class: "hint", text: emptyText }));
+  }
+  entries.forEach(({ value, label, id }) => {
+    const shownId = id != null ? id : value;
+    const row = el("div", {
+      class: "building-picker-row" + (value === currentValue ? " selected" : ""),
+      "data-search": `${label} ${shownId}`.toLowerCase(),
+    });
+    row.appendChild(el("div", { class: "building-picker-name", text: label }));
+    if (shownId !== label) row.appendChild(el("code", { class: "building-picker-id", text: shownId }));
+    row.addEventListener("click", () => { onPick(value); closeGenericPicker(); });
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+  modal.appendChild(body);
+
+  search.addEventListener("input", () => {
+    const q = search.value.trim().toLowerCase();
+    list.querySelectorAll("[data-search]").forEach(row => {
+      row.style.display = !q || row.dataset.search.includes(q) ? "" : "none";
+    });
+  });
+
+  overlay.appendChild(modal);
+  overlay.id = "genericPickerOverlay";
+  document.body.appendChild(overlay);
+  search.focus();
+}
+
+function closeGenericPicker() {
+  const overlay = document.getElementById("genericPickerOverlay");
+  if (overlay) overlay.remove();
+}
+
+function resourceSelect(selected, onchange) {
+  const entries = DATA.resources.map(r => ({ value: r.id, label: r.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
 }
 
 // Вместо выпадающего списка - кнопка, открывающая граф технологий (тот же,
@@ -1624,14 +1987,9 @@ function closeTechMultiPicker() {
 }
 
 function buildingSelect(selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
-  select.appendChild(el("option", { value: "*", text: "* (все постройки)" }));
-  Object.entries(DATA.buildings).forEach(([bid, b]) => {
-    const o = el("option", { value: bid, text: b.name });
-    if (bid === selected) o.selected = true;
-    select.appendChild(o);
-  });
-  return select;
+  const entries = [{ value: "*", label: "* (все постройки)" }]
+    .concat(Object.entries(DATA.buildings).map(([bid, b]) => ({ value: bid, label: b.name })));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать постройку", placeholder: "— выбрать —" });
 }
 
 // В отличие от buildingSelect (targeting эффекта технологии, где "*" = все построй),
@@ -1772,6 +2130,23 @@ function enchantKindInput(value, onChange) {
   return el("span", {}, [input, datalist]);
 }
 
+// Тот же приём, что soulKindInput, только для тега роли компонента реактора
+// (resources.*.reactor_component.role, например 'fuel'/'moderator'/'coolant'/
+// 'absorber' - см. buildings.*.reactor.accepts_roles/game/engine.py:
+// reactor_component_role) - свободная строка, datalist только подсказка.
+// knownReactorRoles() определена ниже (рядом с openReactorSettingsModal), но
+// вызывается лениво (внутри функции), так что порядок объявления не важен.
+let _reactorRoleDatalistCounter = 0;
+function reactorRoleInput(value, onChange) {
+  const listId = `reactorRoleList_${_reactorRoleDatalistCounter++}`;
+  const input = el("input", { type: "text", list: listId, placeholder: "например 'fuel'/'moderator'/'coolant'/'absorber'", value: value || "" });
+  input.addEventListener("change", () => onChange(input.value.trim()));
+  const roles = knownReactorRoles();
+  const datalist = el("datalist", { id: listId });
+  roles.forEach(r => datalist.appendChild(el("option", { value: r })));
+  return el("span", {}, [input, datalist]);
+}
+
 // Список произвольных тегов постройки (buildings.*.tags) - НЕ фиксированный
 // enum (тот же принцип, что breeding_accepts_family/soul_kind), только МНОЖЕСТВО
 // значений вместо одного: панель "Производственные мощности" в web_ui.html
@@ -1903,13 +2278,8 @@ function closeSpeciesPicker() {
 // квеста tool_tier_at_least. В отличие от buildingRequirementSelect тут нет "не требуется" -
 // оба места, где используется, обязаны ссылаться на конкретный инструмент.
 function toolSelect(selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
-  Object.entries(DATA.tools).forEach(([tid, t]) => {
-    const o = el("option", { value: tid, text: t.name });
-    if (tid === selected) o.selected = true;
-    select.appendChild(o);
-  });
-  return select;
+  const entries = Object.entries(DATA.tools).map(([tid, t]) => ({ value: tid, label: t.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать инструмент", placeholder: "— выбрать инструмент —" });
 }
 
 // allowNone - добавляет пункт "— корень —" (value="" -> null): у ручных действий
@@ -1919,19 +2289,14 @@ function toolSelect(selected, onchange) {
 // самой себе; полный цикл через цепочку предков всё равно ловит content_validation.py
 // при сохранении, здесь достаточно исключить самый очевидный случай).
 function locationSelect(selected, onchange, { allowNone = false, excludeId = null } = {}) {
-  const select = el("select", { onchange: () => onchange(select.value === "" ? null : select.value) });
-  if (allowNone) {
-    const o = el("option", { value: "", text: "— корень (без локации) —" });
-    if (selected == null) o.selected = true;
-    select.appendChild(o);
-  }
-  Object.entries(DATA.locations).forEach(([lid, l]) => {
-    if (lid === excludeId) return;
-    const o = el("option", { value: lid, text: l.name });
-    if (lid === selected) o.selected = true;
-    select.appendChild(o);
+  const entries = Object.entries(DATA.locations)
+    .filter(([lid]) => lid !== excludeId)
+    .map(([lid, l]) => ({ value: lid, label: l.name }));
+  return genericPickerSelect(entries, selected, onchange, {
+    title: "Выбрать локацию",
+    placeholder: "— выбрать локацию —",
+    noneLabel: allowNone ? "— корень (без локации) —" : null,
   });
-  return select;
 }
 
 // Общее поле "Задержка клика (мс)" для построек/ручных действий/добычи - защита от
@@ -2203,6 +2568,9 @@ function findIdOwner(id) {
   if (DATA.enchantments && id in DATA.enchantments) return "зачарованием";
   if (DATA.quests && id in DATA.quests) return "квестом";
   if (DATA.loot_cases && id in DATA.loot_cases) return "кейсом с лутом";
+  if (DATA.melt_recipes && id in DATA.melt_recipes) return "рецептом плавки";
+  if (DATA.alloy_recipes && id in DATA.alloy_recipes) return "рецептом сплава";
+  if (DATA.cast_recipes && id in DATA.cast_recipes) return "рецептом литья";
   return null;
 }
 
@@ -2374,7 +2742,9 @@ function renderResources() {
   const table = el("table");
   table.appendChild(el("tr", {}, [
     el("th", { text: "ID" }), el("th", { text: "Название" }), el("th", { text: "Иконка" }),
-    el("th", { text: "Дробный" }), el("th", { text: "Порядок" }), el("th", { text: "" }),
+    el("th", { text: "Дробный" }),
+    el("th", { text: "Репликация", title: "Сколько материи репликатора стоит 1 шт. (может быть дробной, 0.05). Пусто - репликатор этот ресурс не делает" }),
+    el("th", { text: "Порядок" }), el("th", { text: "" }),
   ]));
   const filterBar = makeFilterBar("resources", table);
 
@@ -2421,11 +2791,25 @@ function renderResources() {
     fractionalCb.addEventListener("change", () => {
       if (fractionalCb.checked) r.fractional = true; else delete r.fractional;
     });
+    // Цена репликации (resources.*.replication_cost, см. game/engine.py: replicate) -
+    // материи за ОДНУ единицу; у энергии её быть не может (валидатор).
+    const replicationInput = el("input", {
+      type: "number", min: "0", step: "any", style: "width:74px", placeholder: "—",
+      title: "Материи репликатора за 1 шт. Пусто - не реплицируется",
+      value: r.replication_cost != null ? r.replication_cost : "",
+    });
+    replicationInput.disabled = r.id === ENERGY_RESOURCE_ID;
+    replicationInput.addEventListener("change", () => {
+      const v = Number(replicationInput.value);
+      if (replicationInput.value !== "" && v > 0) r.replication_cost = v; else delete r.replication_cost;
+      replicationInput.value = r.replication_cost != null ? r.replication_cost : "";
+    });
     const row = el("tr", { id: `card-resources-${r.id}` }, [
       el("td", {}, [el("code", { text: r.id })]),
       el("td", {}, [nameInput]),
       el("td", {}, [iconBtn]),
       el("td", { style: "text-align:center" }, [fractionalCb]),
+      el("td", {}, [replicationInput]),
       el("td", {}, [order]),
       el("td", {}, [lastCell]),
     ]);
@@ -2450,7 +2834,8 @@ function renderStorage() {
   root.appendChild(el("p", { class: "hint", text:
     "Необязательная вместимость склада ресурса - без неё ресурс хранится без ограничений (как раньше). "
     + "Базовая вместимость доступна сразу; каждый следующий тир расширения покупается СТРОГО ПО ПОРЯДКУ "
-    + "(как тиры инструментов) и добавляет к текущей вместимости capacity_add. Энергия вместимость склада "
+    + "(как тиры инструментов) и добавляет к текущей вместимости capacity_add - ЛИБО, если у тира отмечено "
+    + "«Делает вместимость безграничной», снимает ограничение совсем. Энергия вместимость склада "
     + "не использует - у неё уже есть отдельная механика ёмкости (energy_storage построек)." }));
 
   const cardsBox = el("div");
@@ -2504,10 +2889,24 @@ function renderStorage() {
 
       const addRow = el("div", { class: "field-row" });
       addRow.appendChild(el("label", { text: "Прибавка к вместимости" }));
-      const addInput = el("input", { type: "number", min: "1", value: tier.capacity_add });
+      const addInput = el("input", { type: "number", min: "1", value: tier.capacity_add || 1 });
+      addInput.disabled = !!tier.infinite;
       addInput.addEventListener("change", () => { tier.capacity_add = parseInt(addInput.value, 10) || 1; });
       addRow.appendChild(addInput);
       tierCard.appendChild(addRow);
+
+      const infRow = el("div", { class: "field-row" });
+      const infInput = el("input", { type: "checkbox" });
+      infInput.checked = !!tier.infinite;
+      infInput.addEventListener("change", () => {
+        tier.infinite = infInput.checked;
+        addInput.disabled = tier.infinite;
+      });
+      infRow.appendChild(infInput);
+      infRow.appendChild(el("label", { text: "Делает вместимость безграничной" }));
+      infRow.appendChild(el("span", { class: "hint",
+        text: "Вместо прибавки к вместимости - снимает ограничение склада совсем (как у ресурса вообще без storage). Прибавка выше тогда не используется." }));
+      tierCard.appendChild(infRow);
 
       const techRow = el("div", { class: "field-row" });
       techRow.appendChild(el("label", { text: "Нужна технология" }));
@@ -2590,6 +2989,417 @@ function toolTiersSummaryText(action) {
 // Матрица галочек тир x инструмент живёт в отдельном окне (см. autocraft/energy_converter
 // у построек выше) - на карточке действия остаётся только сводка + кнопка, чтобы список
 // действий не разрастался матрицей на каждый инструмент в игре, даже когда она пуста.
+// ---------- Крафт на сетке механизма (locations.*.crafting + manual_actions.*.pattern) ----------
+//
+// Граница "нужна модалка / не нужна" проходит по ДВУМ явным переключателям, а не
+// выводится из сложности рецепта:
+//   1) у ЛОКАЦИИ - галочка "Крафт-сетка": без неё локация работает как сейчас
+//      (лес, шахта, охотничьи угодья - просто список карточек);
+//   2) у ДЕЙСТВИЯ внутри такой локации - галочка "Крафтится на сетке": без неё
+//      действие остаётся обычной карточкой рядом с сеточными рецептами (например,
+//      плавка, которая тратит прочность молота).
+// В данных обе галочки - это наличие самого поля (crafting / pattern), отдельного
+// флага нет, поэтому рассинхронизироваться им негде.
+//
+// Узор хранится как "сетка символов + легенда" - тот же приём, что у пиксельных
+// иконок: {"rows": ["AA.", "B..", "..."], "key": {"A": "ore", "B": "charcoal"}}.
+
+function patternResourceIcon(rid) {
+  const res = DATA.resources.find(r => r.id === rid);
+  return (res && res.icon) || defaultResourceIcon(rid) || null;
+}
+
+function patternResourceName(rid) {
+  return DATA.resources.find(r => r.id === rid)?.name || rid;
+}
+
+// withName=true подписывает НАЗВАНИЕМ ресурсы, у которых нет своей пиксельной
+// иконки (и нет встроенной по умолчанию) - нужно в ячейке сетки, где другого
+// текста рядом нет. Там, где имя уже написано рядом (палитра, строка цены),
+// withName=false: иначе выходит "Мана Мана".
+function patternIconEl(rid, size, withName = true) {
+  const def = patternResourceIcon(rid);
+  if (def) return pixelIcon(def.grid, def.palette, size);
+  if (!withName) {
+    return el("span", { style: `display:inline-block; flex:none; width:${size}px; height:${size}px; border:1px dashed var(--border); border-radius:3px;` });
+  }
+  return el("span", { class: "hint", style: `max-width:${size + 20}px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;`,
+    text: patternResourceName(rid) });
+}
+
+function craftingGridRow(loc, lid) {
+  const row = el("div", { class: "field-row" });
+  row.appendChild(el("label", { text: "Крафт-сетка (механизм)" }));
+  const checkbox = el("input", { type: "checkbox" });
+  checkbox.checked = !!loc.crafting;
+  const sizeBox = el("span", { style: "display:inline-flex; align-items:center; gap:6px;" });
+  const widthInput = el("input", { type: "number", min: "1", max: "9", style: "width:60px",
+    value: loc.crafting ? loc.crafting.width : 3 });
+  const heightInput = el("input", { type: "number", min: "1", max: "9", style: "width:60px",
+    value: loc.crafting ? loc.crafting.height : 3 });
+  sizeBox.append(widthInput, el("span", { text: "×" }), heightInput);
+  // crafting.batch - кнопка "Скрафтить ×N" в модалке механизма (без флага - только
+  // по одному разу; сервер сам режет times до 1, см. tools/web_ui.py: craft_grid_view).
+  const batchLabel = el("label", { style: "display:inline-flex; align-items:center; gap:4px; margin-left:10px;",
+    title: "Разрешить крафт пачкой («Скрафтить ×N») в модалке этого механизма" });
+  const batchInput = el("input", { type: "checkbox" });
+  batchInput.checked = !!(loc.crafting && loc.crafting.batch);
+  batchLabel.append(batchInput, el("span", { text: "крафт пачкой (×N)" }));
+  sizeBox.appendChild(batchLabel);
+  const syncSize = () => {
+    if (!loc.crafting) return;
+    const w = Math.max(1, Math.min(9, Number(widthInput.value) || 1));
+    const h = Math.max(1, Math.min(9, Number(heightInput.value) || 1));
+    widthInput.value = w;
+    heightInput.value = h;
+    loc.crafting = { width: w, height: h };
+    if (batchInput.checked) loc.crafting.batch = true;
+  };
+  widthInput.addEventListener("change", syncSize);
+  heightInput.addEventListener("change", syncSize);
+  batchInput.addEventListener("change", syncSize);
+  const applyEnabled = () => {
+    widthInput.disabled = !checkbox.checked;
+    heightInput.disabled = !checkbox.checked;
+    batchInput.disabled = !checkbox.checked;
+  };
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) {
+      loc.crafting = {
+        width: Math.max(1, Math.min(9, Number(widthInput.value) || 3)),
+        height: Math.max(1, Math.min(9, Number(heightInput.value) || 3)),
+      };
+      if (batchInput.checked) loc.crafting.batch = true;
+    } else {
+      delete loc.crafting;
+    }
+    applyEnabled();
+    renderManual(); // у действий этой локации меняется доступность узора
+    if (lid === CONVERTER_LOCATION_ID) renderEnergyRecipes(); // и у рецептов крафта за энергию
+  });
+  applyEnabled();
+  row.append(checkbox, sizeBox);
+  row.appendChild(el("span", { class: "hint", text:
+    "без галочки локация работает как сейчас - обычный список карточек действий. С галочкой локация становится механизмом: "
+    + "игра открывает для неё модалку-верстак с сеткой такого размера (3×3 - верстак, 9×9 - ужасающий верстак, 2×1 - печь/мастерская). "
+    + "Внутри такой локации каждое действие само решает, крафтится оно на сетке или остаётся обычной карточкой - см. «Крафт на сетке» у действия"
+    + (lid === CONVERTER_LOCATION_ID
+      ? ". У «Преобразователя» в сетке собираются рецепты крафта за энергию (вкладка «Рецепты за энергию», узор = consumes)"
+      : "") }));
+  return row;
+}
+
+function patternToGrid(pattern, width, height) {
+  const grid = [];
+  for (let y = 0; y < height; y++) grid.push(new Array(width).fill(null));
+  if (!pattern || !Array.isArray(pattern.rows)) return grid;
+  const key = pattern.key || {};
+  pattern.rows.forEach((rowStr, y) => {
+    if (y >= height || typeof rowStr !== "string") return;
+    for (let x = 0; x < Math.min(rowStr.length, width); x++) {
+      const ch = rowStr[x];
+      if (ch !== "." && key[ch]) grid[y][x] = key[ch];
+    }
+  });
+  return grid;
+}
+
+const PATTERN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+function gridToPattern(grid) {
+  const ids = [];
+  grid.forEach(row => row.forEach(cell => { if (cell && !ids.includes(cell)) ids.push(cell); }));
+  if (!ids.length) return null;
+  const charOf = {};
+  const key = {};
+  ids.forEach((id, i) => {
+    const ch = PATTERN_ALPHABET[i] || PATTERN_ALPHABET[PATTERN_ALPHABET.length - 1];
+    charOf[id] = ch;
+    key[ch] = id;
+  });
+  return { rows: grid.map(row => row.map(cell => (cell ? charOf[cell] : ".")).join("")), key };
+}
+
+function patternCostOf(grid) {
+  const cost = {};
+  grid.forEach(row => row.forEach(cell => { if (cell) cost[cell] = (cost[cell] || 0) + 1; }));
+  return cost;
+}
+
+function sameCost(a, b) {
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  return ka.every(k => b[k] === a[k]);
+}
+
+// Цена БЕЗ энергии - именно её обязан повторять узор: энергию в ячейку не положить,
+// она идёт в cost сверх узора и списывается при крафте (держать в паре с
+// tools/content_validation.py: check_grid_pattern).
+function itemCostOf(cost) {
+  const out = {};
+  Object.entries(cost || {}).forEach(([rid, n]) => { if (rid !== ENERGY_RESOURCE_ID) out[rid] = n; });
+  return out;
+}
+
+// Узор рисуется и у ручного действия (сетка его локации, сверяется с cost), и у
+// рецепта крафта за энергию (сетка преобразователя, сверяется с consumes) -
+// opts говорит, чей он: {locationId, costField, isEnergy}.
+function actionPatternOpts(action) {
+  return { locationId: action.location || null, costField: "cost", isEnergy: false };
+}
+
+function energyRecipePatternOpts() {
+  return { locationId: CONVERTER_LOCATION_ID, costField: "consumes", isEnergy: true };
+}
+
+function patternSummaryText(action, opts) {
+  opts = opts || actionPatternOpts(action);
+  const loc = opts.locationId ? DATA.locations[opts.locationId] : null;
+  if (!loc || !loc.crafting) return opts.isEnergy ? "у преобразователя нет крафт-сетки" : "у локации нет крафт-сетки";
+  if (!action.pattern) return opts.isEnergy ? "узора нет - запустить руками нельзя" : "обычная карточка (модалка не нужна)";
+  const grid = patternToGrid(action.pattern, loc.crafting.width, loc.crafting.height);
+  const cost = patternCostOf(grid);
+  const cells = Object.values(cost).reduce((s, n) => s + n, 0);
+  const mirror = action.pattern_mirror ? ", зеркальный" : "";
+  const mismatch = sameCost(cost, itemCostOf(action[opts.costField])) ? "" : `, РАСХОДИТСЯ С ${opts.costField.toUpperCase()}`;
+  const energy = (action[opts.costField] || {})[ENERGY_RESOURCE_ID];
+  const energyText = energy ? `, +${energy} энергии` : "";
+  return `${loc.crafting.width}×${loc.crafting.height}, занято ${cells}${energyText}${mirror}${mismatch}`;
+}
+
+function actionPatternRow(action, aid, opts, onChange) {
+  opts = opts || actionPatternOpts(action);
+  const row = el("div", { class: "field-row settings-summary-row" });
+  row.appendChild(el("label", { text: "Крафт на сетке" }));
+  const checkbox = el("input", { type: "checkbox" });
+  const summary = el("span", { class: "hint", text: patternSummaryText(action, opts) });
+  const editBtn = el("button", { class: "small", text: "Нарисовать узор" });
+
+  const refresh = () => {
+    // Локацию ручного действия могли сменить в карточке - opts пересобираем.
+    const current = opts.isEnergy ? opts : actionPatternOpts(action);
+    const loc = current.locationId ? DATA.locations[current.locationId] : null;
+    const crafting = loc && loc.crafting;
+    checkbox.disabled = !crafting;
+    checkbox.checked = !!action.pattern;
+    editBtn.disabled = !crafting || !action.pattern;
+    summary.textContent = patternSummaryText(action, current);
+    if (onChange) onChange();
+  };
+  const currentOpts = () => (opts.isEnergy ? opts : actionPatternOpts(action));
+
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) {
+      openPatternModal(action, aid, refresh, currentOpts());
+    } else {
+      delete action.pattern;
+      delete action.pattern_mirror;
+      refresh();
+    }
+  });
+  editBtn.addEventListener("click", () => openPatternModal(action, aid, refresh, currentOpts()));
+
+  row.append(checkbox, summary, editBtn);
+  row.appendChild(el("span", { class: "hint", text: opts.isEnergy
+    ? "узор = что игрок раскладывает в слотах преобразователя, чтобы запустить этот рецепт; одна ячейка - одна единица "
+      + "consumes (обязаны совпадать). Энергия в узор не входит - она копится по ходам до порога. Пока у преобразователя "
+      + "есть крафт-сетка, рецепт без узора - ошибка валидации: запустить его руками было бы нельзя"
+    : "галочка = действие выполняется ТОЛЬКО раскладыванием узора в модалке этого механизма. Без галочки действие остаётся "
+      + "обычной карточкой, как сейчас (например, плавка, которая тратит прочность молота, или рубка дров). Галочка недоступна, "
+      + "пока у локации действия не включена крафт-сетка" }));
+  refresh();
+  // Смена локации у действия меняет доступность узора (и его размер), поэтому
+  // карточка дёргает этот refresh вручную - перерисовывать всю вкладку ради
+  // одной строки было бы потерей прокрутки и фокуса.
+  row._refresh = refresh;
+  return row;
+}
+
+function openPatternModal(action, aid, onChange, opts) {
+  opts = opts || actionPatternOpts(action);
+  const costField = opts.costField;
+  const loc = opts.locationId ? DATA.locations[opts.locationId] : null;
+  const crafting = loc && loc.crafting;
+  if (!crafting) {
+    alert(opts.isEnergy
+      ? "У локации «Преобразователь» не включена крафт-сетка - сначала включи её на вкладке «Локации»."
+      : "У локации этого действия не включена крафт-сетка - сначала включи её на вкладке «Локации».");
+    onChange();
+    return;
+  }
+  const width = crafting.width, height = crafting.height;
+  const grid = patternToGrid(action.pattern, width, height);
+  let selected = null; // id ресурса или null = ластик
+  let query = "";
+
+  const overlay = el("div", { class: "modal-overlay" });
+  const close = () => {
+    const pattern = gridToPattern(grid);
+    if (pattern) {
+      action.pattern = pattern;
+    } else {
+      // Пустую сетку не сохраняем: действие просто возвращается в обычные карточки,
+      // иначе в content.json остался бы узор без единой занятой ячейки.
+      delete action.pattern;
+      delete action.pattern_mirror;
+    }
+    overlay.remove();
+    onChange();
+  };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  const modal = el("div", { class: "modal settings-modal pattern-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: `Узор: ${action.name || aid}` }));
+  head.appendChild(el("span", { class: "hint", text: `${loc.name} · сетка ${width}×${height}` }));
+  head.appendChild(el("button", { text: "Готово", onclick: close }));
+  modal.appendChild(head);
+
+  const body = el("div", { class: "pattern-body" });
+  const paletteSide = el("div", { class: "pattern-side" });
+  const center = el("div", { class: "pattern-center" });
+  const costSide = el("div", { class: "pattern-side" });
+  body.append(paletteSide, center, costSide);
+  modal.appendChild(body);
+
+  const paletteBox = el("div", { class: "pattern-palette" });
+  const gridBox = el("div", { class: "pattern-grid", style: `grid-template-columns: repeat(${width}, max-content);` });
+  const costBox = el("div");
+
+  function renderPalette() {
+    paletteBox.innerHTML = "";
+    DATA.resources
+      .filter(r => r.id !== ENERGY_RESOURCE_ID) // в ячейку не кладётся - см. поле «Энергия за крафт»
+      .filter(r => !query || r.name.toLowerCase().includes(query) || r.id.includes(query))
+      .forEach(r => {
+        const swatch = el("button", { class: "pattern-swatch" + (selected === r.id ? " selected" : ""), title: r.id });
+        swatch.appendChild(patternIconEl(r.id, 22, false));
+        swatch.appendChild(el("span", { class: "swatch-name", text: r.name }));
+        swatch.addEventListener("click", () => { selected = r.id; renderAllPattern(); });
+        paletteBox.appendChild(swatch);
+      });
+  }
+
+  function renderGrid() {
+    gridBox.innerHTML = "";
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const cell = grid[y][x];
+        const btn = el("button", { class: "pattern-cell" + (cell ? " filled" : ""), title: cell ? patternResourceName(cell) : "пусто" });
+        if (cell) btn.appendChild(patternIconEl(cell, Math.min(40, Math.floor(320 / Math.max(width, height)))));
+        btn.addEventListener("click", () => {
+          // Клик тем же ресурсом (или ластиком) стирает - иначе выбранную ячейку
+          // нельзя было бы очистить, не переключаясь на ластик каждый раз.
+          grid[y][x] = (!selected || cell === selected) ? null : selected;
+          renderAllPattern();
+        });
+        gridBox.appendChild(btn);
+      }
+    }
+  }
+
+  function renderCost() {
+    costBox.innerHTML = "";
+    const cost = patternCostOf(grid);
+    const ids = Object.keys(cost);
+    costBox.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Цена по узору" })]));
+    if (!ids.length) {
+      costBox.appendChild(el("p", { class: "hint", text: opts.isEnergy
+        ? "сетка пуста - при закрытии узор у рецепта будет убран"
+        : "сетка пуста - при закрытии действие вернётся в обычные карточки" }));
+    } else {
+      ids.forEach(rid => {
+        const line = el("div", { class: "pattern-cost-row" });
+        line.appendChild(patternIconEl(rid, 20, false));
+        line.appendChild(el("span", { text: patternResourceName(rid) }));
+        line.appendChild(el("span", { class: "amount", text: `×${cost[rid]}` }));
+        costBox.appendChild(line);
+      });
+    }
+    const current = itemCostOf(action[costField]);
+    const matches = sameCost(cost, current);
+    const note = el("div", { class: "pattern-note " + (matches ? "ok" : "err") });
+    if (matches) {
+      note.appendChild(el("div", { text: `${costField} ${opts.isEnergy ? "рецепта" : "действия"} совпадает с узором` }));
+    } else {
+      const currentText = Object.keys(current).length
+        ? Object.entries(current).map(([rid, amt]) => `${patternResourceName(rid)} ×${amt}`).join(", ")
+        : "пусто";
+      note.appendChild(el("div", { text: `Сейчас в ${costField}: ${currentText}` }));
+      note.appendChild(el("div", { class: "hint", text:
+        "одна ячейка = одна единица ресурса, поэтому расхождение - ОШИБКА валидации, сохранить контент с ней не выйдет. "
+        + `Либо перенеси узор в ${costField} кнопкой ниже, либо поправь сам узор` }));
+      const syncBtn = el("button", { class: "small", text: `Записать узор в ${costField}` });
+      syncBtn.addEventListener("click", () => {
+        // На месте, а не новым объектом: редактор словаря в карточке держит
+        // ссылку на этот же объект. Энергия - не из узора, её не трогаем.
+        const target = action[costField] || (action[costField] = {});
+        Object.keys(target).forEach(k => { if (k !== ENERGY_RESOURCE_ID) delete target[k]; });
+        Object.assign(target, cost);
+        renderAllPattern();
+      });
+      note.appendChild(syncBtn);
+    }
+    costBox.appendChild(note);
+
+    if (!opts.isEnergy) {
+      // Энергия в цене рецепта - СВЕРХ узора (в ячейку её не положить). Списывается
+      // при крафте; апгрейд механизма energy_efficiency её уменьшает; при нехватке
+      // крафт ждёт притока энергии, а не отказывает.
+      const energyRow = el("div", { class: "field-row" });
+      energyRow.appendChild(el("label", { text: "Энергия за крафт" }));
+      const target = action[costField] || (action[costField] = {});
+      const energyInput = el("input", { type: "number", min: "0", step: "any", style: "width:80px",
+        value: target[ENERGY_RESOURCE_ID] || "", placeholder: "0" });
+      energyInput.addEventListener("change", () => {
+        const v = Number(energyInput.value);
+        if (v > 0) target[ENERGY_RESOURCE_ID] = v; else delete target[ENERGY_RESOURCE_ID];
+      });
+      energyRow.appendChild(energyInput);
+      costBox.appendChild(energyRow);
+      costBox.appendChild(el("p", { class: "hint", text:
+        "не кладётся в ячейку - списывается при каждом крафте сверх узора. Улучшение механизма «энергоэффективность» "
+        + "её уменьшает. Если энергии не хватает, крафт встаёт в очередь и выполнится сам, когда она накопится" }));
+    }
+
+    const mirrorRow = el("div", { class: "field-row" });
+    const mirrorCheckbox = el("input", { type: "checkbox" });
+    mirrorCheckbox.checked = !!action.pattern_mirror;
+    mirrorCheckbox.addEventListener("change", () => {
+      if (mirrorCheckbox.checked) action.pattern_mirror = true; else delete action.pattern_mirror;
+    });
+    mirrorRow.append(mirrorCheckbox, el("label", { text: "Ловить зеркальный узор" }));
+    costBox.appendChild(mirrorRow);
+    costBox.appendChild(el("p", { class: "hint", text:
+      "пустые края узора обрезаются перед сравнением, поэтому рисунок ловится в любом углу сетки, а рецепт верстака 3×3 "
+      + "срабатывает и на большей сетке. Два рецепта одного механизма не могут иметь одинаковую форму - это ошибка валидации" }));
+  }
+
+  function renderAllPattern() {
+    renderPalette();
+    renderGrid();
+    renderCost();
+  }
+
+  const searchInput = el("input", { type: "text", placeholder: "поиск ресурса…" });
+  searchInput.addEventListener("input", () => { query = searchInput.value.trim().toLowerCase(); renderPalette(); });
+  const eraserBtn = el("button", { class: "small", text: "Ластик" });
+  eraserBtn.addEventListener("click", () => { selected = null; renderAllPattern(); });
+  paletteSide.append(
+    el("div", { class: "field-row" }, [el("label", { text: "Ресурсы" })]),
+    searchInput,
+    paletteBox,
+    eraserBtn,
+  );
+  center.append(gridBox, el("p", { class: "hint", style: "text-align:center; max-width:320px;", text:
+    "клик ставит выбранный ресурс, повторный клик по той же ячейке стирает" }));
+  costSide.appendChild(costBox);
+
+  renderAllPattern();
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
 function openToolTiersModal(action, onChange) {
   const overlay = el("div", { class: "modal-overlay" });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
@@ -2644,9 +3454,13 @@ function renderManual() {
     }});
     card.appendChild(el("div", { class: "card-head" }, [el("code", { text: aid }), nameInput, order, el("div", { class: "spacer" }), rm]));
 
+    let patternRow = null;
     const locRow = el("div", { class: "field-row" });
     locRow.appendChild(el("label", { text: "Локация" }));
-    locRow.appendChild(locationSelect(a.location, (v) => { a.location = v; }, { allowNone: true }));
+    locRow.appendChild(locationSelect(a.location, (v) => {
+      a.location = v;
+      if (patternRow) patternRow._refresh();
+    }, { allowNone: true }));
     locRow.appendChild(el("span", { class: "hint", text: "— корень — = действие показывается сразу в корне дерева локаций, без своей локации" }));
     card.appendChild(locRow);
 
@@ -2672,21 +3486,31 @@ function renderManual() {
 
     const toolScalingRow = el("div", { class: "field-row" });
     toolScalingRow.appendChild(el("label", { text: "Множитель от тира инструмента" }));
-    const toolScalingSelect = el("select");
-    toolScalingSelect.appendChild(el("option", { value: "", text: "— не выбран —" }));
-    Object.entries(DATA.tools).forEach(([tid, t]) => {
-      const o = el("option", { value: tid, text: t.name });
-      if (a.tool_scaling && a.tool_scaling.tool === tid) o.selected = true;
-      toolScalingSelect.appendChild(o);
-    });
-    toolScalingSelect.addEventListener("change", () => {
-      if (toolScalingSelect.value) a.tool_scaling = { tool: toolScalingSelect.value };
-      else delete a.tool_scaling;
-    });
+    const toolScalingEntries = Object.entries(DATA.tools).map(([tid, t]) => ({ value: tid, label: t.name }));
+    const toolScalingSelect = genericPickerSelect(
+      toolScalingEntries,
+      a.tool_scaling ? a.tool_scaling.tool : null,
+      (v) => { if (v) a.tool_scaling = { tool: v }; else delete a.tool_scaling; },
+      { title: "Выбрать инструмент", placeholder: "— не выбран —", noneLabel: "— не выбран —" },
+    );
     toolScalingRow.appendChild(toolScalingSelect);
     toolScalingRow.appendChild(el("span", { class: "hint", text:
       "необязательно - если выбран инструмент, весь gain этого действия домножается на его ТЕКУЩИЙ тир (тир 1 = без инструмента = множитель x1, не влияет на cost)" }));
     card.appendChild(toolScalingRow);
+
+    const durabilityRow = el("div", { class: "field-row" });
+    durabilityRow.appendChild(el("label", { text: "Тратит прочность инструмента" }));
+    const durabilityEntries = Object.entries(DATA.tools).map(([tid, t]) => ({ value: tid, label: t.name }));
+    const durabilitySelect = genericPickerSelect(
+      durabilityEntries,
+      a.uses_tool_durability ? a.uses_tool_durability.tool : null,
+      (v) => { if (v) a.uses_tool_durability = { tool: v }; else delete a.uses_tool_durability; },
+      { title: "Выбрать инструмент", placeholder: "— не выбран —", noneLabel: "— не выбран —" },
+    );
+    durabilityRow.appendChild(durabilitySelect);
+    durabilityRow.appendChild(el("span", { class: "hint", text:
+      "необязательно - выполнение действия тратит 1 прочность выбранного инструмента (см. tiers[].max_durability), сразу при запуске, как у добычи в шахте; сломанный инструмент блокирует запуск действия до починки (repair_tool). У инструмента без max_durability на текущем тире это поле ничего не тратит" }));
+    card.appendChild(durabilityRow);
 
     const priorityRow = el("div", { class: "field-row" });
     priorityRow.appendChild(el("label", { text: "Приоритет автокрафта (по умолчанию)" }));
@@ -2711,6 +3535,8 @@ function renderManual() {
     noAutocraftRow.appendChild(el("span", { class: "hint", text:
       "автокрафт (resource_recipe) никогда не выберет это действие рецептом для его gain-ресурса, даже если оно полностью детерминировано и мгновенно - как будто рецепта не существует вовсе (нехватка ресурса покажется игроку как обычная нехватка сырья). Кнопка «Перейти к рецепту» этим не гейтится - игрок всё ещё может найти и выполнить действие вручную. Для действий, которые НЕЛЬЗЯ доверять автоматике (например, убийство босса)." }));
     card.appendChild(noAutocraftRow);
+    const actionCycle = cycleNote(aid);
+    if (actionCycle) card.appendChild(actionCycle);
 
     const durationRow = el("div", { class: "field-row" });
     durationRow.appendChild(el("label", { text: "Длительность (ходов)" }));
@@ -2725,8 +3551,17 @@ function renderManual() {
       "если указано (>=2) - действие не выполняется мгновенно по клику: cost списывается сразу, а gain начисляется автоматически через столько ходов. Одновременно может выполняться только один запуск этого действия - повторный клик, пока не закончилось, заблокирован. Такое действие также исключено из автокрафта (resource_recipe)." }));
     card.appendChild(durationRow);
 
+    // Окно узора меняет cost на месте («Записать узор в cost», «Энергия за крафт») -
+    // словарь цены ниже перерисовываем, когда окно закрывается. costBox объявлен
+    // ниже, а refresh зовёт onChange сразу при создании строки - отсюда проверка.
+    let costBox = null;
+    patternRow = actionPatternRow(a, aid, undefined, () => {
+      if (costBox) renderManualResourceDictEditor(costBox, a, "cost", "cost_chance");
+    });
+    card.appendChild(patternRow);
+
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Цена (cost)" })]));
-    const costBox = el("div", { class: "dict-editor" });
+    costBox = el("div", { class: "dict-editor" });
     renderManualResourceDictEditor(costBox, a, "cost", "cost_chance");
     card.appendChild(costBox);
 
@@ -2827,7 +3662,7 @@ function renderLocations() {
     reqBuildingRow.appendChild(el("label", { text: "Нужна постройка" }));
     reqBuildingRow.appendChild(buildingRequirementSelect(loc.requires_building || null, (v) => { loc.requires_building = v; }));
     reqBuildingRow.appendChild(el("span", { class: "hint", text:
-      "необязательно - локация видна, только пока работает хотя бы одна копия этой постройки (в дополнение к технологии, если она тоже указана). Так постройка-\"механизм\" без своих produces/consumes может открывать СВОЮ локацию с ручными действиями внутри - см. requires_building у самих действий и вкладку «Улучшения» постройки" }));
+      "необязательно - локация видна, только пока работает хотя бы одна копия этой постройки (в дополнение к технологии, если она тоже указана). Так постройка-\"механизм\" без своих produces/consumes может открывать СВОЮ локацию с ручными действиями внутри. Все действия этой локации без собственной «Нужна постройка» наследуют эту: и проверку «постройка работает», и её улучшения (масштаб, энергоэффективность, ускорение многоходовых) - см. вкладку «Улучшения» постройки" }));
     card.appendChild(reqBuildingRow);
 
     const parentRow = el("div", { class: "field-row" });
@@ -2835,6 +3670,21 @@ function renderLocations() {
     parentRow.appendChild(locationSelect(loc.parent_location, (v) => { loc.parent_location = v; }, { allowNone: true, excludeId: lid }));
     parentRow.appendChild(el("span", { class: "hint", text: "— корень — = локация верхнего уровня. Внутри родительской локации эта появится как вложенная - полноценное дерево, можно вкладывать сколько угодно уровней" }));
     card.appendChild(parentRow);
+
+    card.appendChild(craftingGridRow(loc, lid));
+
+    const hubRow = el("div", { class: "field-row" });
+    hubRow.appendChild(el("label", { text: "Кнопки построек-механизмов" }));
+    const hubInput = el("input", { type: "checkbox" });
+    hubInput.checked = !!loc.shows_building_mechanisms;
+    hubInput.addEventListener("change", () => {
+      if (hubInput.checked) loc.shows_building_mechanisms = true;
+      else delete loc.shows_building_mechanisms;
+    });
+    hubRow.appendChild(hubInput);
+    hubRow.appendChild(el("span", { class: "hint", text:
+      "в этой локации появятся кнопки «Открыть: ...» для построенных автоматизаторов, синтезаторов душ, ритуальных кругов и реакторов (в дополнение к кнопкам на карточке постройки). Обычно - у «Механизмов». Локация с крафт-сеткой, в которой нет ничего, кроме сетки, и так показывается кнопкой в родительской локации, а не отдельной локацией" }));
+    card.appendChild(hubRow);
 
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
@@ -2844,7 +3694,7 @@ function renderLocations() {
 
 // ---------- Постройки ----------
 
-// Автокрафт (compute_power/autocraft_speed/autocraft_slots/unlocks_autocraft) и
+// Автокрафт (процессор: compute_power/autocraft_slots; сборщик: autocraft_assembler) и
 // крафт из энергии (energy_converter) настраиваются НЕ инлайн в карточке постройки,
 // а в отдельных всплывающих окнах (по образцу techSelect/openTechPicker) - это
 // специфичные для одной подсистемы поля, нужные далеко не каждой постройке, и на
@@ -2852,13 +3702,50 @@ function renderLocations() {
 function autocraftSummaryText(b) {
   const parts = [];
   if (b.compute_power) parts.push(`мощность ${b.compute_power}`);
-  if (b.autocraft_speed) parts.push(`скорость ${b.autocraft_speed}`);
-  if (b.autocraft_slots) parts.push(`слоты +${b.autocraft_slots}`);
-  if ((b.unlocks_autocraft || []).length) parts.push(`открывает: ${b.unlocks_autocraft.length}`);
+  if (b.autocraft_slots) parts.push(`слоты заказов +${b.autocraft_slots}`);
+  if (b.autocraft_assembler) {
+    const perTurn = b.autocraft_assembler.per_turn;
+    parts.push(`сборщик «${assemblerTargetName(b.autocraft_assembler)}», ${perTurn == null ? "без лимита" : `${perTurn}/ход`}`);
+  }
   return parts.length ? parts.join(", ") : "не участвует в автокрафте";
 }
 
+// Цель сборщика - ОДНО из полей: location (локация-механизм: верстак, печь,
+// преобразователь...) или building (ритуальный алтарь - постройка с ritual_circle,
+// своей локации у ритуалов нет). Держать в паре с content_validation.py.
+function assemblerTargetValue(asm) {
+  return "building" in asm ? `building:${asm.building}` : `location:${asm.location}`;
+}
+function assemblerTargetName(asm) {
+  if ("building" in asm) {
+    const b = DATA.buildings[asm.building];
+    return b ? b.name : asm.building;
+  }
+  const loc = DATA.locations[asm.location];
+  return loc ? loc.name : asm.location;
+}
+function assemblerTargetSelect(asm) {
+  const entries = Object.entries(DATA.locations).map(([lid, l]) => ({ value: `location:${lid}`, label: l.name, id: lid }));
+  Object.entries(DATA.buildings).forEach(([bid, bb]) => {
+    if (bb.ritual_circle) entries.push({ value: `building:${bid}`, label: `Ритуалы: ${bb.name}`, id: bid });
+  });
+  return genericPickerSelect(entries, assemblerTargetValue(asm), (v) => {
+    const sep = v.indexOf(":");
+    const key = v.slice(0, sep), id = v.slice(sep + 1);
+    const perTurn = asm.per_turn;  // пересобираем, чтобы в content.json цель шла первой
+    delete asm.location;
+    delete asm.building;
+    delete asm.per_turn;
+    asm[key] = id;
+    asm.per_turn = perTurn;
+  }, { title: "Выбрать механизм", placeholder: "— выбрать механизм —" });
+}
+
 function openAutocraftSettingsModal(b, onChange) {
+  // Поля старого автокрафта (открытие по ресурсам и общая скорость) убраны из игры -
+  // валидатор считает их ошибкой, здесь они просто стираются при открытии окна.
+  delete b.unlocks_autocraft;
+  delete b.autocraft_speed;
   const overlay = el("div", { class: "modal-overlay" });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
   const modal = el("div", { class: "modal settings-modal" });
@@ -2867,44 +3754,75 @@ function openAutocraftSettingsModal(b, onChange) {
   head.appendChild(el("button", { text: "Закрыть", onclick: () => { overlay.remove(); onChange(); } }));
   modal.appendChild(head);
 
+  modal.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Процессор - «мозг заказов»" })]));
   const computeRow = el("div", { class: "field-row" });
   computeRow.appendChild(el("label", { text: "Вычислительная мощность" }));
   const computeInput = el("input", { type: "number", min: "0", value: b.compute_power || 0 });
   computeInput.addEventListener("change", () => { b.compute_power = Number(computeInput.value) || 0; });
   computeRow.appendChild(computeInput);
-  computeRow.appendChild(el("span", { class: "hint", text: "0 - обычная постройка; иначе это процессор. Суммарная мощность всех рабочих процессоров - потолок того, сколько раз за один автокрафт можно прокрутить один рецепт (см. compute_capacity)" }));
+  computeRow.appendChild(el("span", { class: "hint", text: "0 - обычная постройка; иначе это процессор. Суммарная мощность всех рабочих процессоров - максимальный размер ОДНОГО заказа автокрафта: сколько предметов съедят все его крафты (энергия не считается). Без процессоров заказов нет вовсе" }));
   modal.appendChild(computeRow);
 
-  const speedRow = el("div", { class: "field-row" });
-  speedRow.appendChild(el("label", { text: "Скорость автокрафта" }));
-  const speedInput = el("input", { type: "number", min: "0", value: b.autocraft_speed || 0 });
-  speedInput.addEventListener("change", () => { b.autocraft_speed = Number(speedInput.value) || 0; });
-  speedRow.appendChild(speedInput);
-  speedRow.appendChild(el("span", { class: "hint", text: "0 - обычная постройка. Сколько операций автокрафта в сумме можно выполнить ЗА ОДИН ХОД (в отличие от мощности - потолка размера запроса безотносительно времени). Не хватает скорости - остаток докрафтится фоновой задачей за несколько ходов, а не мгновенно (см. autocraft_speed_capacity)" }));
-  modal.appendChild(speedRow);
-
   const slotsRow = el("div", { class: "field-row" });
-  slotsRow.appendChild(el("label", { text: "Слоты автокрафта" }));
+  slotsRow.appendChild(el("label", { text: "Слоты заказов" }));
   const slotsInput = el("input", { type: "number", min: "0", value: b.autocraft_slots || 0 });
   slotsInput.addEventListener("change", () => { b.autocraft_slots = Number(slotsInput.value) || 0; });
   slotsRow.appendChild(slotsInput);
-  slotsRow.appendChild(el("span", { class: "hint", text: "0 - обычная постройка. Сколько фоновых автокрафт-задач может выполняться одновременно (по одной на каждый ресурс в цепочке докрафта) - база 1 без единой такой постройки" }));
+  slotsRow.appendChild(el("span", { class: "hint", text: "0 - обычная постройка. Сколько заказов автокрафта идёт одновременно - база 1 без единой такой постройки. Заказ, который только ждёт энергию, слот не занимает" }));
   modal.appendChild(slotsRow);
 
-  modal.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Открывает автокрафт для" })]));
-  if (!Array.isArray(b.unlocks_autocraft)) b.unlocks_autocraft = [];
-  const autocraftBox = el("div", { class: "req-list" });
-  DATA.resources.forEach(r => {
-    const cb = el("input", { type: "checkbox" });
-    cb.checked = b.unlocks_autocraft.includes(r.id);
-    cb.addEventListener("change", () => {
-      if (cb.checked) { if (!b.unlocks_autocraft.includes(r.id)) b.unlocks_autocraft.push(r.id); }
-      else { b.unlocks_autocraft = b.unlocks_autocraft.filter(x => x !== r.id); }
+  modal.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Сборщик" })]));
+  const asmRow = el("div", { class: "field-row" });
+  const asmCheckbox = el("input", { type: "checkbox" });
+  asmCheckbox.checked = !!b.autocraft_assembler;
+  asmRow.appendChild(asmCheckbox);
+  asmRow.appendChild(el("label", { text: "Эта постройка - сборщик" }));
+  modal.appendChild(asmRow);
+  const asmBox = el("div");
+  modal.appendChild(asmBox);
+  const renderAssembler = () => {
+    asmBox.innerHTML = "";
+    if (!b.autocraft_assembler) return;
+    const locRow = el("div", { class: "field-row" });
+    locRow.appendChild(el("label", { text: "Для какого механизма" }));
+    locRow.appendChild(assemblerTargetSelect(b.autocraft_assembler));
+    asmBox.appendChild(locRow);
+    const perRow = el("div", { class: "field-row" });
+    perRow.appendChild(el("label", { text: "Крафтов (ритуалов) за ход на копию" }));
+    const unlimited = el("input", { type: "checkbox" });
+    unlimited.checked = b.autocraft_assembler.per_turn == null;
+    const perInput = el("input", { type: "number", min: "1", step: "1", style: "width:70px",
+      value: b.autocraft_assembler.per_turn == null ? 1 : b.autocraft_assembler.per_turn });
+    perInput.disabled = unlimited.checked;
+    perInput.addEventListener("change", () => {
+      b.autocraft_assembler.per_turn = Math.max(1, Math.floor(Number(perInput.value) || 1));
+      perInput.value = b.autocraft_assembler.per_turn;
     });
-    autocraftBox.appendChild(el("label", {}, [cb, document.createTextNode(r.name)]));
+    unlimited.addEventListener("change", () => {
+      b.autocraft_assembler.per_turn = unlimited.checked ? null : Math.max(1, Math.floor(Number(perInput.value) || 1));
+      perInput.disabled = unlimited.checked;
+    });
+    perRow.append(perInput, unlimited, el("span", { text: "без лимита" }));
+    asmBox.appendChild(perRow);
+  };
+  asmCheckbox.addEventListener("change", () => {
+    if (asmCheckbox.checked) {
+      const firstMechanism = Object.keys(DATA.locations).find(lid => DATA.locations[lid].crafting) || Object.keys(DATA.locations)[0];
+      b.autocraft_assembler = { location: firstMechanism, per_turn: 1 };
+    } else {
+      delete b.autocraft_assembler;
+    }
+    renderAssembler();
   });
-  modal.appendChild(autocraftBox);
-  modal.appendChild(el("p", { class: "hint", text: "Автокрафт ЛЮБОГО ресурса по умолчанию закрыт - игрок обязан делать его руками, пока не построит (и не будет держать рабочей) хотя бы одну постройку, отметившую этот ресурс здесь." }));
+  renderAssembler();
+  modal.appendChild(el("p", { class: "hint", text:
+    "Сборщик делает для заказов автокрафта рецепты выбранного механизма (любой локации: верстак, печь, преобразователь...) МГНОВЕННО, "
+    + "какой бы долгий ни был рецепт. Лимит - сколько крафтов за ход даёт каждая копия (32 сборщика по 1 = 32 крафта за ход); "
+    + "«без лимита» - любое число за ход. Второй способ автоматизировать механизм - улучшение «Автоматизация» (type autocraft) "
+    + "у постройки механизма: как игрок у механизма, 1 крафт за ход с длительностью рецепта. "
+    + "«Ритуалы: …» - сборщик ритуалов этого алтаря: ритуал для заказа проходит мгновенно, без хода у алтаря и без "
+    + "доп. расхода за ход (extra_consumes_per_turn); ритуалы со случайным результатом (шанс/диапазон в produces) "
+    + "сборщик не делает. Запускать ритуалы по условию умеет и автоматизатор (правило с целью «Ритуал»)" }));
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
@@ -3061,6 +3979,197 @@ function openSoulCollectorSettingsModal(b, onChange) {
   document.body.appendChild(overlay);
 }
 
+function replicatorSummaryText(b) {
+  if (!b.replicator) return "не репликатор";
+  const matter = (DATA.resources.find(r => r.id === b.replicator.matter) || {}).name || b.replicator.matter || "—";
+  const perTurn = b.replicator.max_matter_per_turn;
+  const priced = DATA.resources.filter(r => r.replication_cost != null && r.id !== b.replicator.matter).length;
+  return `материя «${matter}», ${perTurn == null ? "без лимита" : `${perTurn}/ход`}, `
+    + `${b.replicator.slots || 1} слот(ов)/копия; ресурсов с ценой: ${priced}`;
+}
+
+// Репликатор (buildings.*.replicator, см. game/engine.py: replicate) - делает ЛЮБОЙ
+// ресурс с ценой репликации (столбец «Репликация» на вкладке «Ресурсы») из одной
+// материи. Держать в паре с content_validation.py.
+function openReplicatorSettingsModal(b, onChange) {
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal settings-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Репликатор" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => { overlay.remove(); onChange(); } }));
+  modal.appendChild(head);
+
+  modal.appendChild(el("p", { class: "hint", text:
+    "Постройка делает любой ресурс, у которого на вкладке «Ресурсы» задана цена репликации (материи за 1 шт., "
+    + "может быть дробной), из одного ресурса-материи. Игрок выбирает ресурс и количество, материя списывается "
+    + "сразу целиком, ресурс приходит по мере переработки - не быстрее лимита за ход. Лимит растят улучшения типа "
+    + "«Пропускная способность репликатора»; улучшение «Автоматизация» (type autocraft) пускает репликатор в "
+    + "автокрафт: сырьё без рецепта, запасной путь и основной путь, если игрок поднимет приоритет репликации." }));
+
+  const toggleRow = el("div", { class: "field-row" });
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = !!b.replicator;
+  toggleRow.appendChild(enabled);
+  toggleRow.appendChild(el("label", { text: "Репликатор (replicator)" }));
+  modal.appendChild(toggleRow);
+
+  const body = el("div");
+  const renderBody = () => {
+    body.innerHTML = "";
+    if (!b.replicator) return;
+    const matterRow = el("div", { class: "field-row" });
+    matterRow.appendChild(el("label", { text: "Материя" }));
+    matterRow.appendChild(resourceSelect(b.replicator.matter || null, (v) => { b.replicator.matter = v; }));
+    matterRow.appendChild(el("span", { class: "hint", text: "ресурс-валюта репликатора (обычно дробный, как энергия); его копят генераторы - постройки с «только на излишках энергии»" }));
+    body.appendChild(matterRow);
+
+    const perRow = el("div", { class: "field-row" });
+    perRow.appendChild(el("label", { text: "Материи за ход (на 1 репликацию)" }));
+    const perInput = el("input", { type: "number", min: "0", step: "any", value: b.replicator.max_matter_per_turn ?? "", placeholder: "без ограничения" });
+    perInput.addEventListener("change", () => {
+      const v = Number(perInput.value);
+      b.replicator.max_matter_per_turn = perInput.value !== "" && v > 0 ? v : null;
+    });
+    perRow.appendChild(perInput);
+    perRow.appendChild(el("span", { class: "hint", text: "пусто/0 - без лимита: любой объём за один ход" }));
+    body.appendChild(perRow);
+
+    const slotsRow = el("div", { class: "field-row" });
+    slotsRow.appendChild(el("label", { text: "Репликаций сразу (на копию)" }));
+    const slotsInput = el("input", { type: "number", min: "1", step: "1", value: b.replicator.slots || 1 });
+    slotsInput.addEventListener("change", () => { b.replicator.slots = Math.max(1, Math.floor(Number(slotsInput.value) || 1)); });
+    slotsRow.appendChild(slotsInput);
+    body.appendChild(slotsRow);
+  };
+  renderBody();
+  modal.appendChild(body);
+
+  enabled.addEventListener("change", () => {
+    if (enabled.checked) {
+      const firstFractional = DATA.resources.find(r => r.fractional && r.id !== ENERGY_RESOURCE_ID);
+      b.replicator = { matter: firstFractional ? firstFractional.id : null, max_matter_per_turn: null, slots: 1 };
+    } else {
+      delete b.replicator;
+    }
+    renderBody();
+  });
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function ritualCircleSummaryText(b) {
+  if (!b.ritual_circle) return "не алтарь";
+  return `${b.ritual_circle.ring_pedestals || 1} пьедестал(ов) в кольце/копия`;
+}
+
+function openRitualCircleSettingsModal(b, onChange) {
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal settings-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Ритуальный круг" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => { overlay.remove(); onChange(); } }));
+  modal.appendChild(head);
+
+  modal.appendChild(el("p", { class: "hint", text:
+    "Постройка-алтарь: игрок раскладывает ингредиенты по внешнему кольцу пьедesталов (число ниже, ПЕР "
+    + "КОПИЮ) и заводит один предмет в отдельный, всегда доступный центральный пьедestal - см. вкладку "
+    + "«Ритуалы», где ring_cost/center_cost задаются для каждого рецепта. Число пьедесталов кольца можно "
+    + "увеличивать апгрейдами типа «Пьедесталы ритуального круга» (вкладка «Улучшения» этой постройки) - "
+    + "центральный пьедestal апгрейдам не подчиняется, он есть у алтаря всегда." }));
+
+  const toggleRow = el("div", { class: "field-row" });
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = !!b.ritual_circle;
+  toggleRow.appendChild(enabled);
+  toggleRow.appendChild(el("label", { text: "Ритуальный круг (ritual_circle)" }));
+  modal.appendChild(toggleRow);
+
+  const body = el("div");
+  const renderBody = () => {
+    body.innerHTML = "";
+    if (!b.ritual_circle) return;
+
+    const pedestalsRow = el("div", { class: "field-row" });
+    pedestalsRow.appendChild(el("label", { text: "Пьедesталов в кольце на копию" }));
+    const pedestalsInput = el("input", { type: "number", min: "1", value: b.ritual_circle.ring_pedestals || 1 });
+    pedestalsInput.addEventListener("change", () => { b.ritual_circle.ring_pedestals = Number(pedestalsInput.value) || 1; });
+    pedestalsRow.appendChild(pedestalsInput);
+    pedestalsRow.appendChild(el("span", { class: "hint", text: "умножается на число РАБОЧИХ копий этой постройки, плюс бонус от апгрейдов типа «Пьедесталы ритуального круга»" }));
+    body.appendChild(pedestalsRow);
+  };
+  renderBody();
+  modal.appendChild(body);
+
+  enabled.addEventListener("change", () => {
+    if (enabled.checked) b.ritual_circle = { ring_pedestals: 3 };
+    else delete b.ritual_circle;
+    renderBody();
+  });
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+function smelterySummaryText(b) {
+  if (!b.smeltery) return "не плавильня";
+  const s = b.smeltery;
+  return `жар ${s.heat || 1} · ${s.slots || 1} слот(ов)/копия · тигель ${s.capacity || 1}/копия`;
+}
+
+// Плавильня (buildings.*.smeltery): слоты плавки -> тигель -> литьё в формы. Рецепты -
+// на вкладке «Плавильня» (они не привязаны к постройке: их ведёт любая плавильня, чьего
+// жара хватает). См. game/engine.py: smeltery_heat/smeltery_slot_capacity/load_melt.
+function openSmelterySettingsModal(b, onChange) {
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal settings-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Плавильня" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => { overlay.remove(); onChange(); } }));
+  modal.appendChild(head);
+  modal.appendChild(el("p", { class: "hint", text:
+    "Игрок кладёт руду в слоты плавки (ход на загрузку), она плавится turns ходов и стекает в общий тигель "
+    + "жидким металлом (resources.*.molten) и шлаком. Металлы сплавляются по кнопке, металл льётся в формы "
+    + "(форма - предмет склада, не тратится). Жар решает, какие рецепты плавки и сплавы тут доступны. Слоты и "
+    + "тигель умножаются на число РАБОЧИХ копий; все три числа наращиваются апгрейдами smeltery_*." }));
+  const toggleRow = el("div", { class: "field-row" });
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = !!b.smeltery;
+  toggleRow.appendChild(enabled);
+  toggleRow.appendChild(el("label", { text: "Плавильня (smeltery)" }));
+  modal.appendChild(toggleRow);
+  const body = el("div");
+  const renderBody = () => {
+    body.innerHTML = "";
+    if (!b.smeltery) return;
+    [
+      ["heat", "Жар", "рецепт плавки/сплав с heat выше - здесь недоступен; от числа копий не зависит"],
+      ["slots", "Слотов плавки на копию", "сколько порций плавится одновременно"],
+      ["capacity", "Объём тигля на копию", "единиц на ВСЕ металлы и шлак вместе"],
+    ].forEach(([field, label, hint]) => {
+      const row = el("div", { class: "field-row" });
+      row.appendChild(el("label", { text: label }));
+      const input = el("input", { type: "number", min: "1", step: "1", value: b.smeltery[field] || 1 });
+      input.addEventListener("change", () => { b.smeltery[field] = Math.max(1, Math.round(Number(input.value) || 1)); });
+      row.appendChild(input);
+      row.appendChild(el("span", { class: "hint", text: hint }));
+      body.appendChild(row);
+    });
+  };
+  renderBody();
+  modal.appendChild(body);
+  enabled.addEventListener("change", () => {
+    if (enabled.checked) b.smeltery = { slots: 1, capacity: 4, heat: 1 };
+    else delete b.smeltery;
+    renderBody();
+  });
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
 function automationHubSummaryText(b) {
   if (!b.automation_hub) return "нет";
   return `${b.automation_hub.slots || 1} слот(ов)/копия`;
@@ -3115,12 +4224,183 @@ function openAutomationHubSettingsModal(b, onChange) {
   document.body.appendChild(overlay);
 }
 
+// Свободные теги ролей реактора (resources.*.reactor_component.role), уже
+// встречающиеся хоть у одного ресурса - тот же приём, что soulKindInput, только
+// собирает МНОЖЕСТВО отмеченных ролей (accepts_roles - список), а не одну строку.
+function knownReactorRoles() {
+  const roles = new Set();
+  (DATA.resources || []).forEach(r => { if (r.reactor_component && r.reactor_component.role) roles.add(r.reactor_component.role); });
+  return [...roles].sort();
+}
+
+function reactorSummaryText(b) {
+  if (!b.reactor) return "не реактор";
+  const r = b.reactor;
+  return `${r.grid_width || 3}×${r.grid_height || 3}, зон по умолчанию: ${r.zones_default || 1}, роли: ${(r.accepts_roles || []).join(", ") || "—"}`;
+}
+
+function openReactorSettingsModal(b, onChange) {
+  const overlay = el("div", { class: "modal-overlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+  const modal = el("div", { class: "modal settings-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Реактор" }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: () => { overlay.remove(); onChange(); } }));
+  modal.appendChild(head);
+
+  modal.appendChild(el("p", { class: "hint", text:
+    "Постройка-решётка: игрок вручную расставляет по ячейкам ресурсы-компоненты (тег reactor_component, "
+    + "вкладка «Реактор») - топливо/замедлители/теплоносители/поглотители. Решётка делится на зоны (по "
+    + "строкам, число зон - апгрейд типа «Зонирование реактора»), у каждой зоны свой рычаг глубины "
+    + "стержней и клапан охлаждения. Числа ниже настраивают формулу соседства и пороги перегрева - см. "
+    + "game/engine.py:_process_reactors." }));
+
+  const toggleRow = el("div", { class: "field-row" });
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = !!b.reactor;
+  toggleRow.appendChild(enabled);
+  toggleRow.appendChild(el("label", { text: "Реактор (reactor)" }));
+  modal.appendChild(toggleRow);
+
+  const body = el("div");
+  const renderBody = () => {
+    body.innerHTML = "";
+    if (!b.reactor) return;
+    const r = b.reactor;
+
+    const dimsRow = el("div", { class: "field-row" });
+    dimsRow.appendChild(el("label", { text: "Решётка (ширина × высота)" }));
+    const widthInput = el("input", { type: "number", min: "1", value: r.grid_width || 3, style: "width:70px" });
+    widthInput.addEventListener("change", () => { r.grid_width = parseInt(widthInput.value, 10) || 1; });
+    const heightInput = el("input", { type: "number", min: "1", value: r.grid_height || 3, style: "width:70px" });
+    heightInput.addEventListener("change", () => { r.grid_height = parseInt(heightInput.value, 10) || 1; });
+    dimsRow.appendChild(widthInput);
+    dimsRow.appendChild(el("span", { text: "×" }));
+    dimsRow.appendChild(heightInput);
+    body.appendChild(dimsRow);
+
+    const zonesRow = el("div", { class: "field-row" });
+    zonesRow.appendChild(el("label", { text: "Зон по умолчанию" }));
+    const zonesInput = el("input", { type: "number", min: "1", value: r.zones_default || 1 });
+    zonesInput.addEventListener("change", () => { r.zones_default = parseInt(zonesInput.value, 10) || 1; });
+    zonesRow.appendChild(zonesInput);
+    zonesRow.appendChild(el("span", { class: "hint", text: "наращивается апгрейдом типа «Зонирование реактора» (reactor_zoning)" }));
+    body.appendChild(zonesRow);
+
+    const rolesRow = el("div", { class: "field-row" });
+    rolesRow.appendChild(el("label", { text: "Принимает роли (accepts_roles)" }));
+    const rolesBox = el("div");
+    if (!Array.isArray(r.accepts_roles)) r.accepts_roles = [];
+    const roles = knownReactorRoles();
+    if (!roles.length) {
+      rolesBox.appendChild(el("span", { class: "hint", text: "сначала заведи хотя бы один ресурс-компонент реактора (вкладка «Реактор»)" }));
+    }
+    roles.forEach(role => {
+      const roleLabel = el("label", { style: "margin-right:12px" });
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = r.accepts_roles.includes(role);
+      cb.addEventListener("change", () => {
+        if (cb.checked) { if (!r.accepts_roles.includes(role)) r.accepts_roles.push(role); }
+        else r.accepts_roles = r.accepts_roles.filter(x => x !== role);
+      });
+      roleLabel.appendChild(cb);
+      roleLabel.appendChild(document.createTextNode(" " + role));
+      rolesBox.appendChild(roleLabel);
+    });
+    rolesRow.appendChild(rolesBox);
+    body.appendChild(rolesRow);
+
+    const heatCapRow = el("div", { class: "field-row" });
+    heatCapRow.appendChild(el("label", { text: "Ёмкость тепла на ячейку" }));
+    const heatCapInput = el("input", { type: "number", min: "0", step: "any", value: r.heat_cap_per_cell ?? 100 });
+    heatCapInput.addEventListener("change", () => { r.heat_cap_per_cell = Number(heatCapInput.value) || 0; });
+    heatCapRow.appendChild(heatCapInput);
+    heatCapRow.appendChild(el("span", { class: "hint", text: "порог аварии зоны = число ячеек зоны × это значение" }));
+    body.appendChild(heatCapRow);
+
+    const softRow = el("div", { class: "field-row" });
+    softRow.appendChild(el("label", { text: "Мягкий порог (доля 0..1)" }));
+    const softInput = el("input", { type: "number", min: "0.01", max: "1", step: "0.05", value: r.soft_threshold_pct ?? 0.6 });
+    softInput.addEventListener("change", () => { r.soft_threshold_pct = Number(softInput.value) || 0.6; });
+    softRow.appendChild(softInput);
+    softRow.appendChild(el("span", { class: "hint", text: "выше этой доли ёмкости тепла зона начинает терять эффективность выхода; жёсткий порог (авария) - всегда 100%" }));
+    body.appendChild(softRow);
+
+    [
+      ["fuel_adjacency_heat_step", "Прирост тепла за соседний fuel"],
+      ["fuel_adjacency_output_step", "Прирост выхода за соседний fuel"],
+      ["fuel_min_heat_mult", "ТЕПЛОВОЙ ПОЛ стержня: какую долю своего тепла он отдаёт ВСЕГДА, сколько щитов/поглотителей вокруг ни ставь. 0 = соседи могут обнулить нагрев полностью, и тогда охлаждение (теплоносители + расход жидкости) обесценивается, как только открыты продвинутые компоненты"],
+      ["moderator_adjacency_output_bonus", "Бонус выхода за соседний moderator"],
+      ["absorber_adjacency_reduction", "Снижение heat за соседний absorber"],
+      ["absorber_adjacency_output_reduction", "Снижение output за соседний absorber (если равно снижению heat, поглотитель строго хуже щита - он и был мёртвым)"],
+      ["shield_adjacency_reduction", "Снижение ТОЛЬКО heat за соседний shield (output не трогает)"],
+      ["reflector_adjacency_output_mult_step", "Множитель выхода за соседний reflector (перемножается с другими reflector)"],
+      ["reflector_adjacency_heat_mult_step", "Множитель ТЕПЛА за соседний reflector (0 = отражатель бесплатный, и тогда его всегда выгодно ставить максимум)"],
+      ["control_rod_burnup_factor", "Насколько стержни тормозят РАСХОД топлива: 0 = заряд тает независимо от рычага (тогда глубина - чистая потеря), 1 = ровно в темпе демпфирования"],
+      ["control_rod_heat_damp_exponent", "Во сколько раз сильнее рычаг душит ТЕПЛО, чем выход (степень): 1 = одинаково (глубина бесполезна), больше 1 = погружение улучшает отношение тепла к выходу и становится предметом выбора"],
+      ["catalyst_malus_radius", "Радиус (Чебышёва) окна, в котором катализатор штрафует чужие ячейки: 0 = только 4 ортогональные, 1 = весь квадрат 3x3 вместе с диагоналями"],
+      ["thermal_shock_flow_delta_pct", "Термоудар: порог скачка потока охлаждения (пп, 0-100)"],
+      ["thermal_shock_heat_bonus_pct", "Термоудар: добавка тепла (доля ёмкости зоны, 0..1)"],
+    ].forEach(([field, label]) => {
+      const row = el("div", { class: "field-row" });
+      row.appendChild(el("label", { text: label }));
+      const input = el("input", { type: "number", min: "0", step: "any", value: r[field] ?? 0 });
+      input.addEventListener("change", () => { r[field] = Number(input.value) || 0; });
+      row.appendChild(input);
+      body.appendChild(row);
+    });
+
+    const accidentRow = el("div", { class: "field-row" });
+    accidentRow.appendChild(el("label", { text: "Таблица аварий" }));
+    const accidentSelect = el("select", {});
+    const tableIds = Object.keys(DATA.reactor_accidents || {});
+    tableIds.forEach(tid => {
+      const o = el("option", { value: tid, text: tid });
+      if (r.accident_table === tid) o.selected = true;
+      accidentSelect.appendChild(o);
+    });
+    if (!tableIds.includes(r.accident_table)) r.accident_table = tableIds[0] || "";
+    accidentSelect.addEventListener("change", () => { r.accident_table = accidentSelect.value; });
+    accidentRow.appendChild(accidentSelect);
+    if (!tableIds.length) accidentRow.appendChild(el("span", { class: "hint", text: "сначала заведи таблицу аварий (вкладка «Реактор»)" }));
+    body.appendChild(accidentRow);
+  };
+  renderBody();
+  modal.appendChild(body);
+
+  enabled.addEventListener("change", () => {
+    if (enabled.checked) {
+      b.reactor = {
+        grid_width: 3, grid_height: 3, zones_default: 1, accepts_roles: [],
+        heat_cap_per_cell: 15, soft_threshold_pct: 0.6,
+        fuel_adjacency_heat_step: 0.35, fuel_adjacency_output_step: 0.15,
+        fuel_min_heat_mult: 0.25,
+        moderator_adjacency_output_bonus: 1.0, absorber_adjacency_reduction: 0.36,
+        absorber_adjacency_output_reduction: 0.12,
+        shield_adjacency_reduction: 0.18,
+        reflector_adjacency_output_mult_step: 0.15,
+        reflector_adjacency_heat_mult_step: 0.1,
+        control_rod_burnup_factor: 1.0, control_rod_heat_damp_exponent: 2.0,
+        catalyst_malus_radius: 1,
+        thermal_shock_flow_delta_pct: 40, thermal_shock_heat_bonus_pct: 0.15,
+        accident_table: Object.keys(DATA.reactor_accidents || {})[0] || "",
+      };
+    } else delete b.reactor;
+    renderBody();
+  });
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
 function enchantingTableSummaryText(b) {
   if (!b.enchanting_table) return "не стол зачарований";
   const cost = Object.entries(b.enchanting_table.cost || {});
-  if (!cost.length) return "цена попытки не задана";
-  return "цена попытки: " + cost.map(([rid, amt]) =>
-    `${amt}× ${DATA.resources.find(r => r.id === rid)?.name || rid}`).join(", ");
+  const costText = cost.length
+    ? "цена попытки: " + cost.map(([rid, amt]) => `${amt}× ${DATA.resources.find(r => r.id === rid)?.name || rid}`).join(", ")
+    : "цена попытки не задана";
+  const strip = b.enchanting_table.strip_on_fail !== false;
+  return `${costText}, провал ${strip ? "снимает все чары" : "щадящий"}`;
 }
 
 function openEnchantingTableSettingsModal(b, onChange) {
@@ -3135,8 +4415,9 @@ function openEnchantingTableSettingsModal(b, onChange) {
   modal.appendChild(el("p", { class: "hint", text:
     "Постройка, открывающая общую модалку «Стол зачарований» (три магических круга) для ЛЮБОГО инструмента "
     + "с заданным enchant_kind (вкладка «Инструменты») - список зачарований и то, каким инструментам они "
-    + "доступны, задаётся отдельно на вкладке «Зачарования». Тут только цена ОДНОЙ попытки (обычно книга "
-    + "зачарований) - списывается целиком независимо от исхода (см. game/engine.py:enchant_tool)." }));
+    + "доступны, задаётся отдельно на вкладке «Зачарования». Тут цена ОДНОЙ попытки (обычно книга "
+    + "зачарований, списывается целиком независимо от исхода) и режим провала - обе настройки игрок сам "
+    + "не меняет, это решение баланса (см. game/engine.py:enchant_tool)." }));
 
   const toggleRow = el("div", { class: "field-row" });
   const enabled = el("input", { type: "checkbox" });
@@ -3155,6 +4436,17 @@ function openEnchantingTableSettingsModal(b, onChange) {
     const costBox = el("div", { class: "dict-editor" });
     renderDictEditor(costBox, b.enchanting_table.cost);
     body.appendChild(costBox);
+
+    const stripRow = el("div", { class: "field-row" });
+    const stripInput = el("input", { type: "checkbox" });
+    stripInput.checked = b.enchanting_table.strip_on_fail !== false;
+    stripInput.addEventListener("change", () => { b.enchanting_table.strip_on_fail = stripInput.checked; });
+    stripRow.appendChild(stripInput);
+    stripRow.appendChild(el("label", { text: "Провал снимает все зачарования инструмента (strip_on_fail)" }));
+    body.appendChild(stripRow);
+    body.appendChild(el("p", { class: "hint", text:
+      "Выключено - провал попытки просто ничего не даёт, уже наложенные зачарования остаются как были. "
+      + "На ветку удачи не влияет - там всегда берётся максимум между текущим и выпавшим уровнем." }));
   };
   renderBody();
   modal.appendChild(body);
@@ -3195,8 +4487,21 @@ const UPGRADE_TYPE_OPTIONS = [
   ["action_duration_reduction", "Ускорение действия (сокращает duration_turns)"],
   ["automation_slots", "Слоты автоматизатора"],
   ["research_speed", "Скорость исследований (сокращает research_turns своего тира)"],
+  ["autocraft", "Автоматизация (автокрафт рецептов механизма)"],
+  ["ritual_pedestals", "Пьедесталы ритуального круга"],
+  ["reactor_zoning", "Зонирование реактора (число независимых зон)"],
+  ["reactor_grid_size", "Размер решётки реактора"],
+  ["reactor_telemetry", "Точная телеметрия реактора"],
+  ["replicator_throughput", "Пропускная способность репликатора (материи/ход)"],
+  ["smeltery_slots", "Слоты плавки плавильни"],
+  ["smeltery_capacity", "Объём тигля плавильни"],
+  ["smeltery_heat", "Жар плавильни"],
 ];
 const UPGRADE_TYPE_HINTS = {
+  smeltery_slots: "целое положительное число - АБСОЛЮТНАЯ добавка к числу слотов плавки ЭТОЙ плавильни (smeltery.slots × рабочие копии + бонус). Имеет смысл только у построек с smeltery. Обычные уровни - действует самый сильный купленный; repeatable - каждая покупка добавляет ещё value",
+  smeltery_capacity: "целое положительное число - АБСОЛЮТНАЯ добавка к объёму тигля ЭТОЙ плавильни (общий на все металлы и шлак). Имеет смысл только у построек с smeltery. Обычные уровни - действует самый сильный купленный",
+  smeltery_heat: "целое положительное число - АБСОЛЮТНАЯ добавка к жару ЭТОЙ плавильни: открывает рецепты плавки и сплавы с heat выше базового (например «большие мехи»). Имеет смысл только у построек с smeltery",
+  replicator_throughput: "положительное число - АБСОЛЮТНАЯ добавка к replicator.max_matter_per_turn ЭТОЙ ЖЕ постройки (материи за ход на одну репликацию). Имеет смысл только у репликатора (модалка «Репликатор»). Обычные уровни - действует самый сильный купленный; repeatable - каждая покупка добавляет ещё value",
   scale: "любое положительное число (не обязательно целое) - во сколько раз рецепт домножается относительно БАЗОВОГО (и produces, и consumes). Если у постройки НЕСКОЛЬКО scale-улучшений, действует только САМОЕ БОЛЬШОЕ купленное значение (они не перемножаются) - чтобы задать прогрессию \"1:1 -> 2:2 -> 3:3\", просто заведите отдельные улучшения со значениями 2 и 3, а не 2 и 1.5",
   energy_efficiency: "число от 0 до 1 (не включая) - множитель расхода энергии, например 0.5 = -50%. При нескольких таких улучшениях действует САМОЕ МАЛЕНЬКОЕ купленное значение (сильнейшее снижение)",
   generation_efficiency: "число больше 1 - множитель выработки энергии, например 1.5 = +50% (нужна produces.energy). При нескольких таких улучшениях действует САМОЕ БОЛЬШОЕ купленное значение",
@@ -3209,9 +4514,14 @@ const UPGRADE_TYPE_HINTS = {
   soul_collector_slots: "положительное число - АБСОЛЮТНАЯ добавка к вместимости синтезатора душ ЭТОЙ постройки (см. модалку «Синтезатор душ»). Имеет смысл только у построек с soul_collector. Обычно repeatable",
   soul_generation_efficiency: "число больше 1 - множитель продукции ВСЕХ душ, вставленных в синтезатор ЭТОЙ постройки. Имеет смысл только у построек с soul_collector. При нескольких таких улучшениях действует САМОЕ БОЛЬШОЕ купленное значение",
   breakdown_immunity: "само число не используется (куплено/не куплено) - постройка (или, для фермы, ИМЕННО ЭТОТ экземпляр - апгрейд покупается через 'Особи') перестаёт ломаться вовсе, независимо от breakdown_chance и любых тех-эффектов. Разрешён у ЛЮБОЙ постройки, не только у ферм",
-  action_duration_reduction: "число от 0 до 1 (не включая 1) - доля сокращения duration_turns у ручных действий, которые зависят от ЭТОЙ постройки (requires_building) и многоходовые (duration_turns > 1). При нескольких таких улучшениях действует САМОЕ БОЛЬШОЕ купленное значение (сильнейшее сокращение). Настолько сильное сокращение, что итог округляется до 1 хода, делает действие фактически мгновенным",
+  action_duration_reduction: "число от 0 до 1 (не включая 1) - доля сокращения duration_turns у ручных действий, которые зависят от ЭТОЙ постройки (requires_building самого действия или локации, где оно лежит - например, все рецепты печи-механизма) и многоходовые (duration_turns > 1). При нескольких таких улучшениях действует САМОЕ БОЛЬШОЕ купленное значение (сильнейшее сокращение). Настолько сильное сокращение, что итог округляется до 1 хода, делает действие фактически мгновенным",
   automation_slots: "положительное число - АБСОЛЮТНАЯ добавка к вместимости автоматизатора ЭТОЙ постройки (см. модалку «Автоматизатор»). Имеет смысл только у построек с automation_hub. Обычно repeatable",
+  autocraft: "само число не используется (куплено/не куплено) - автокрафт может сам запускать рецепты локации, которую открывает ЭТА постройка (locations.*.requires_building), либо рецепты преобразователя, если это преобразователь. Работает как игрок у механизма: 1 крафт за ход, многоходовой рецепт - одна партия своей длительности. Мгновенный крафт даёт только сборщик (autocraft_assembler, окно «Автокрафт» постройки). Не может быть repeatable",
   research_speed: "положительное число - АБСОЛЮТНОЕ сокращение времени исследования, В ХОДАХ (не доля, в отличие от action_duration_reduction), у технологий ТОГО ЖЕ тира, что lab_tier ЭТОЙ постройки (\"лаборатория той же эры\" - см. вкладку «Технологии», поле research_turns). Имеет смысл только у построек-лабораторий (lab_tier). При нескольких таких улучшениях (или нескольких подходящих лабораториях) действует САМОЕ БОЛЬШОЕ купленное сокращение, не сумма",
+  ritual_pedestals: "положительное число - АБСОЛЮТНАЯ добавка к ёмкости кольца ритуального круга ЭТОЙ постройки (см. модалку «Ритуальный круг»), не трогает центральный пьедestal. Имеет смысл только у построек с ritual_circle. Как и scale - обычно НЕ repeatable, а прогрессия из нескольких уровней (например 3 -> 6 -> 9 пьедesталов): каждый следующий уровень требует, чтобы предыдущий того же типа уже был куплен, среди купленных действует только самый сильный (не сумма)",
+  reactor_zoning: "целое число - сколько зон в решётке ПОСЛЕ покупки (решётка делится на зоны по строкам). ВЗАИМОИСКЛЮЧАЮЩИЙ выбор, как environment_emulation - покупка заменяет предыдущий купленный уровень зонирования ЭТОГО экземпляра, а не складывается с ним; не может быть repeatable. Имеет смысл только у построек-реакторов (reactor)",
+  reactor_grid_size: "объект {ширина, высота} - размер решётки ПОСЛЕ покупки (АБСОЛЮТНОЕ значение, как scale - не repeatable, задавайте прогрессию отдельными улучшениями 4x4 -> 5x5...). Существующие заполненные ячейки сохраняются, новые добавляются в конец. Имеет смысл только у построек-реакторов (reactor)",
+  reactor_telemetry: "само число не используется (куплено/не куплено) - открывает точные цифры тепла/выхода по каждой зоне вместо грубого статуса. Имеет смысл только у построек-реакторов (reactor)",
 };
 
 function upgradesSummaryText(b) {
@@ -3307,6 +4617,22 @@ function openBuildingUpgradesEditorModal(b, onChange) {
         if (!ENVIRONMENT_ALLELE_IDS.includes(u.value)) u.value = ENVIRONMENT_ALLELE_IDS[0];
         valueSelect.addEventListener("change", () => { u.value = valueSelect.value; });
         valueRow.appendChild(valueSelect);
+      } else if (u.type === "reactor_grid_size") {
+        // value - объект {width, height}, не число - см. UPGRADE_TYPE_HINTS.
+        if (!u.value || typeof u.value !== "object") u.value = { width: 4, height: 4 };
+        const widthInput = el("input", { type: "number", min: "1", value: u.value.width || 4, style: "width:70px" });
+        widthInput.addEventListener("change", () => { u.value.width = parseInt(widthInput.value, 10) || 1; });
+        const heightInput = el("input", { type: "number", min: "1", value: u.value.height || 4, style: "width:70px" });
+        heightInput.addEventListener("change", () => { u.value.height = parseInt(heightInput.value, 10) || 1; });
+        valueRow.appendChild(el("span", { text: "ширина:" }));
+        valueRow.appendChild(widthInput);
+        valueRow.appendChild(el("span", { text: "высота:" }));
+        valueRow.appendChild(heightInput);
+      } else if (u.type === "reactor_telemetry") {
+        // Как breakdown_immunity/breeding_immortality - куплено/не куплено, но тут
+        // это буквально true, а не произвольное положительное число.
+        u.value = true;
+        valueRow.appendChild(el("span", { class: "hint", text: "(включено/выключено покупкой - значение не используется)" }));
       } else {
         const valueInput = el("input", { type: "number", step: "any", value: u.value != null ? u.value : "" });
         valueInput.addEventListener("change", () => { u.value = Number(valueInput.value) || 0; });
@@ -3604,6 +4930,22 @@ function renderBuildings() {
     maxCountRow.appendChild(el("span", { class: "hint", text: "пусто/0 - без ограничения; иначе игрок не сможет построить больше указанного числа копий этой постройки" }));
     card.appendChild(maxCountRow);
 
+    // «Только на излишках энергии» (buildings.*.energy_surplus_only, см. engine.advance_turn):
+    // энергию берёт после всех, кроме преобразователей, - например генератор материи.
+    const surplusRow = el("div", { class: "field-row" });
+    surplusRow.appendChild(el("label", { text: "Только на излишках энергии" }));
+    const surplusCb = el("input", { type: "checkbox" });
+    surplusCb.checked = !!b.energy_surplus_only;
+    surplusCb.addEventListener("change", () => {
+      if (surplusCb.checked) b.energy_surplus_only = true; else delete b.energy_surplus_only;
+    });
+    surplusRow.appendChild(surplusCb);
+    surplusRow.appendChild(el("span", { class: "hint", text:
+      "энергию из consumes берёт ПРЕДПОСЛЕДНЕЙ в ходу: после остальных построек, заказов автокрафта, долгих действий "
+      + "и автоматизатора, но до преобразователей; не трогает энергию, которую копят ждущие заказы. Порядок в "
+      + "content.json между такими постройками решает, кто возьмёт первым. Нужна энергия в consumes" }));
+    card.appendChild(surplusRow);
+
     // Автокрафт и крафт из энергии - специфичные для одной подсистемы поля, нужные
     // далеко не каждой постройке; чтобы не захламлять карточку, живут в отдельных
     // окнах (см. openAutocraftSettingsModal/openEnergyConverterModal выше), а тут
@@ -3652,6 +4994,42 @@ function renderBuildings() {
       openAutomationHubSettingsModal(b, () => { automationHubSummary.textContent = automationHubSummaryText(b); });
     }}));
     card.appendChild(automationHubRow);
+
+    const ritualCircleRow = el("div", { class: "field-row settings-summary-row" });
+    ritualCircleRow.appendChild(el("label", { text: "Ритуальный круг" }));
+    const ritualCircleSummary = el("span", { class: "hint", text: ritualCircleSummaryText(b) });
+    ritualCircleRow.appendChild(ritualCircleSummary);
+    ritualCircleRow.appendChild(el("button", { class: "small", text: "Настроить", onclick: () => {
+      openRitualCircleSettingsModal(b, () => { ritualCircleSummary.textContent = ritualCircleSummaryText(b); });
+    }}));
+    card.appendChild(ritualCircleRow);
+
+    const smelteryRow = el("div", { class: "field-row settings-summary-row" });
+    smelteryRow.appendChild(el("label", { text: "Плавильня" }));
+    const smelterySummary = el("span", { class: "hint", text: smelterySummaryText(b) });
+    smelteryRow.appendChild(smelterySummary);
+    smelteryRow.appendChild(el("button", { class: "small", text: "Настроить", onclick: () => {
+      openSmelterySettingsModal(b, () => { smelterySummary.textContent = smelterySummaryText(b); });
+    }}));
+    card.appendChild(smelteryRow);
+
+    const replicatorRow = el("div", { class: "field-row settings-summary-row" });
+    replicatorRow.appendChild(el("label", { text: "Репликатор" }));
+    const replicatorSummary = el("span", { class: "hint", text: replicatorSummaryText(b) });
+    replicatorRow.appendChild(replicatorSummary);
+    replicatorRow.appendChild(el("button", { class: "small", text: "Настроить", onclick: () => {
+      openReplicatorSettingsModal(b, () => { replicatorSummary.textContent = replicatorSummaryText(b); });
+    }}));
+    card.appendChild(replicatorRow);
+
+    const reactorRow = el("div", { class: "field-row settings-summary-row" });
+    reactorRow.appendChild(el("label", { text: "Реактор" }));
+    const reactorSummary = el("span", { class: "hint", text: reactorSummaryText(b) });
+    reactorRow.appendChild(reactorSummary);
+    reactorRow.appendChild(el("button", { class: "small", text: "Настроить", onclick: () => {
+      openReactorSettingsModal(b, () => { reactorSummary.textContent = reactorSummaryText(b); });
+    }}));
+    card.appendChild(reactorRow);
 
     const upgradesRow = el("div", { class: "field-row settings-summary-row" });
     upgradesRow.appendChild(el("label", { text: "Улучшения" }));
@@ -4428,7 +5806,8 @@ function renderEnergyRecipes() {
   root.innerHTML = "";
   root.appendChild(el("p", { class: "hint", text:
     "Рецепты для энергетических преобразователей (постройка с полем energy_converter, вкладка «Постройки») - "
-    + "игрок выбирает, какой из них запустить, вручную в локации «Механизмы» (или его сам запускает автокрафт, "
+    + "игрок запускает их, раскладывая узор (consumes) в слотах «Преобразователя» (вкладка «Локации», крафт-сетка) "
+    + "- или их сам запускает автокрафт, "
     + "если результат кому-то нужен). threshold - сколько энергии нужно накопить, чтобы партия была готова; "
     + "produces - что партия даёт; необязательная материальная цена (consumes) списывается СРАЗУ при запуске, "
     + "в дополнение к энергии - так рецепт может быть не просто «энергия -> ресурс» (трансмутация), а "
@@ -4493,18 +5872,26 @@ function renderEnergyRecipes() {
       + "со своими рецептами, недоступными в обычном «Преобразователе»." }));
     card.appendChild(machineRow);
 
-    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Материальная цена (consumes)" })]));
     if (!r.consumes) r.consumes = {};
     const consumeBox = el("div", { class: "dict-editor" });
+    // Узор раскладывается в слотах преобразователя - после его правки (в т.ч.
+    // "Записать узор в consumes") словарь ниже перерисовывается.
+    card.appendChild(actionPatternRow(r, rid, energyRecipePatternOpts(), () => renderDictEditor(consumeBox, r.consumes)));
+
+    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Материальная цена (consumes)" })]));
     renderDictEditor(consumeBox, r.consumes);
     card.appendChild(consumeBox);
-    card.appendChild(el("p", { class: "hint", text: "Необязательно - пусто, если рецепт делает ресурс из чистой энергии, без сырья." }));
+    card.appendChild(el("p", { class: "hint", text:
+      "Списывается сразу при запуске, в дополнение к энергии. Пока у преобразователя есть крафт-сетка, это и есть "
+      + "содержимое его слотов - одна ячейка на единицу, совпадать с узором обязано." }));
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Партия даёт (produces)" })]));
     if (!r.produces) r.produces = {};
     const produceBox = el("div", { class: "dict-editor" });
     renderDictEditor(produceBox, r.produces, undefined, true);
     card.appendChild(produceBox);
+    const energyCycle = cycleNote("energy_recipe:" + rid);
+    if (energyCycle) card.appendChild(energyCycle);
 
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
@@ -4538,12 +5925,12 @@ function renderSpecies() {
   const freeResources = DATA.resources.filter(r => !(r.id in DATA.species));
   let addForm = null;
   if (freeResources.length) {
-    const select = el("select");
-    freeResources.forEach(r => select.appendChild(el("option", { value: r.id, text: r.name })));
+    let addRid = freeResources[0].id;
+    const entries = freeResources.map(r => ({ value: r.id, label: r.name }));
+    const select = genericPickerSelect(entries, addRid, (v) => { addRid = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
     const addBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
-      const rid = select.value;
-      DATA.species[rid] = { description: "", produces: {}, consumes: {}, dominant: false, weight: 1 };
-      jumpTo(`card-species-${rid}`, "species");
+      DATA.species[addRid] = { description: "", produces: {}, consumes: {}, dominant: false, weight: 1 };
+      jumpTo(`card-species-${addRid}`, "species");
     }});
     addForm = el("div", { class: "add-form" }, [el("span", { text: "Сделать видом для разведения:" }), select, addBtn]);
   }
@@ -4607,18 +5994,12 @@ function renderSpecies() {
     // tools/content_validation.py: они не обязательны без bonus_resource).
     const bonusResRow = el("div", { class: "field-row" });
     bonusResRow.appendChild(el("label", { text: "Бонусный ресурс" }));
-    const bonusResSelect = el("select");
-    bonusResSelect.appendChild(el("option", { value: "", text: "— нет бонуса —" }));
-    DATA.resources.forEach(r => {
-      const o = el("option", { value: r.id, text: r.name });
-      if (r.id === sp.bonus_resource) o.selected = true;
-      bonusResSelect.appendChild(o);
-    });
-    bonusResSelect.addEventListener("change", () => {
-      if (bonusResSelect.value === "") { delete sp.bonus_resource; delete sp.bonus_amount; delete sp.bonus_chance; }
-      else { sp.bonus_resource = bonusResSelect.value; if (sp.bonus_amount == null) sp.bonus_amount = 1; if (sp.bonus_chance == null) sp.bonus_chance = 0.2; }
+    const bonusResEntries = DATA.resources.map(r => ({ value: r.id, label: r.name }));
+    const bonusResSelect = genericPickerSelect(bonusResEntries, sp.bonus_resource || null, (v) => {
+      if (v == null) { delete sp.bonus_resource; delete sp.bonus_amount; delete sp.bonus_chance; }
+      else { sp.bonus_resource = v; if (sp.bonus_amount == null) sp.bonus_amount = 1; if (sp.bonus_chance == null) sp.bonus_chance = 0.2; }
       renderSpecies();
-    });
+    }, { title: "Выбрать ресурс", placeholder: "— нет бонуса —", noneLabel: "— нет бонуса —" });
     bonusResRow.appendChild(bonusResSelect);
     bonusResRow.appendChild(el("span", { class: "hint", text: "какой ресурс с шансом добавляет промышленная пасека, если генотип особи ('Среда обитания') совпадает со средой, которую эмулирует её экземпляр фермы (апгрейд типа environment_emulation) - разные виды в ОДНОЙ и той же благоприятной среде дают разные бонусы" }));
     card.appendChild(bonusResRow);
@@ -4974,6 +6355,52 @@ function renderMineFieldSettingsCard() {
     + "руд начинает отмечать, что реально заспавнилось на ЭТОМ поле. Порода (rock_resource) в детекцию не входит - "
     + "щуп ищет только руду из списка ниже." }));
 
+  if (!Array.isArray(mf.scanner_radius_tiers)) mf.scanner_radius_tiers = [];
+  const radiusRow = el("div", { class: "field-row" });
+  radiusRow.appendChild(el("label", { text: "Радиусная подсветка (пороги между \"счётом\" и \"подсветкой всей руды\")" }));
+  const radiusBox = el("div", { style: "display:flex; flex-direction:column; gap:6px;" });
+  function renderRadiusBox() {
+    radiusBox.innerHTML = "";
+    mf.scanner_radius_tiers.forEach((entry, i) => {
+      const row = el("div", { style: "display:flex; align-items:center; gap:6px;" });
+      row.appendChild(el("span", { class: "hint", text: "тир" }));
+      const tierInput = el("input", { type: "number", min: "1", max: String(scannerTierCount), style: "width:52px;", value: entry.tier });
+      tierInput.addEventListener("change", () => {
+        entry.tier = Math.min(scannerTierCount, Math.max(1, Math.round(Number(tierInput.value) || 1)));
+        tierInput.value = entry.tier;
+      });
+      row.appendChild(tierInput);
+      row.appendChild(el("span", { class: "hint", text: "радиус (клеток)" }));
+      const radiusInput = el("input", { type: "number", min: "1", style: "width:60px;", value: entry.radius });
+      radiusInput.addEventListener("change", () => {
+        entry.radius = Math.max(1, Math.round(Number(radiusInput.value) || 1));
+        radiusInput.value = entry.radius;
+      });
+      row.appendChild(radiusInput);
+      const removeBtn = el("button", { class: "small", text: "✕" });
+      removeBtn.addEventListener("click", () => {
+        mf.scanner_radius_tiers.splice(i, 1);
+        renderRadiusBox();
+      });
+      row.appendChild(removeBtn);
+      radiusBox.appendChild(row);
+    });
+    const addBtn = el("button", { class: "small", text: "+ Добавить порог" });
+    addBtn.addEventListener("click", () => {
+      mf.scanner_radius_tiers.push({ tier: Math.min(scannerTierCount, mf.scanner_reveal_all_tier), radius: 5 });
+      renderRadiusBox();
+    });
+    radiusBox.appendChild(addBtn);
+  }
+  renderRadiusBox();
+  radiusRow.appendChild(radiusBox);
+  card.appendChild(radiusRow);
+  card.appendChild(el("p", { class: "hint", text:
+    "Начиная с указанного тира щупа руда в этом радиусе (клетки, считая по диагонали как 1 - та же метрика, что у "
+    + "рассеивания тумана вокруг сломанной клетки) от ЛЮБОЙ уже открытой клетки светится сквозь туман. Среди "
+    + "разблокированных порогов действует только САМЫЙ БОЛЬШОЙ радиус (не сумма). Порог >= \"подсветка руды в тумане\" "
+    + "смысла не имеет - та уже показывает всё поле целиком, независимо от радиуса." }));
+
   const rockResourceRow = el("div", { class: "field-row" });
   rockResourceRow.appendChild(el("label", { text: "Ресурс пустой породы" }));
   rockResourceRow.appendChild(resourceSelect(mf.rock_resource, (v) => { mf.rock_resource = v; }));
@@ -5053,7 +6480,7 @@ function renderMining() {
     DATA.mine_field = {
       size: 20, dig_tool: Object.keys(DATA.tools)[0] || null, cluster_budget: 8,
       scanner_tool: Object.keys(DATA.tools)[0] || null,
-      scanner_types_tier: 1, scanner_counts_tier: 1, scanner_reveal_all_tier: 1,
+      scanner_types_tier: 1, scanner_counts_tier: 1, scanner_radius_tiers: [], scanner_reveal_all_tier: 1,
       rock_resource: DATA.resources[0]?.id || null, rock_yield: 2, rock_toughness: 1,
       rock_icon: null, rock_broken_icon: null, rock_icon_variants: [],
     };
@@ -5066,10 +6493,11 @@ function renderMining() {
   const freeResources = DATA.resources.filter(r => !(r.id in DATA.mining_info));
   let addForm = null;
   if (freeResources.length) {
-    const select = el("select");
-    freeResources.forEach(r => select.appendChild(el("option", { value: r.id, text: r.name })));
+    let addRid = freeResources[0].id;
+    const entries = freeResources.map(r => ({ value: r.id, label: r.name }));
+    const select = genericPickerSelect(entries, addRid, (v) => { addRid = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
     const addBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
-      const rid = select.value;
+      const rid = addRid;
       const firstTool = Object.keys(DATA.tools)[0] || null;
       DATA.mining_info[rid] = {
         requires_tech: null, required_tool: firstTool, required_tier: 1, rarity: 1,
@@ -5518,10 +6946,11 @@ function renderSoulRecipesSection() {
   const cardsBox = el("div");
   const freeResources = DATA.resources.filter(r => !(r.id in DATA.soul_recipes));
   if (freeResources.length) {
-    const select = el("select");
-    freeResources.forEach(r => select.appendChild(el("option", { value: r.id, text: r.name })));
+    let addRid = freeResources[0].id;
+    const entries = freeResources.map(r => ({ value: r.id, label: r.name }));
+    const select = genericPickerSelect(entries, addRid, (v) => { addRid = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
     const addBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
-      DATA.soul_recipes[select.value] = { produces: {} };
+      DATA.soul_recipes[addRid] = { produces: {} };
       renderMobs();
     }});
     box.appendChild(el("div", { class: "add-form" }, [el("span", { text: "Продукция для души:" }), select, addBtn]));
@@ -5833,18 +7262,12 @@ function renderMobs() {
     } else {
       const soulRow = el("div", { class: "field-row" });
       soulRow.appendChild(el("label", { text: "Душа (soul_id)" }));
-      const soulSelect = el("select");
-      soulSelect.appendChild(el("option", { value: "", text: "— не выпадает —" }));
-      DATA.resources.forEach(r => {
-        const o = el("option", { value: r.id, text: r.name });
-        if (r.id === mob.soul_id) o.selected = true;
-        soulSelect.appendChild(o);
-      });
-      soulSelect.addEventListener("change", () => {
-        if (soulSelect.value === "") { delete mob.soul_id; delete mob.soul_chance; }
-        else { mob.soul_id = soulSelect.value; if (mob.soul_chance == null) mob.soul_chance = 0.05; }
+      const soulEntries = DATA.resources.map(r => ({ value: r.id, label: r.name }));
+      const soulSelect = genericPickerSelect(soulEntries, mob.soul_id || null, (v) => {
+        if (v == null) { delete mob.soul_id; delete mob.soul_chance; }
+        else { mob.soul_id = v; if (mob.soul_chance == null) mob.soul_chance = 0.05; }
         renderMobs();
-      });
+      }, { title: "Выбрать ресурс", placeholder: "— не выпадает —", noneLabel: "— не выпадает —" });
       soulRow.appendChild(soulSelect);
       card.appendChild(soulRow);
 
@@ -6198,63 +7621,70 @@ const CONDITION_TYPES = {
   species_discovered: { label: "Вывести/поймать конкретный вид", fields: ["species"] },
   manual_action_performed_at_least: { label: "Выполнить ручное действие не меньше раз", fields: ["action", "amount"] },
   building_upgrade_purchased: { label: "Купить улучшение постройки", fields: ["building", "upgrade"] },
+  storage_tier_at_least: { label: "Прокачать склад ресурса до тира не ниже", fields: ["resource", "amount"] },
+  building_upgrade_level_at_least: { label: "Купить улучшение постройки до уровня не ниже", fields: ["building", "upgrade", "amount"] },
+  building_upgrade_type_purchased_any: { label: "Купить улучшение типа у ЛЮБОГО механизма", fields: ["upgrade_type"] },
 };
 
-function requiredBuildingSelect(selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
-  Object.entries(DATA.buildings).forEach(([bid, b]) => {
-    const o = el("option", { value: bid, text: b.name });
-    if (bid === selected) o.selected = true;
-    select.appendChild(o);
+// Только ресурсы с настроенной вместимостью склада (r.storage) - для
+// storage_tier_at_least: тир, до которого нужно прокачать, имеет смысл только
+// у ресурса, у которого вообще ЕСТЬ тиры расширения.
+function storageResourceSelect(selected, onchange) {
+  const entries = DATA.resources.filter(r => r.storage).map(r => ({ value: r.id, label: r.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать ресурс со складом", placeholder: "— выбрать ресурс —" });
+}
+
+function upgradeTypeSelect(selected, onchange) {
+  const sel = el("select");
+  UPGRADE_TYPE_OPTIONS.forEach(([value, label]) => {
+    const o = el("option", { value, text: label });
+    if (selected === value) o.selected = true;
+    sel.appendChild(o);
   });
-  return select;
+  sel.addEventListener("change", () => { onchange(sel.value); });
+  return sel;
+}
+
+function requiredBuildingSelect(selected, onchange) {
+  const entries = Object.entries(DATA.buildings).map(([bid, b]) => ({ value: bid, label: b.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать постройку", placeholder: "— выбрать постройку —" });
 }
 
 function requiredTechSelect(selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
-  Object.entries(DATA.techs).forEach(([tid, t]) => {
-    const o = el("option", { value: tid, text: t.name });
-    if (tid === selected) o.selected = true;
-    select.appendChild(o);
-  });
-  return select;
+  const entries = Object.entries(DATA.techs).map(([tid, t]) => ({ value: tid, label: t.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать технологию", placeholder: "— выбрать технологию —" });
 }
 
 function requiredActionSelect(selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
-  Object.entries(DATA.manual_actions).forEach(([aid, a]) => {
-    const o = el("option", { value: aid, text: a.name });
-    if (aid === selected) o.selected = true;
-    select.appendChild(o);
-  });
-  return select;
+  const entries = Object.entries(DATA.manual_actions).map(([aid, a]) => ({ value: aid, label: a.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать действие", placeholder: "— выбрать действие —" });
 }
 
 // Зависимый от выбранной постройки список её же upgrades - в отличие от
 // requiredBuildingSelect/requiredTechSelect (плоское глобальное пространство id),
 // upgrade.id уникален только ВНУТРИ одной постройки (см. building_upgrade_purchased).
 function requiredBuildingUpgradeSelect(buildingId, selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
   const upgrades = DATA.buildings[buildingId]?.upgrades || [];
-  upgrades.forEach(u => {
-    const o = el("option", { value: u.id, text: u.name });
-    if (u.id === selected) o.selected = true;
-    select.appendChild(o);
-  });
-  return select;
+  const entries = upgrades.map(u => ({ value: u.id, label: u.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать улучшение", placeholder: "— выбрать улучшение —" });
 }
 
 function defaultConditionOfType(type) {
   const fields = CONDITION_TYPES[type].fields;
   const cond = { type };
   if (fields.includes("amount")) cond.amount = 1;
-  if (fields.includes("resource")) cond.resource = DATA.resources[0]?.id;
+  if (fields.includes("resource")) {
+    cond.resource = type === "storage_tier_at_least"
+      ? (DATA.resources.find(r => r.storage)?.id ?? DATA.resources[0]?.id)
+      : DATA.resources[0]?.id;
+  }
   if (fields.includes("building")) cond.building = Object.keys(DATA.buildings)[0];
   if (fields.includes("tech")) cond.tech = Object.keys(DATA.techs)[0];
   if (fields.includes("tool")) cond.tool = Object.keys(DATA.tools)[0];
   if (fields.includes("action")) cond.action = Object.keys(DATA.manual_actions)[0];
   if (fields.includes("species")) cond.species = Object.keys(DATA.species || {})[0];
   if (fields.includes("upgrade")) cond.upgrade = (DATA.buildings[cond.building]?.upgrades || [])[0]?.id;
+  if (fields.includes("upgrade_type")) cond.upgrade_type = UPGRADE_TYPE_OPTIONS[0][0];
   return cond;
 }
 
@@ -6285,7 +7715,9 @@ function renderConditions(container, conditions) {
     const fieldsRow = el("div", { class: "field-row" });
     if (info.fields.includes("resource")) {
       fieldsRow.appendChild(el("label", { text: "Ресурс" }));
-      fieldsRow.appendChild(resourceSelect(cond.resource, v => { cond.resource = v; }));
+      fieldsRow.appendChild(cond.type === "storage_tier_at_least"
+        ? storageResourceSelect(cond.resource, v => { cond.resource = v; })
+        : resourceSelect(cond.resource, v => { cond.resource = v; }));
     }
     if (info.fields.includes("building")) {
       fieldsRow.appendChild(el("label", { text: "Постройка" }));
@@ -6319,6 +7751,10 @@ function renderConditions(container, conditions) {
       fieldsRow.appendChild(el("label", { text: "Улучшение" }));
       fieldsRow.appendChild(requiredBuildingUpgradeSelect(cond.building, cond.upgrade, v => { cond.upgrade = v; }));
     }
+    if (info.fields.includes("upgrade_type")) {
+      fieldsRow.appendChild(el("label", { text: "Тип улучшения" }));
+      fieldsRow.appendChild(upgradeTypeSelect(cond.upgrade_type, v => { cond.upgrade_type = v; }));
+    }
     if (info.fields.includes("amount")) {
       fieldsRow.appendChild(el("label", { text: "Не меньше" }));
       const input = el("input", { type: "number", min: "1", value: cond.amount ?? 1 });
@@ -6340,13 +7776,653 @@ function renderConditions(container, conditions) {
 // ---------- Квесты ----------
 
 function lootCaseSelect(selected, onchange) {
-  const select = el("select", { onchange: () => onchange(select.value) });
-  Object.entries(DATA.loot_cases).forEach(([cid, c]) => {
-    const o = el("option", { value: cid, text: c.name });
-    if (cid === selected) o.selected = true;
-    select.appendChild(o);
+  const entries = Object.entries(DATA.loot_cases).map(([cid, c]) => ({ value: cid, label: c.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать лутбокс", placeholder: "— выбрать лутбокс —" });
+}
+
+// Ритуальный круг - постройка с полем ritual_circle (вкладка «Постройки», кнопка
+// «Настроить» у строки «Ритуальный круг») определяет ёмкость кольца пьедesталов,
+// а сам рецепт (ring_cost/center_cost) живёт здесь. Совпадение с рецептом - ПО
+// КОЛИЧЕСТВУ ингредиентов в кольце, без привязки к конкретному пьедesталу
+// (см. game/engine.py:is_ritual_recipe_available/start_ritual) - расстановка по
+// конкретным чашам в web_ui.html чисто визуальная, сервер её не хранит.
+function ritualDefaultRecipe() {
+  return {
+    name: "Новый ритуал", description: "", requires_tech: null, requires_building: null,
+    ring_cost: {}, center_cost: "", extra_cost: {}, duration_turns: 1,
+    extra_consumes_per_turn: {}, extra_consumes_chance: {}, produces: {}, produces_chance: {},
+  };
+}
+
+function renderRituals() {
+  const root = document.getElementById("tab-rituals");
+  root.innerHTML = "";
+  if (!DATA.ritual_recipes) DATA.ritual_recipes = {};
+  root.appendChild(el("p", { class: "hint", text:
+    "ring_cost - сколько чего нужно разложить по внешнему кольцу алтаря (requires_building, должна быть "
+    + "постройка с полем ritual_circle - настраивается на вкладке «Постройки»), суммарно не больше её текущей "
+    + "ёмкости кольца (см. апгрейды типа «Пьедесталы ритуального круга»). center_cost - ровно один предмет в "
+    + "отдельный центральный пьедestal (не считается в ёмкость кольца). extra_cost - дополнительная разовая "
+    + "цена (списывается вместе с ring/center в момент запуска, для нефизических затрат вроде маны). "
+    + "duration_turns > 1 делает ритуал многоходовым - тогда extra_consumes_per_turn (+ шанс extra_consumes_chance "
+    + "на каждый ресурс отдельно, как cost_chance) списывается КАЖДЫЙ ход отдельно, пока ритуал идёт; нехватка "
+    + "не отменяет и не тормозит ритуал, просто в этот ход ничего не спишется." }));
+
+  const cardsBox = el("div");
+  const filterBar = makeFilterBar("rituals", cardsBox);
+  const addForm = idPromptAndAdd("рецепт ритуала", (id) => {
+    DATA.ritual_recipes[id] = ritualDefaultRecipe();
+    jumpTo(`card-rituals-${id}`, "rituals", { focusName: true });
   });
-  return select;
+  root.appendChild(makeToolbar(addForm, filterBar));
+  root.appendChild(cardsBox);
+
+  const recipeIds = Object.keys(DATA.ritual_recipes);
+  recipeIds.forEach((rid, i) => {
+    const r = DATA.ritual_recipes[rid];
+    const card = el("div", { class: "card", id: `card-rituals-${rid}` });
+    card.dataset.search = (rid + " " + r.name).toLowerCase();
+    const nameInput = el("input", { type: "text", value: r.name });
+    nameInput.addEventListener("change", () => { r.name = nameInput.value; card.dataset.search = (rid + " " + r.name).toLowerCase(); });
+    const order = orderControls({
+      index: i, count: recipeIds.length,
+      onMove: (delta) => { moveDictKeyInPlace(DATA.ritual_recipes, rid, delta); renderRituals(); },
+      kind: "рецепт ритуала",
+      createDefault: () => ritualDefaultRecipe(),
+      insertAfter: (id, value) => insertDictKeyAfterInPlace(DATA.ritual_recipes, rid, id, value),
+      jumpToNew: (id) => { renderRituals(); jumpTo(`card-rituals-${id}`, "rituals", { focusName: true }); },
+    });
+    const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => {
+      delete DATA.ritual_recipes[rid];
+      renderRituals();
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: rid }), nameInput, order, el("div", { class: "spacer" }), rm]));
+
+    const descRow = el("div", { class: "field-row" });
+    descRow.appendChild(el("label", { text: "Описание" }));
+    descRow.appendChild(descriptionTextarea(r.description, "Что это за ритуал, зачем он игроку", (v) => { r.description = v; }));
+    card.appendChild(descRow);
+
+    const techRow = el("div", { class: "field-row" });
+    techRow.appendChild(el("label", { text: "Нужна технология" }));
+    techRow.appendChild(techSelect(r.requires_tech, (v) => { r.requires_tech = v; }));
+    card.appendChild(techRow);
+
+    const buildingRow = el("div", { class: "field-row" });
+    buildingRow.appendChild(el("label", { text: "Алтарь (requires_building)" }));
+    buildingRow.appendChild(buildingRequirementSelect(r.requires_building || null, (v) => { r.requires_building = v; }, {}));
+    buildingRow.appendChild(el("span", { class: "hint", text: "обязательно - постройка должна иметь включённый ritual_circle (вкладка «Постройки»), иначе рецепт не пройдёт валидацию" }));
+    card.appendChild(buildingRow);
+
+    const ringRowWrap = el("div");
+    ringRowWrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Кольцо (ring_cost)" })]));
+    const ringBox = el("div", { class: "dict-editor" });
+    if (!r.ring_cost) r.ring_cost = {};
+    renderDictEditor(ringBox, r.ring_cost);
+    ringRowWrap.appendChild(ringBox);
+    card.appendChild(ringRowWrap);
+
+    const centerRow = el("div", { class: "field-row" });
+    centerRow.appendChild(el("label", { text: "Центр (center_cost)" }));
+    if (!r.center_cost && DATA.resources.length) r.center_cost = DATA.resources[0].id;
+    centerRow.appendChild(resourceSelect(r.center_cost || null, (v) => { r.center_cost = v; }));
+    centerRow.appendChild(el("span", { class: "hint", text: "ровно 1 шт., отдельный пьедestal, не считается в ёмкость кольца" }));
+    card.appendChild(centerRow);
+
+    const extraCostWrap = el("div");
+    extraCostWrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Доп. разовая цена (extra_cost)" })]));
+    const extraCostBox = el("div", { class: "dict-editor" });
+    if (!r.extra_cost) r.extra_cost = {};
+    renderDictEditor(extraCostBox, r.extra_cost);
+    extraCostWrap.appendChild(extraCostBox);
+    card.appendChild(extraCostWrap);
+
+    const durationRow = el("div", { class: "field-row" });
+    durationRow.appendChild(el("label", { text: "Длительность, ходов" }));
+    const durationInput = el("input", { type: "number", min: "1", step: "1", value: r.duration_turns || 1 });
+    durationInput.addEventListener("change", () => { r.duration_turns = Math.max(1, Math.round(Number(durationInput.value) || 1)); });
+    durationRow.appendChild(durationInput);
+    durationRow.appendChild(el("span", { class: "hint", text: "1 (или пусто) - ритуал мгновенный" }));
+    card.appendChild(durationRow);
+
+    const extraTurnWrap = el("div");
+    extraTurnWrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Доп. расход за ход (extra_consumes_per_turn)" })]));
+    const extraTurnBox = el("div", { class: "dict-editor" });
+    if (!r.extra_consumes_per_turn) r.extra_consumes_per_turn = {};
+    const extraTurnChanceBox = el("div", { class: "dict-editor" });
+    const renderExtraTurnChance = () => renderChanceOnlyEditor(extraTurnChanceBox, r, "extra_consumes_per_turn", "extra_consumes_chance");
+    renderDictEditor(extraTurnBox, r.extra_consumes_per_turn, renderExtraTurnChance);
+    extraTurnWrap.appendChild(extraTurnBox);
+    extraTurnWrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Шанс на ресурс, %" })]));
+    extraTurnWrap.appendChild(extraTurnChanceBox);
+    extraTurnWrap.appendChild(el("p", { class: "hint", text: "имеет смысл только при длительности > 1; 100% - гарантированно каждый ход, меньше - независимый шанс на КАЖДЫЙ ресурс (как cost_chance у ручных действий)" }));
+    renderExtraTurnChance();
+    card.appendChild(extraTurnWrap);
+
+    const producesWrap = el("div");
+    producesWrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Результат (produces)" })]));
+    const producesBox = el("div", { class: "dict-editor" });
+    if (!r.produces) r.produces = {};
+    const producesChanceBox = el("div", { class: "dict-editor" });
+    const renderProducesChance = () => renderChanceOnlyEditor(producesChanceBox, r, "produces", "produces_chance");
+    renderDictEditor(producesBox, r.produces, renderProducesChance, true);
+    producesWrap.appendChild(producesBox);
+    producesWrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Шанс на ресурс, %" })]));
+    producesWrap.appendChild(producesChanceBox);
+    renderProducesChance();
+    card.appendChild(producesWrap);
+
+    card.appendChild(soundRow(
+      rid, "Звук ритуала", "стандартный (по умолчанию)",
+      "необязательно - без файла играет общий стандартный звук действия",
+      () => r.sound, (v) => { if (v) r.sound = v; else delete r.sound; },
+    ));
+    const ritualCycle = cycleNote("ritual_recipe:" + rid);
+    if (ritualCycle) card.appendChild(ritualCycle);
+
+    makeCardCollapsible(card);
+    cardsBox.appendChild(card);
+  });
+}
+
+// ---------- Реактор ----------
+// resources.*.reactor_component - тег роли компонента решётки реактора (fuel/
+// moderator/coolant/absorber), тот же генерик-принцип, что soul_kind: живёт НА
+// ресурсе, но редактируется на СВОЕЙ вкладке (а не на общей "Ресурсы"), потому
+// что у него, в отличие от soul_kind, несколько числовых полей сразу (как
+// resources.*.storage - см. renderStorage). Сама постройка-реактор
+// (buildings.*.reactor) настраивается в "Настроить" на карточке постройки
+// (openReactorSettingsModal выше) - тут только компоненты + барабан аварий.
+// ---------- Плавильня: жидкие металлы + рецепты плавки/сплавов/литья ----------
+// Постройка-плавильня (buildings.*.smeltery) настраивается на вкладке «Постройки»; здесь -
+// то, что она плавит/сплавляет/льёт. См. game/engine.py: load_melt/alloy_smeltery/pour_cast
+// и tools/content_validation.py (там же правила: металлы только в тигле, пара форма+металл
+// уникальна).
+const SMELTERY_EDITOR_KINDS = {
+  melt: {
+    key: "melt_recipes", title: "Плавка (melt_recipes)", noun: "рецепт плавки", filter: "smelt-melt",
+    hint: "input - что списывается со склада при загрузке в слот. ПЕРВЫМ пишите главное сырьё (руду): его иконка в слоте, "
+      + "и по нему клик на складе выбирает рецепт; топливо - следом. output - что через turns ходов стечёт в тигель: жидкие "
+      + "металлы и/или шлак (всё не-металлическое всплывает и снимается на склад). heat - нужный жар плавильни. Если одну "
+      + "руду плавят несколько рецептов, клик по плитке склада берёт самый «горячий» из доступных этой плавильне.",
+    make: () => ({ name: "Новая плавка", requires_tech: null, heat: 1, input: {}, output: {}, turns: 1 }),
+  },
+  alloy: {
+    key: "alloy_recipes", title: "Сплавы (alloy_recipes)", noun: "рецепт сплава", filter: "smelt-alloy",
+    hint: "input и output - только жидкие металлы: сплав идёт прямо в тигле по кнопке «Сплавить» (тратит ход), результат "
+      + "должен влезть в тигель. heat - нужный жар. hidden - пропорция скрыта («???»), пока игрок сам не попробует "
+      + "сплавить эти металлы (открытие хранится в сохранении).",
+    make: () => ({ name: "Новый сплав", requires_tech: null, heat: 1, input: {}, output: {}, hidden: false }),
+  },
+  cast: {
+    key: "cast_recipes", title: "Литьё (cast_recipes)", noun: "рецепт литья", filter: "smelt-cast",
+    hint: "Литейный стол: amount единиц жидкого металла metal из тигля в форму form -> output на склад через turns ходов "
+      + "остывания (1 - сразу). Форма - обычный предмет склада: нужна одна, при литье НЕ тратится (крафтится один раз). "
+      + "Пара «форма + металл» должна быть уникальной - по ней стол понимает, что лить.",
+    make: () => ({ name: "Новое литьё", requires_tech: null, form: null, metal: null, amount: 1, output: {}, turns: 1 }),
+  },
+};
+
+function smelteryIntRow(label, value, min, onchange, hint) {
+  const row = el("div", { class: "field-row" });
+  row.appendChild(el("label", { text: label }));
+  const input = el("input", { type: "number", min: String(min), step: "1", value: value ?? min });
+  input.addEventListener("change", () => onchange(Math.max(min, Math.round(Number(input.value) || min))));
+  row.appendChild(input);
+  if (hint) row.appendChild(el("span", { class: "hint", text: hint }));
+  return row;
+}
+
+function smelteryDictRow(label, obj) {
+  const wrap = el("div");
+  wrap.appendChild(el("div", { class: "field-row" }, [el("label", { text: label })]));
+  const box = el("div", { class: "dict-editor" });
+  renderDictEditor(box, obj);
+  wrap.appendChild(box);
+  return wrap;
+}
+
+function smelteryRecipeSection(kind) {
+  const cfg = SMELTERY_EDITOR_KINDS[kind];
+  const dict = DATA[cfg.key];
+  const box = el("div", { class: "sub-section" });
+  box.appendChild(el("h3", { text: cfg.title }));
+  box.appendChild(el("p", { class: "hint", text: cfg.hint }));
+  const cardsBox = el("div");
+  const filterBar = makeFilterBar(cfg.filter, cardsBox);
+  const addForm = idPromptAndAdd(cfg.noun, (id) => {
+    dict[id] = cfg.make();
+    jumpTo(`card-smelt-${kind}-${id}`, "smeltery", { focusName: true });
+  });
+  box.appendChild(makeToolbar(addForm, filterBar));
+  box.appendChild(cardsBox);
+  const moltenEntries = DATA.resources.filter(r => r.molten).map(r => ({ value: r.id, label: r.name }));
+  const ids = Object.keys(dict);
+  ids.forEach((rid, i) => {
+    const r = dict[rid];
+    const card = el("div", { class: "card", id: `card-smelt-${kind}-${rid}` });
+    card.dataset.search = (rid + " " + r.name).toLowerCase();
+    const nameInput = el("input", { type: "text", value: r.name });
+    nameInput.addEventListener("change", () => { r.name = nameInput.value; card.dataset.search = (rid + " " + r.name).toLowerCase(); });
+    const order = orderControls({
+      index: i, count: ids.length,
+      onMove: (delta) => { moveDictKeyInPlace(dict, rid, delta); renderSmeltery(); },
+      kind: cfg.noun,
+      createDefault: () => cfg.make(),
+      insertAfter: (id, value) => insertDictKeyAfterInPlace(dict, rid, id, value),
+      jumpToNew: (id) => { renderSmeltery(); jumpTo(`card-smelt-${kind}-${id}`, "smeltery", { focusName: true }); },
+    });
+    const rm = el("button", { class: "small danger", text: "Удалить", onclick: () => { delete dict[rid]; renderSmeltery(); } });
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: rid }), nameInput, order, el("div", { class: "spacer" }), rm]));
+
+    const techRow = el("div", { class: "field-row" });
+    techRow.appendChild(el("label", { text: "Нужна технология" }));
+    techRow.appendChild(techSelect(r.requires_tech, (v) => { r.requires_tech = v; }));
+    card.appendChild(techRow);
+
+    if (kind !== "cast") {
+      card.appendChild(smelteryIntRow("Жар (heat)", r.heat ?? 1, 1, (v) => { r.heat = v; }, "плавильне нужен жар не ниже этого"));
+    }
+    if (kind === "alloy") {
+      const hiddenRow = el("div", { class: "field-row" });
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = !!r.hidden;
+      cb.addEventListener("change", () => { r.hidden = cb.checked; });
+      hiddenRow.appendChild(cb);
+      hiddenRow.appendChild(el("label", { text: "Скрытый (hidden) - открывается пробой" }));
+      card.appendChild(hiddenRow);
+    }
+    if (kind === "cast") {
+      const formRow = el("div", { class: "field-row" });
+      formRow.appendChild(el("label", { text: "Форма (form)" }));
+      formRow.appendChild(resourceSelect(r.form || null, (v) => { r.form = v; }));
+      formRow.appendChild(el("span", { class: "hint", text: "предмет склада, при литье не тратится" }));
+      card.appendChild(formRow);
+      const metalRow = el("div", { class: "field-row" });
+      metalRow.appendChild(el("label", { text: "Металл (metal)" }));
+      metalRow.appendChild(genericPickerSelect(moltenEntries, r.metal || null, (v) => { r.metal = v; }, {
+        title: "Выбрать жидкий металл", placeholder: "— жидкий металл —", emptyText: "Сначала отметьте ресурс жидким металлом выше.",
+      }));
+      card.appendChild(metalRow);
+      card.appendChild(smelteryIntRow("Сколько металла (amount)", r.amount ?? 1, 1, (v) => { r.amount = v; }, "единиц из тигля на одну отливку"));
+    } else {
+      if (!r.input) r.input = {};
+      card.appendChild(smelteryDictRow(kind === "melt" ? "Сырьё со склада (input)" : "Металлы из тигля (input)", r.input));
+    }
+    if (!r.output) r.output = {};
+    card.appendChild(smelteryDictRow(kind === "melt" ? "Стекает в тигель (output)" : kind === "alloy" ? "Сплав в тигель (output)" : "На склад (output)", r.output));
+    if (kind !== "alloy") {
+      card.appendChild(smelteryIntRow(kind === "melt" ? "Ходов плавки (turns)" : "Ходов остывания (turns)", r.turns ?? 1, 1, (v) => { r.turns = v; },
+        kind === "cast" ? "1 - отливка готова сразу" : ""));
+    }
+    makeCardCollapsible(card);
+    cardsBox.appendChild(card);
+  });
+  filterBar._apply();
+  return box;
+}
+
+function renderSmeltery() {
+  const root = document.getElementById("tab-smeltery");
+  root.innerHTML = "";
+  ["melt_recipes", "alloy_recipes", "cast_recipes"].forEach(k => { if (!DATA[k]) DATA[k] = {}; });
+  root.appendChild(el("p", { class: "hint", text:
+    "Плавильня - постройка с полем smeltery (вкладка «Постройки», строка «Плавильня» → «Настроить»: жар, слоты плавки, "
+    + "объём тигля). Рецепты ниже не привязаны к конкретной постройке - их ведёт любая плавильня, чьего жара хватает. "
+    + "В игре: руда -> слот плавки (ход, затем turns ходов) -> тигель (жидкий металл, шлак сверху) -> «Сплавить» -> литьё "
+    + "в форму. Все три вида рецептов видны в справочнике источников и закрепляются звездой. Автокрафт и автоматизатор "
+    + "плавильню не видят." }));
+
+  const moltenBox = el("div", { class: "sub-section" });
+  moltenBox.appendChild(el("h3", { text: "Жидкие металлы (resources.*.molten)" }));
+  moltenBox.appendChild(el("p", { class: "hint", text:
+    "Такой ресурс живёт только в тигле плавильни, не на складе. color - цвет слоя, density - порядок слоёв (тяжёлый "
+    + "тонет, лёгкий сверху). Без своей иконки в игре рисуется каплей этого цвета." }));
+  const free = DATA.resources.filter(r => !r.molten && r.id !== ENERGY_RESOURCE_ID);
+  if (free.length) {
+    let addId = free[0].id;
+    const sel = genericPickerSelect(free.map(r => ({ value: r.id, label: r.name })), addId, (v) => { addId = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
+    const addBtn = el("button", { class: "primary", text: "Сделать жидким металлом", onclick: () => {
+      const res = DATA.resources.find(x => x.id === addId);
+      if (res) res.molten = { color: "#e07a3f", density: 8 };
+      renderSmeltery();
+    }});
+    moltenBox.appendChild(el("div", { class: "add-form" }, [el("span", { text: "Ресурс:" }), sel, addBtn]));
+  }
+  DATA.resources.filter(r => r.molten).forEach(r => {
+    const card = el("div", { class: "card", id: `card-smelt-molten-${r.id}` });
+    const swatch = el("span", { style: `display:inline-block;width:14px;height:14px;background:${r.molten.color};box-shadow:0 0 6px ${r.molten.color};` });
+    const rm = el("button", { class: "small danger", text: "Убрать тег", onclick: () => { delete r.molten; renderSmeltery(); } });
+    card.appendChild(el("div", { class: "card-head" }, [swatch, el("code", { text: r.id }), el("strong", { text: r.name }), el("div", { class: "spacer" }), rm]));
+    const colorRow = el("div", { class: "field-row" });
+    colorRow.appendChild(el("label", { text: "Цвет слоя (color)" }));
+    const colorInput = el("input", { type: "color", value: r.molten.color || "#e07a3f" });
+    colorInput.addEventListener("input", () => {
+      r.molten.color = colorInput.value;
+      swatch.style.background = colorInput.value;
+      swatch.style.boxShadow = `0 0 6px ${colorInput.value}`;
+    });
+    colorRow.appendChild(colorInput);
+    card.appendChild(colorRow);
+    const densityRow = el("div", { class: "field-row" });
+    densityRow.appendChild(el("label", { text: "Плотность (density)" }));
+    const densityInput = el("input", { type: "number", step: "any", value: r.molten.density ?? 0 });
+    densityInput.addEventListener("change", () => { r.molten.density = Number(densityInput.value) || 0; });
+    densityRow.appendChild(densityInput);
+    densityRow.appendChild(el("span", { class: "hint", text: "больше - ниже в тигле" }));
+    card.appendChild(densityRow);
+    makeCardCollapsible(card);
+    moltenBox.appendChild(card);
+  });
+  root.appendChild(moltenBox);
+
+  root.appendChild(smelteryRecipeSection("melt"));
+  root.appendChild(smelteryRecipeSection("alloy"));
+  root.appendChild(smelteryRecipeSection("cast"));
+}
+
+function renderReactor() {
+  const root = document.getElementById("tab-reactor");
+  root.innerHTML = "";
+  root.appendChild(el("p", { class: "hint", text:
+    "Компоненты решётки реактора (resources.*.reactor_component) - любой ресурс можно пометить ролью "
+    + "fuel/moderator/coolant/absorber/reflector/shield (свободный тег, как soul_kind); постройка-реактор (вкладка "
+    + "«Постройки», кнопка «Настроить» у поля «Реактор») принимает роли из accepts_roles. У fuel "
+    + "обязателен spent_result - ресурс-отход, остающийся в ячейке после выгорания (burnup_per_turn/turn "
+    + "до charge_max)." }));
+
+  const cardsBox = el("div");
+  const freeResources = DATA.resources.filter(r => !r.reactor_component);
+  if (freeResources.length) {
+    let addRid = freeResources[0].id;
+    const entries = freeResources.map(r => ({ value: r.id, label: r.name }));
+    const select = genericPickerSelect(entries, addRid, (v) => { addRid = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
+    const addBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
+      const resource = DATA.resources.find(r => r.id === addRid);
+      if (resource) resource.reactor_component = { role: "fuel", heat: 4, output: 6, burnup_per_turn: 1, charge_max: 20, spent_result: "" };
+      renderReactor();
+    }});
+    root.appendChild(el("div", { class: "add-form" }, [el("span", { text: "Компонент реактора для ресурса:" }), select, addBtn]));
+  }
+  root.appendChild(cardsBox);
+
+  DATA.resources.filter(r => r.reactor_component).forEach(r => {
+    const c = r.reactor_component;
+    const card = el("div", { class: "card" });
+    const rm = el("button", { class: "small danger", text: "Убрать компонент", onclick: () => {
+      delete r.reactor_component;
+      renderReactor();
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: r.id }), el("strong", { text: r.name }), el("div", { class: "spacer" }), rm]));
+
+    const roleRow = el("div", { class: "field-row" });
+    roleRow.appendChild(el("label", { text: "Роль (role)" }));
+    roleRow.appendChild(reactorRoleInput(c.role, (v) => { c.role = v; renderReactor(); }));
+    card.appendChild(roleRow);
+
+    const isFuel = c.role === "fuel";
+    const numericFields = isFuel
+      ? [["heat", "Тепло/ход (сырое)"], ["output", "Выход/ход (сырой)"], ["burnup_per_turn", "Расход заряда/ход"], ["charge_max", "Заряд при установке"]]
+      : [["power", "Сила (power)"]];
+    numericFields.forEach(([field, label]) => {
+      const row = el("div", { class: "field-row" });
+      row.appendChild(el("label", { text: label }));
+      const input = el("input", { type: "number", min: "0", step: "any", value: c[field] ?? 0 });
+      input.addEventListener("change", () => { c[field] = Number(input.value) || 0; });
+      row.appendChild(input);
+      card.appendChild(row);
+    });
+
+    if (isFuel) {
+      const spentRow = el("div", { class: "field-row" });
+      spentRow.appendChild(el("label", { text: "Отход при выгорании (spent_result)" }));
+      const entries = DATA.resources.filter(res => res.id !== r.id).map(res => ({ value: res.id, label: res.name }));
+      const select = genericPickerSelect(entries, c.spent_result || null, (v) => { c.spent_result = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
+      spentRow.appendChild(select);
+      card.appendChild(spentRow);
+    }
+
+    makeCardCollapsible(card);
+    cardsBox.appendChild(card);
+  });
+
+  // resources.*.reactor_catalyst - отдельный слот ПОВЕРХ уже занятой ячейки
+  // (не занимает клетку сам), усиливает применённую роль ценой малуса
+  // ортогональным соседям - см. game/engine.py:_reactor_effective_component/
+  // insert_reactor_catalyst.
+  const catalystsBox = el("div", { class: "sub-section" });
+  catalystsBox.appendChild(el("h3", { text: "Катализаторы решётки (resources.*.reactor_catalyst)" }));
+  catalystsBox.appendChild(el("p", { class: "hint", text:
+    "Отдельный слот в УЖЕ занятой ячейке (не занимает клетку сам) - усиливает свою характеристику ценой "
+    + "фиксированного штрафа всем ортогональным соседям. self_stat 'heat_output'/'burnup'/'field' имеют смысл "
+    + "только у applies_to, включающего 'fuel'; 'power' - у остальных ролей." }));
+  const freeForCatalyst = DATA.resources.filter(r => !r.reactor_catalyst);
+  if (freeForCatalyst.length) {
+    let addCatId = freeForCatalyst[0].id;
+    const catEntries = freeForCatalyst.map(r => ({ value: r.id, label: r.name }));
+    const catSelect = genericPickerSelect(catEntries, addCatId, (v) => { addCatId = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
+    const addCatBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
+      const resource = DATA.resources.find(r => r.id === addCatId);
+      if (resource) resource.reactor_catalyst = { applies_to: [], self_stat: "power", self_pct: 0.2, neighbor_malus_pct: 0.08 };
+      renderReactor();
+    }});
+    catalystsBox.appendChild(el("div", { class: "add-form" }, [el("span", { text: "Катализатор для ресурса:" }), catSelect, addCatBtn]));
+  }
+  const catalystCardsBox = el("div");
+  catalystsBox.appendChild(catalystCardsBox);
+
+  DATA.resources.filter(r => r.reactor_catalyst).forEach(r => {
+    const c = r.reactor_catalyst;
+    const card = el("div", { class: "card" });
+    const rm = el("button", { class: "small danger", text: "Убрать катализатор", onclick: () => {
+      delete r.reactor_catalyst;
+      renderReactor();
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: r.id }), el("strong", { text: r.name }), el("div", { class: "spacer" }), rm]));
+
+    const rolesRow = el("div", { class: "field-row" });
+    rolesRow.appendChild(el("label", { text: "Применим к ролям (applies_to)" }));
+    const rolesBox = el("div");
+    if (!Array.isArray(c.applies_to)) c.applies_to = [];
+    const roles = knownReactorRoles();
+    if (!roles.length) {
+      rolesBox.appendChild(el("span", { class: "hint", text: "сначала заведи хотя бы один ресурс-компонент реактора выше" }));
+    }
+    roles.forEach(role => {
+      const roleLabel = el("label", { style: "margin-right:12px" });
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = c.applies_to.includes(role);
+      cb.addEventListener("change", () => {
+        if (cb.checked) { if (!c.applies_to.includes(role)) c.applies_to.push(role); }
+        else c.applies_to = c.applies_to.filter(x => x !== role);
+      });
+      roleLabel.appendChild(cb);
+      roleLabel.appendChild(document.createTextNode(" " + role));
+      rolesBox.appendChild(roleLabel);
+    });
+    rolesRow.appendChild(rolesBox);
+    card.appendChild(rolesRow);
+
+    const statRow = el("div", { class: "field-row" });
+    statRow.appendChild(el("label", { text: "Что усиливает себе (self_stat)" }));
+    const statSelect = el("select", {});
+    [
+      ["heat_output", "heat+output (только fuel)"],
+      ["burnup", "−расход заряда (только fuel)"],
+      ["field", "сила радиации на соседей-топливо (только fuel)"],
+      ["power", "power (остальные роли)"],
+    ].forEach(([value, label]) => {
+      const o = el("option", { value, text: label });
+      if (c.self_stat === value) o.selected = true;
+      statSelect.appendChild(o);
+    });
+    statSelect.addEventListener("change", () => { c.self_stat = statSelect.value; });
+    statRow.appendChild(statSelect);
+    card.appendChild(statRow);
+
+    [
+      ["self_pct", "Бонус себе, доля (self_pct)"],
+      ["neighbor_malus_pct", "Штраф соседям, доля (neighbor_malus_pct)"],
+    ].forEach(([field, label]) => {
+      const row = el("div", { class: "field-row" });
+      row.appendChild(el("label", { text: label }));
+      const input = el("input", { type: "number", min: "0", step: "any", value: c[field] ?? 0 });
+      input.addEventListener("change", () => { c[field] = Number(input.value) || 0; });
+      row.appendChild(input);
+      card.appendChild(row);
+    });
+
+    // НЕОБЯЗАТЕЛЬНОЕ и единственное поле, где осмысленно ОТРИЦАТЕЛЬНОЕ значение:
+    // пустое = тепловая сторона растёт так же, как выходная (прежнее поведение).
+    // Минус означает, что катализатор ГАСИТ разогрев там, где усиливает выход, -
+    // без этого катализатор поля усиливает обе стороны соседства топлива разом,
+    // а оно даёт больше тепла, чем выхода, и потому не окупается никогда.
+    const heatRow = el("div", { class: "field-row" });
+    heatRow.appendChild(el("label", {
+      text: "Рост ТЕПЛОВОЙ стороны, доля (self_pct_heat, пусто = как выходная)" }));
+    const heatInput = el("input", {
+      type: "number", min: "-1", step: "any",
+      value: c.self_pct_heat === undefined ? "" : String(c.self_pct_heat),
+    });
+    heatInput.addEventListener("change", () => {
+      if (heatInput.value.trim() === "") delete c.self_pct_heat;
+      else c.self_pct_heat = Number(heatInput.value) || 0;
+    });
+    heatRow.appendChild(heatInput);
+    card.appendChild(heatRow);
+
+    makeCardCollapsible(card);
+    catalystCardsBox.appendChild(card);
+  });
+  root.appendChild(catalystsBox);
+
+  // resources.*.reactor_coolant_fluid - РАСХОДНИК, который теплоносители решётки
+  // тратят каждый ход. Не путать с ролью "coolant" у reactor_component: та -
+  // железо в ячейке, эта - то, что в него залито. См.
+  // game/engine.py:_reactor_coolant_plan/set_reactor_coolant_fluid.
+  const fluidsBox = el("div", { class: "sub-section" });
+  fluidsBox.appendChild(el("h3", { text: "Охлаждающие жидкости (resources.*.reactor_coolant_fluid)" }));
+  fluidsBox.appendChild(el("p", { class: "hint", text:
+    "Расходник теплоносителей: каждый ход зона тратит (мощность теплоносителей × поток% × units_per_power) "
+    + "единиц, а снимаемое тепло умножается на cooling_mult. Если в контенте НЕТ ни одной жидкости, механика "
+    + "выключена целиком и теплоносители работают даром. Если жидкости не хватило - охлаждение срабатывает "
+    + "частично, пропорционально остатку." }));
+  const freeForFluid = DATA.resources.filter(r => !r.reactor_coolant_fluid);
+  if (freeForFluid.length) {
+    let addFluidId = freeForFluid[0].id;
+    const fluidEntries = freeForFluid.map(r => ({ value: r.id, label: r.name }));
+    const fluidSelect = genericPickerSelect(fluidEntries, addFluidId, (v) => { addFluidId = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
+    const addFluidBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
+      const resource = DATA.resources.find(r => r.id === addFluidId);
+      if (resource) resource.reactor_coolant_fluid = { cooling_mult: 1.0, units_per_power: 0.5 };
+      renderReactor();
+    }});
+    fluidsBox.appendChild(el("div", { class: "add-form" }, [el("span", { text: "Жидкость из ресурса:" }), fluidSelect, addFluidBtn]));
+  }
+  const fluidCardsBox = el("div");
+  fluidsBox.appendChild(fluidCardsBox);
+  DATA.resources.filter(r => r.reactor_coolant_fluid).forEach(r => {
+    const f = r.reactor_coolant_fluid;
+    const card = el("div", { class: "card" });
+    const rm = el("button", { class: "small danger", text: "Убрать жидкость", onclick: () => {
+      delete r.reactor_coolant_fluid;
+      renderReactor();
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: r.id }), el("strong", { text: r.name }), el("div", { class: "spacer" }), rm]));
+    [
+      ["cooling_mult", "Множитель снимаемого тепла (cooling_mult)"],
+      ["units_per_power", "Расход единиц на 1 мощности теплоносителя при потоке 100% (units_per_power)"],
+    ].forEach(([field, label]) => {
+      const row = el("div", { class: "field-row" });
+      row.appendChild(el("label", { text: label }));
+      const input = el("input", { type: "number", min: "0", step: "any", value: f[field] ?? 0 });
+      input.addEventListener("change", () => { f[field] = Number(input.value) || 0; });
+      row.appendChild(input);
+      card.appendChild(row);
+    });
+    makeCardCollapsible(card);
+    fluidCardsBox.appendChild(card);
+  });
+  root.appendChild(fluidsBox);
+
+  // reactor_accidents - барабан аварий (тот же алгоритм взвешенного розыгрыша,
+  // что loot_cases, см. tools/content_validation.py/game/engine.py:
+  // _roll_reactor_accident), но result - закрытый хардкод-enum, не ресурс.
+  const REACTOR_ACCIDENT_RESULTS = [
+    ["destroy_one_fuel_cell", "Разрушить одну fuel-ячейку зоны"],
+    ["destroy_zone_grid", "Разрушить всю решётку зоны"],
+  ];
+  if (!DATA.reactor_accidents) DATA.reactor_accidents = {};
+  const accidentsBox = el("div", { class: "sub-section" });
+  accidentsBox.appendChild(el("h3", { text: "Таблицы аварий (reactor_accidents)" }));
+  accidentsBox.appendChild(el("p", { class: "hint", text:
+    "Барабан, разыгрываемый при перегреве зоны выше 100% ёмкости - выпадает РОВНО один исход (как приз "
+    + "лутбокса). buildings.*.reactor.accident_table ссылается сюда по id." }));
+  const addTableBtn = el("button", { class: "small", text: "+ добавить таблицу", onclick: () => {
+    const id = prompt("id таблицы аварий (латиница, snake_case):");
+    if (!id) return;
+    if (!/^[a-z][a-z0-9_]*$/.test(id)) { alert("id должен быть в snake_case."); return; }
+    if (DATA.reactor_accidents[id]) { alert("Такая таблица уже есть."); return; }
+    DATA.reactor_accidents[id] = { entries: [{ result: "destroy_one_fuel_cell", weight: 70, message: "" }] };
+    renderReactor();
+  }});
+  accidentsBox.appendChild(addTableBtn);
+
+  Object.entries(DATA.reactor_accidents).forEach(([tid, table]) => {
+    const card = el("div", { class: "card" });
+    const rm = el("button", { class: "small danger", text: "Удалить таблицу", onclick: () => {
+      delete DATA.reactor_accidents[tid];
+      renderReactor();
+    }});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: tid }), el("div", { class: "spacer" }), rm]));
+    if (!Array.isArray(table.entries)) table.entries = [];
+
+    const entriesBox = el("div", { class: "stages-box" });
+    table.entries.forEach((entry, i) => {
+      const entryCard = el("div", { class: "stage-card" });
+      const entryRm = el("button", { class: "small danger", text: "Удалить исход", onclick: () => {
+        table.entries.splice(i, 1);
+        renderReactor();
+      }});
+      entryCard.appendChild(el("div", { class: "stage-head" }, [el("strong", { text: `Исход ${i + 1}` }), el("div", { class: "spacer" }), entryRm]));
+
+      const resultRow = el("div", { class: "field-row" });
+      resultRow.appendChild(el("label", { text: "Результат (result)" }));
+      const resultSelect = el("select", {});
+      REACTOR_ACCIDENT_RESULTS.forEach(([value, label]) => {
+        const o = el("option", { value, text: label });
+        if (entry.result === value) o.selected = true;
+        resultSelect.appendChild(o);
+      });
+      resultSelect.addEventListener("change", () => { entry.result = resultSelect.value; });
+      resultRow.appendChild(resultSelect);
+      entryCard.appendChild(resultRow);
+
+      const weightRow = el("div", { class: "field-row" });
+      weightRow.appendChild(el("label", { text: "Вес (weight)" }));
+      const weightInput = el("input", { type: "number", min: "0.01", step: "any", value: entry.weight ?? 1 });
+      weightInput.addEventListener("change", () => { entry.weight = Number(weightInput.value) || 1; });
+      weightRow.appendChild(weightInput);
+      entryCard.appendChild(weightRow);
+
+      const msgRow = el("div", { class: "field-row" });
+      msgRow.appendChild(el("label", { text: "Сообщение игроку" }));
+      msgRow.appendChild(descriptionTextarea(entry.message, "Что случилось - игрок должен понять", (v) => { entry.message = v; }));
+      entryCard.appendChild(msgRow);
+
+      entriesBox.appendChild(entryCard);
+    });
+    card.appendChild(entriesBox);
+
+    card.appendChild(el("button", { class: "small", text: "+ добавить исход", onclick: () => {
+      table.entries.push({ result: "destroy_one_fuel_cell", weight: 10, message: "" });
+      renderReactor();
+    }}));
+
+    makeCardCollapsible(card);
+    accidentsBox.appendChild(card);
+  });
+  root.appendChild(accidentsBox);
 }
 
 // Квестбук - буквально дерево технологий (renderTechs/renderTechGraphView ниже),
@@ -7332,6 +9408,12 @@ function renderSettings() {
     + "самого действия (успех/провал/поломка и т.п.)",
     () => DATA.ui.sounds.button_click, (v) => { if (v) DATA.ui.sounds.button_click = v; else delete DATA.ui.sounds.button_click; },
   ));
+  soundsCard.appendChild(soundRow(
+    "mine_hit", "Звук удара киркой в шахте", "стандартный (по умолчанию)",
+    "играет при каждом удачном ударе по клетке поля шахты (Шахта -> клик по клетке) - независимо от того, "
+    + "выпала ли руда",
+    () => DATA.ui.sounds.mine_hit, (v) => { if (v) DATA.ui.sounds.mine_hit = v; else delete DATA.ui.sounds.mine_hit; },
+  ));
 
   root.appendChild(soundsCard);
 
@@ -7395,6 +9477,7 @@ const RENDER_BY_TAB = {
   breeding: renderMutations,
   mining: renderMining,
   tools: renderTools,
+  smeltery: renderSmeltery,
   quests: renderQuests,
   settings: renderSettings,
 };

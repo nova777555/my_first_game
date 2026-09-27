@@ -142,5 +142,95 @@ class PinEnergyRecipeTests(ConverterGridTestCase):
         self.assertFalse(engine.toggle_pinned_recipe(self.state, "energy_pair").ok)
 
 
+class WebUiConverterGridTests(unittest.TestCase):
+    """tools/web_ui.py поверх той же сетки: crafting_view/craft_grid_view/
+    converter_view/resource_sources/run_turn."""
+
+    def setUp(self):
+        import web_ui
+        self.web_ui = web_ui
+        patch = fixtures.patched_content()
+        patch.__enter__()
+        self.addCleanup(patch.__exit__, None, None, None)
+        converter = {**engine.LOCATIONS[engine.CONVERTER_LOCATION_ID], "crafting": {"width": 2, "height": 1}}
+        for patcher in (
+            mock.patch.dict(engine.LOCATIONS, {engine.CONVERTER_LOCATION_ID: converter}),
+            mock.patch.dict(engine.ENERGY_RECIPES, GRID_ENERGY_RECIPES),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.state = GameState(resources={"raw_a": 3, "raw_b": 3, "energy": 50}, buildings={"energy_converter": 1})
+
+    def converter_entry(self):
+        entries = self.web_ui.crafting_view(self.state)
+        return next(e for e in entries if e["location_id"] == engine.CONVERTER_LOCATION_ID)
+
+    def test_converter_entry_lists_energy_recipes_by_key(self):
+        entry = self.converter_entry()
+        recipes = {r["action_id"]: r for r in entry["recipes"]}
+        self.assertEqual(set(recipes), {"energy_recipe:energy_single", "energy_recipe:energy_pair"})
+        single = recipes["energy_recipe:energy_single"]
+        self.assertEqual(single["kind"], "energy_recipe")
+        self.assertEqual(single["threshold"], 10)
+        self.assertEqual([c["id"] for c in single["cost"]], ["raw_a"])
+        self.assertEqual(single["energy_per_turn"], 4)
+        self.assertEqual(single["eta_turns"], 3)  # 10 энергии по 4 за ход
+        self.assertTrue(single["available"])
+        self.assertEqual(entry["converter_slots"], {"busy": 0, "capacity": 1})
+
+    def test_eta_is_not_faster_than_the_energy_inflow(self):
+        # Регрессия: срок считался только по потолку преобразователя (4/ход -> 3 хода),
+        # хотя в сети пусто и притекает 2/ход - на деле 5 ходов.
+        self.state.resources["energy"] = 0
+        self.state.buildings["gen"] = 1
+        recipes = {r["action_id"]: r for r in self.converter_entry()["recipes"]}
+        self.assertEqual(recipes["energy_recipe:energy_single"]["eta_turns"], 5)
+        self.state.energy_jobs.append({"recipe_id": "energy_single", "progress": 6, "building_id": "energy_converter"})
+        self.assertEqual(self.converter_entry()["job"]["eta_turns"], 2)  # осталось 4 при притоке 2
+
+    def test_recipe_unavailable_when_every_converter_is_busy(self):
+        self.state.energy_jobs.append({"recipe_id": "make_raw_b", "progress": 0, "building_id": "energy_converter"})
+        entry = self.converter_entry()
+        self.assertFalse(all(r["available"] for r in entry["recipes"]))
+        self.assertEqual(entry["job"]["kind"], "energy_recipe")
+        self.assertEqual(entry["job"]["action_id"], "energy_recipe:make_raw_b")
+        self.assertEqual(entry["job"]["index"], 0)
+
+    def test_craft_grid_starts_energy_recipe(self):
+        result = self.web_ui.craft_grid_view(self.state, engine.CONVERTER_LOCATION_ID, ["raw_a", "raw_b"], 5)
+        self.assertTrue(result["ok"], result["message"])
+        self.assertEqual(result["action_id"], "energy_recipe:energy_pair")
+        self.assertEqual(result["times_requested"], 1)  # пачкой не бывает
+        self.assertEqual(self.state.resources["raw_a"], 2)
+        self.assertEqual(self.state.resources["raw_b"], 2)
+        self.assertEqual([j["recipe_id"] for j in self.state.energy_jobs], ["energy_pair"])
+
+    def test_craft_grid_refuses_when_converter_busy(self):
+        self.state.energy_jobs.append({"recipe_id": "make_raw_b", "progress": 0, "building_id": "energy_converter"})
+        result = self.web_ui.craft_grid_view(self.state, engine.CONVERTER_LOCATION_ID, ["raw_a", None], 1)
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.state.resources["raw_a"], 3)
+
+    def test_grid_recipes_are_not_converter_cards(self):
+        ids = {item["id"] for item in self.web_ui.converter_view(self.state)}
+        self.assertIn("make_raw_b", ids)
+        self.assertNotIn("energy_single", ids)
+        self.assertNotIn("energy_pair", ids)
+
+    def test_sources_point_to_converter_grid(self):
+        sources = self.web_ui.resource_sources("raw_b")
+        grid = next(s for s in sources if s.get("action_id") == "energy_recipe:energy_single")
+        self.assertEqual(grid["kind"], "grid_craft")
+        self.assertEqual(grid["location_id"], engine.CONVERTER_LOCATION_ID)
+        self.assertEqual(grid["threshold"], 10)
+        plain = next(s for s in sources if s.get("action_id") == "make_raw_b")
+        self.assertEqual(plain["kind"], "energy")
+
+    def test_turn_log_reports_completed_energy_keys(self):
+        self.state.energy_jobs.append({"recipe_id": "energy_single", "progress": 9, "building_id": "energy_converter"})
+        log = self.web_ui.run_turn(self.state, "skip", None)
+        self.assertEqual(log["energy_completed_keys"], ["energy_recipe:energy_single"])
+
+
 if __name__ == "__main__":
     unittest.main()

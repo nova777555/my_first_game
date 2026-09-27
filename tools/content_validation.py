@@ -50,6 +50,12 @@ _ENERGY_RESOURCE_ID = "energy"
 # модуля, а не внутри validate(), чтобы порядок этих двух проверок был не важен.
 _ENVIRONMENT_ALLELE_IDS = {"forest", "caves", "water", "space", "desert", "fields"}
 
+# Закрытый список id исходов, которые умеет интерпретировать
+# game/engine.py:_apply_reactor_accident_result - как и _ENVIRONMENT_ALLELE_IDS
+# выше, result в reactor_accidents НЕ произвольная строка контента, а
+# хардкод-enum, понятный только движку - держать в паре с этой функцией.
+_REACTOR_ACCIDENT_RESULTS = {"destroy_one_fuel_cell", "destroy_zone_grid"}
+
 # Тип условия квеста (data["quests"][...]["conditions"]) -> обязательные поля
 # (кроме самого "type"). Держать в паре с _condition_met в game/engine.py -
 # список типов общий.
@@ -66,6 +72,23 @@ CONDITION_FIELDS = {
     "species_discovered": ["species"],
     "manual_action_performed_at_least": ["action", "amount"],
     "building_upgrade_purchased": ["building", "upgrade"],
+    "storage_tier_at_least": ["resource", "amount"],
+    "building_upgrade_level_at_least": ["building", "upgrade", "amount"],
+    "building_upgrade_type_purchased_any": ["upgrade_type"],
+}
+
+# Типы улучшений построек (buildings.*.upgrades[].type) - держать в паре с веткой
+# if/elif в check_buildings ниже (сообщение об ошибке там же перечисляет их текстом)
+# и с UPGRADE_TYPE_OPTIONS в tools/content_editor.html. Используется для валидации
+# quests.*.conditions[].upgrade_type (building_upgrade_type_purchased_any).
+_BUILDING_UPGRADE_TYPES = {
+    "scale", "energy_efficiency", "generation_efficiency", "breeding_output",
+    "breeding_slots_bonus", "breeding_immortality", "breeding_mutation_chance",
+    "energy_converter_capacity", "environment_emulation", "soul_collector_slots",
+    "soul_generation_efficiency", "breakdown_immunity", "action_duration_reduction",
+    "automation_slots", "research_speed", "ritual_pedestals", "reactor_zoning",
+    "reactor_grid_size", "reactor_telemetry", "autocraft", "replicator_throughput",
+    "smeltery_slots", "smeltery_capacity", "smeltery_heat",
 }
 
 
@@ -151,6 +174,43 @@ def find_building_requires_cycle(buildings: dict) -> list[str]:
         if color[bid] == WHITE:
             visit(bid, [])
     return sorted(cyclic)
+
+
+# Максимальная сторона крафт-сетки локации (locations.*.crafting). 9 - это
+# "ужасающий верстак" 9x9, больше не предусмотрено ни дизайном, ни UI.
+MAX_CRAFTING_SIDE = 9
+
+
+def pattern_shape(pattern: dict) -> tuple[tuple[str | None, ...], ...]:
+    """Нормализованная форма узора: сетка id ресурсов с ОБРЕЗАННЫМИ пустыми краями.
+
+    Обрезка - то самое правило, из-за которого рецепт 2x2 ловится в любом углу
+    сетки 3x3, а рецепт верстака работает и на ужасающем верстаке. Сравнивать
+    два узора между собой (как на дубликаты, так и с тем, что разложил игрок)
+    можно ТОЛЬКО через эту функцию, иначе один и тот же рисунок, сдвинутый на
+    клетку, посчитается другим рецептом.
+
+    Форма узора должна быть уже проверена (см. validate) - тут только приведение.
+    """
+    key = pattern.get("key") or {}
+    grid = [[(None if ch == "." else key.get(ch)) for ch in row] for row in pattern.get("rows") or []]
+    if not grid:
+        return ()
+    rows_used = [y for y, row in enumerate(grid) if any(c is not None for c in row)]
+    cols_used = [x for x in range(max(len(r) for r in grid)) if any(x < len(r) and r[x] is not None for r in grid)]
+    if not rows_used or not cols_used:
+        return ()
+    top, bottom = rows_used[0], rows_used[-1]
+    left, right = cols_used[0], cols_used[-1]
+    return tuple(
+        tuple(grid[y][x] if x < len(grid[y]) else None for x in range(left, right + 1))
+        for y in range(top, bottom + 1)
+    )
+
+
+def mirror_shape(shape: tuple[tuple[str | None, ...], ...]) -> tuple[tuple[str | None, ...], ...]:
+    """Та же форма, отражённая по горизонтали - для pattern_mirror."""
+    return tuple(tuple(reversed(row)) for row in shape)
 
 
 def validate(data: dict) -> list[str]:
@@ -240,6 +300,119 @@ def validate(data: dict) -> list[str]:
             if not isinstance(chance, (int, float)) or isinstance(chance, bool) or not (0 <= chance <= 1):
                 errors.append(f"{where}: шанс для '{rid}' должен быть числом от 0 до 1")
 
+    def check_action_pattern(aid: str, action: dict, loc_id) -> None:
+        check_grid_pattern(f"Действие '{aid}'", action, loc_id, "cost")
+
+    def check_grid_pattern(label: str, action: dict, loc_id, cost_field: str) -> None:
+        """manual_actions.*.pattern (cost_field="cost") и energy_recipes.*.pattern
+        (cost_field="consumes", loc_id - всегда преобразователь) - необязательный
+        узор крафта на сетке механизма.
+
+        НАЛИЧИЕ этого поля и есть переключатель «действие крафтится на сетке»:
+        действие без pattern остаётся обычной карточкой в локации, даже если сама
+        локация - механизм с сеткой (так плавка, которая тратит прочность молота,
+        может жить рядом с сеточными рецептами, не требуя модалки). Форма:
+        {"rows": ["AA.", "B..", "..."], "key": {"A": "ore", "B": "charcoal"}} -
+        тот же приём "сетка символов + легенда", что у пиксельных иконок.
+
+        Размер rows обязан совпадать с сеткой локации (locations.*.crafting):
+        узор хранится в координатах своего механизма, а сдвиг по сетке обеспечивает
+        уже обрезка краёв при сравнении (см. pattern_shape).
+        """
+        pattern = action.get("pattern")
+        mirror = action.get("pattern_mirror", False)
+        if not isinstance(mirror, bool):
+            errors.append(f"{label}: pattern_mirror должен быть true или false")
+        if pattern is None:
+            if mirror:
+                errors.append(f"{label}: pattern_mirror указан, но самого узора (pattern) нет")
+            return
+        where = f"{label}.pattern"
+        if not isinstance(pattern, dict):
+            errors.append(f"{where}: должен быть объектом {{rows, key}} или отсутствовать вовсе")
+            return
+
+        crafting = locations.get(loc_id, {}).get("crafting") if loc_id in locations else None
+        if not isinstance(crafting, dict):
+            errors.append(
+                f"{where}: узор есть, а у локации '{loc_id}' нет крафт-сетки (crafting) - "
+                f"либо задай сетку локации, либо убери узор"
+            )
+            crafting = None
+
+        rows = pattern.get("rows")
+        key = pattern.get("key")
+        if not isinstance(rows, list) or not rows or not all(isinstance(r, str) for r in rows):
+            errors.append(f"{where}.rows: должен быть непустым списком строк")
+            return
+        if not isinstance(key, dict) or not key:
+            errors.append(f"{where}.key: должен быть непустым объектом символ->ресурс")
+            return
+
+        widths = {len(r) for r in rows}
+        if len(widths) != 1:
+            errors.append(f"{where}.rows: все строки должны быть одной длины")
+            return
+        width = widths.pop()
+        if crafting is not None:
+            want_w, want_h = crafting.get("width"), crafting.get("height")
+            if isinstance(want_w, int) and isinstance(want_h, int) and (width != want_w or len(rows) != want_h):
+                errors.append(
+                    f"{where}.rows: размер узора {width}x{len(rows)} не совпадает с сеткой "
+                    f"локации '{loc_id}' ({want_w}x{want_h})"
+                )
+
+        for ch, rid in key.items():
+            if not isinstance(ch, str) or len(ch) != 1 or ch == ".":
+                errors.append(f"{where}.key: ключ '{ch}' должен быть ОДНИМ символом и не '.' (точка = пустая ячейка)")
+                continue
+            if rid not in resource_ids:
+                errors.append(f"{where}.key['{ch}']: неизвестный ресурс '{rid}'")
+            elif rid == _ENERGY_RESOURCE_ID:
+                errors.append(
+                    f"{where}.key['{ch}']: энергию нельзя положить в ячейку - "
+                    f"укажи её в {cost_field} сверх узора, она спишется при крафте"
+                )
+
+        used: set[str] = set()
+        for row in rows:
+            for ch in row:
+                if ch == ".":
+                    continue
+                if ch not in key:
+                    errors.append(f"{where}.rows: символ '{ch}' не описан в key")
+                else:
+                    used.add(ch)
+        unused = sorted(set(key) - used)
+        if unused:
+            errors.append(f"{where}.key: символы {', '.join(unused)} не встречаются в rows")
+        if not used:
+            errors.append(f"{where}: узор пуст - в сетке нет ни одной занятой ячейки")
+            return
+
+        # Одна ячейка = одна единица ресурса, поэтому cost сеточного действия -
+        # это ровно подсчёт занятых ячеек. Два источника истины тут были бы
+        # источником тихого расхождения: игрок видит узор, а движок списывает cost.
+        # Единственное исключение - энергия: в ячейку её не положить, она идёт в
+        # cost СВЕРХ узора и списывается при крафте (держать в паре с
+        # content_editor.html: patternCostOf/itemCostOf).
+        from_pattern: dict[str, int] = {}
+        for row in rows:
+            for ch in row:
+                rid = key.get(ch)
+                if rid:
+                    from_pattern[rid] = from_pattern.get(rid, 0) + 1
+        cost = action.get(cost_field) or {}
+        if isinstance(cost, dict):
+            cost = {rid: n for rid, n in cost.items() if rid != _ENERGY_RESOURCE_ID}
+        if isinstance(cost, dict) and from_pattern != cost:
+            shown = ", ".join(f"{rid}×{n}" for rid, n in sorted(from_pattern.items())) or "пусто"
+            current = ", ".join(f"{rid}×{n}" for rid, n in sorted(cost.items())) or "пусто"
+            errors.append(
+                f"{where}: узор даёт цену {shown}, а в {cost_field} записано {current} - "
+                f"одна ячейка это одна единица, они обязаны совпадать"
+            )
+
     def check_tech_ref(tech_id, where: str) -> None:
         if tech_id is not None and tech_id not in techs:
             errors.append(f"{where}: неизвестная технология '{tech_id}'")
@@ -327,6 +500,25 @@ def validate(data: dict) -> list[str]:
     if _ENERGY_RESOURCE_ID not in resource_ids:
         errors.append(f"Ресурс '{_ENERGY_RESOURCE_ID}' (Энергия) обязателен - с ним завязано особое поведение в движке")
 
+    # Цена репликации (resources.*.replication_cost) - материи репликатора за ОДНУ
+    # единицу ресурса, может быть дробной. Держать в паре с game/engine.py:
+    # replication_matter_cost/replicate.
+    replicator_matters = {
+        (b.get("replicator") or {}).get("matter")
+        for b in buildings.values() if isinstance(b, dict) and isinstance(b.get("replicator"), dict)
+    } - {None}
+    for r in resources:
+        rid = r.get("id", "")
+        price = r.get("replication_cost")
+        if price is None:
+            continue
+        if not isinstance(price, (int, float)) or isinstance(price, bool) or price <= 0:
+            errors.append(f"Ресурс '{rid}': replication_cost должен быть положительным числом (сколько материи репликатора стоит 1 шт.) или отсутствовать")
+        if rid == _ENERGY_RESOURCE_ID:
+            errors.append(f"Ресурс '{rid}': энергию репликатор не делает - уберите replication_cost")
+        if rid in replicator_matters:
+            errors.append(f"Ресурс '{rid}': это материя репликатора - делать её из неё самой бессмысленно, уберите replication_cost")
+
     # Отдельным проходом ПОСЛЕ основного цикла по resources - check_resource_dict
     # (в storage.tiers[].cost) сверяется с resource_ids, а он заполняется как раз
     # ЭТИМ циклом; проверять cost ВНУТРИ него означало бы ложно ругаться на вполне
@@ -353,11 +545,49 @@ def validate(data: dict) -> list[str]:
             if not isinstance(tier, dict):
                 errors.append(f"{twhere}: должен быть объектом")
                 continue
+            infinite = tier.get("infinite", False)
+            if not isinstance(infinite, bool):
+                errors.append(f"{twhere}.infinite: должен быть true или false")
+                infinite = False
+            # infinite - тир, который вместо очередного capacity_add снимает
+            # ограничение склада совсем (см. game/engine.py:storage_capacity) -
+            # capacity_add ему тогда не нужен (в расчёте не участвует).
             capacity_add = tier.get("capacity_add")
-            if not isinstance(capacity_add, int) or isinstance(capacity_add, bool) or capacity_add <= 0:
+            if not infinite and (not isinstance(capacity_add, int) or isinstance(capacity_add, bool) or capacity_add <= 0):
                 errors.append(f"{twhere}.capacity_add: должен быть положительным целым числом")
             check_tech_ref(tier.get("requires_tech"), twhere)
             check_resource_dict(tier.get("cost") or {}, f"{twhere}.cost")
+
+    # Тот же порядок причин, что у storage выше - spent_result сверяется с
+    # resource_ids, который заполняется основным циклом по resources.
+    _REACTOR_ROLES_FUEL_ONLY = {"heat", "output", "burnup_per_turn", "charge_max", "spent_result"}
+    for r in resources:
+        rid = r.get("id", "")
+        component = r.get("reactor_component")
+        if component is None:
+            continue
+        where = f"Ресурс '{rid}'.reactor_component"
+        if not isinstance(component, dict):
+            errors.append(f"{where}: должен быть объектом")
+            continue
+        role = component.get("role")
+        if not isinstance(role, str) or not role:
+            errors.append(f"{where}.role: должен быть непустой строкой (тег роли в решётке реактора, например 'fuel'/'moderator'/'coolant'/'absorber')")
+        for numeric_field in ("heat", "output", "power", "burnup_per_turn", "charge_max"):
+            fval = component.get(numeric_field)
+            if fval is not None and (not isinstance(fval, (int, float)) or isinstance(fval, bool) or fval < 0):
+                errors.append(f"{where}.{numeric_field}: должен быть null или неотрицательным числом")
+        spent_result = component.get("spent_result")
+        if role == "fuel":
+            if not spent_result:
+                errors.append(f"{where}: у топлива (role == 'fuel') обязан быть spent_result - иначе непонятно, что остаётся в ячейке после выгорания")
+            elif spent_result not in resource_ids:
+                errors.append(f"{where}.spent_result: ссылается на неизвестный ресурс '{spent_result}'")
+        else:
+            if spent_result is not None:
+                errors.append(f"{where}: spent_result имеет смысл только у топлива (role == 'fuel')")
+            if any(component.get(f) is not None for f in ("burnup_per_turn", "charge_max")):
+                errors.append(f"{where}: burnup_per_turn/charge_max имеют смысл только у топлива (role == 'fuel')")
 
     # Вынесено выше (до manual_actions) - нужен уже там для проверки spawn_species.
     species = data.get("species", {})
@@ -366,6 +596,94 @@ def validate(data: dict) -> list[str]:
     # Вынесено выше (до buildings) - нужен уже там для проверки buildings.*.soul_collector.accepts_kind.
     soul_recipes = data.get("soul_recipes", {})
     soul_kinds = {r.get("soul_kind") for r in resources if r.get("soul_kind")}
+    # Вынесено выше (до buildings) - нужен уже там для проверки buildings.*.reactor.accepts_roles/accident_table.
+    reactor_roles = {r.get("reactor_component", {}).get("role") for r in resources if r.get("reactor_component")}
+    reactor_accident_tables = set(data.get("reactor_accidents", {}) or {})
+
+    # Катализатор решётки реактора (resources.*.reactor_catalyst) - отдельный
+    # от reactor_component тег: не занимает ячейку сам, а усиливает УЖЕ
+    # стоящий в ней компонент (см. game/engine.py:_reactor_effective_component).
+    _REACTOR_CATALYST_SELF_STATS = {"heat_output", "burnup", "power", "field"}
+    for r in resources:
+        rid = r.get("id", "")
+        catalyst = r.get("reactor_catalyst")
+        if catalyst is None:
+            continue
+        where = f"Ресурс '{rid}'.reactor_catalyst"
+        if not isinstance(catalyst, dict):
+            errors.append(f"{where}: должен быть объектом")
+            continue
+        applies_to = catalyst.get("applies_to")
+        if not isinstance(applies_to, list) or not applies_to:
+            errors.append(f"{where}.applies_to: должен быть непустым списком тегов ролей")
+        else:
+            for role in applies_to:
+                if not isinstance(role, str) or not role:
+                    errors.append(f"{where}.applies_to: содержит нестроковый/пустой элемент")
+                elif role not in reactor_roles:
+                    errors.append(f"{where}.applies_to: ссылается на тег роли '{role}', которого нет ни у одного ресурса-компонента реактора")
+        self_stat = catalyst.get("self_stat")
+        if self_stat not in _REACTOR_CATALYST_SELF_STATS:
+            errors.append(f"{where}.self_stat: должен быть одним из {sorted(_REACTOR_CATALYST_SELF_STATS)}")
+        elif self_stat == "burnup" and isinstance(applies_to, list) and applies_to and "fuel" not in applies_to:
+            errors.append(f"{where}: self_stat 'burnup'/'heat_output'/'field' имеют смысл только у applies_to, включающего 'fuel'")
+        elif self_stat in ("heat_output", "field") and isinstance(applies_to, list) and applies_to and "fuel" not in applies_to:
+            errors.append(f"{where}: self_stat 'burnup'/'heat_output'/'field' имеют смысл только у applies_to, включающего 'fuel'")
+        for pct_field in ("self_pct", "neighbor_malus_pct"):
+            pval = catalyst.get(pct_field)
+            if not isinstance(pval, (int, float)) or isinstance(pval, bool) or pval < 0:
+                errors.append(f"{where}.{pct_field}: должен быть неотрицательным числом")
+        # НЕОБЯЗАТЕЛЬНОЕ: насколько растёт ТЕПЛОВАЯ сторона катализатора, если она
+        # должна отличаться от выходной. Отсутствие = обе стороны растут одинаково
+        # (прежнее поведение). ОТРИЦАТЕЛЬНОЕ значение осмысленно и нужно: именно
+        # оно позволяет катализатору ГАСИТЬ разогрев там, где он усиливает выход,
+        # - без этого катализатор поля усиливал заведомо невыгодную сделку
+        # (соседство топлива даёт больше тепла, чем выхода) и не окупался никогда.
+        # Ниже -1 множитель ушёл бы в минус, то есть тепло стало бы отрицательным.
+        if "self_pct_heat" in catalyst:
+            hval = catalyst.get("self_pct_heat")
+            if not isinstance(hval, (int, float)) or isinstance(hval, bool) or hval < -1:
+                errors.append(f"{where}.self_pct_heat: должен быть числом не меньше -1 "
+                              f"(-1 полностью гасит тепловую сторону, 0 оставляет её как есть)")
+
+    # Охлаждающая жидкость реактора (resources.*.reactor_coolant_fluid) - РАСХОДНИК,
+    # который теплоносители решётки тратят каждый ход. Не путать с ролью "coolant"
+    # у reactor_component: та - железо в ячейке, эта - то, что в него залито.
+    # Завести новую жидкость = добавить ресурс с этим тегом, код менять не нужно.
+    for r in resources:
+        rid = r.get("id", "")
+        fluid = r.get("reactor_coolant_fluid")
+        if fluid is None:
+            continue
+        where = f"Ресурс '{rid}'.reactor_coolant_fluid"
+        if not isinstance(fluid, dict):
+            errors.append(f"{where}: должен быть объектом")
+            continue
+        cooling = fluid.get("cooling_mult")
+        if not isinstance(cooling, (int, float)) or isinstance(cooling, bool) or cooling <= 0:
+            errors.append(f"{where}.cooling_mult: должен быть положительным числом (множитель снимаемого тепла)")
+        upp = fluid.get("units_per_power")
+        if not isinstance(upp, (int, float)) or isinstance(upp, bool) or upp < 0:
+            errors.append(f"{where}.units_per_power: должен быть неотрицательным числом (расход единиц на единицу мощности теплоносителя при потоке 100%)")
+
+    # Жидкий металл плавильни (resources.*.molten) - живёт только в тигле; color - цвет
+    # слоя, density - порядок слоёв (тяжёлый тонет). См. game/content.py:RESOURCE_MOLTEN.
+    molten_ids = set()
+    for r in resources:
+        molten = r.get("molten")
+        if molten is None:
+            continue
+        where = f"Ресурс '{r.get('id', '')}'.molten"
+        molten_ids.add(r.get("id"))
+        if not isinstance(molten, dict):
+            errors.append(f"{where}: должен быть объектом {{color, density}}")
+            continue
+        color = molten.get("color")
+        if not isinstance(color, str) or not _HEX_COLOR_RE.match(color):
+            errors.append(f"{where}.color: должен быть цветом вида '#rrggbb'")
+        density = molten.get("density", 0)
+        if not isinstance(density, (int, float)) or isinstance(density, bool):
+            errors.append(f"{where}.density: должен быть числом (или отсутствовать)")
 
     for lid, loc in locations.items():
         record_id(lid, "локация")
@@ -381,6 +699,24 @@ def validate(data: dict) -> list[str]:
         if not loc.get("name"):
             errors.append(f"Локация '{lid}': не указано название")
         check_icon(loc.get("icon"), f"Локация '{lid}'")
+        crafting = loc.get("crafting")
+        if crafting is not None:
+            where = f"Локация '{lid}'.crafting"
+            if not isinstance(crafting, dict):
+                errors.append(f"{where}: должен быть объектом {{width, height}} или отсутствовать вовсе")
+            else:
+                for side in ("width", "height"):
+                    value = crafting.get(side)
+                    if not isinstance(value, int) or isinstance(value, bool) or not (1 <= value <= MAX_CRAFTING_SIDE):
+                        errors.append(f"{where}.{side}: должен быть целым числом от 1 до {MAX_CRAFTING_SIDE}")
+                # batch - крафт пачкой ("Скрафтить ×N"), необязательный флаг.
+                if "batch" in crafting and not isinstance(crafting["batch"], bool):
+                    errors.append(f"{where}.batch: должен быть true/false или отсутствовать")
+        # shows_building_mechanisms - в этой локации (обычно «Механизмы») появляются
+        # кнопки открытия построек-механизмов (автоматизатор, синтезатор душ,
+        # ритуальный круг, реактор), см. web_ui.html: buildingMechanismsAt.
+        if "shows_building_mechanisms" in loc and not isinstance(loc["shows_building_mechanisms"], bool):
+            errors.append(f"Локация '{lid}'.shows_building_mechanisms: должен быть true/false или отсутствовать")
     if _MINE_LOCATION_ID not in locations:
         errors.append(f"Локация '{_MINE_LOCATION_ID}' (Шахта) обязательна - к ней привязан поиск и добыча жил")
     if _CONVERTER_LOCATION_ID not in locations:
@@ -419,6 +755,12 @@ def validate(data: dict) -> list[str]:
                 errors.append(f"Действие '{aid}'.tool_scaling: должен быть объектом с полем tool")
             elif tool_scaling["tool"] not in tools:
                 errors.append(f"Действие '{aid}'.tool_scaling: неизвестный инструмент '{tool_scaling['tool']}'")
+        uses_tool_durability = a.get("uses_tool_durability")
+        if uses_tool_durability is not None:
+            if not isinstance(uses_tool_durability, dict) or "tool" not in uses_tool_durability:
+                errors.append(f"Действие '{aid}'.uses_tool_durability: должен быть объектом с полем tool")
+            elif uses_tool_durability["tool"] not in tools:
+                errors.append(f"Действие '{aid}'.uses_tool_durability: неизвестный инструмент '{uses_tool_durability['tool']}'")
         priority = a.get("priority", 0)
         if not isinstance(priority, int):
             errors.append(f"Действие '{aid}': priority должен быть целым числом")
@@ -428,6 +770,39 @@ def validate(data: dict) -> list[str]:
         excluded_from_autocraft = a.get("excluded_from_autocraft", False)
         if not isinstance(excluded_from_autocraft, bool):
             errors.append(f"Действие '{aid}': excluded_from_autocraft должен быть true или false")
+        check_action_pattern(aid, a, loc_id)
+
+    # Дубликаты форм внутри ОДНОЙ локации-механизма: два рецепта с одинаковым
+    # рисунком неразличимы для игрока (движок не смог бы выбрать между ними), а с
+    # учётом pattern_mirror форма считается занятой и своим отражением.
+    # Энергорецепты преобразователя (energy_recipes.*.pattern) делят ту же таблицу
+    # форм с ручными действиями локации преобразователя - см. их цикл ниже.
+    shapes_by_location: dict[str, dict[tuple, str]] = {}
+
+    def register_pattern_shape(label: str, entity: dict, loc_id) -> None:
+        pattern = entity.get("pattern")
+        if not isinstance(pattern, dict) or loc_id not in locations:
+            return
+        shape = pattern_shape(pattern)
+        if not shape:
+            return
+        taken = shapes_by_location.setdefault(loc_id, {})
+        variants = [shape]
+        if entity.get("pattern_mirror"):
+            variants.append(mirror_shape(shape))
+        for variant in variants:
+            other = taken.get(variant)
+            if other is not None and other != label:
+                errors.append(
+                    f"{label}.pattern: та же форма узора уже занята ({other}) "
+                    f"в локации '{loc_id}' - два рецепта одного механизма не могут выглядеть одинаково"
+                )
+                break
+        for variant in variants:
+            taken.setdefault(variant, label)
+
+    for aid, a in manual_actions.items():
+        register_pattern_shape(f"Действие '{aid}'", a, a.get("location"))
 
     for bid, b in buildings.items():
         record_id(bid, "постройка")
@@ -450,9 +825,11 @@ def validate(data: dict) -> list[str]:
         cp = b.get("compute_power", 0)
         if not isinstance(cp, (int, float)) or cp < 0:
             errors.append(f"Постройка '{bid}': compute_power должен быть неотрицательным числом")
-        speed = b.get("autocraft_speed", 0)
-        if not isinstance(speed, (int, float)) or speed < 0:
-            errors.append(f"Постройка '{bid}': autocraft_speed должен быть неотрицательным числом")
+        if "autocraft_speed" in b:
+            errors.append(
+                f"Постройка '{bid}': autocraft_speed устарело - скорость автокрафта теперь задают сборщики "
+                f"(autocraft_assembler) и улучшение «Автоматизация» механизма (type autocraft)"
+            )
         slots = b.get("autocraft_slots", 0)
         if not isinstance(slots, (int, float)) or slots < 0:
             errors.append(f"Постройка '{bid}': autocraft_slots должен быть неотрицательным числом")
@@ -489,13 +866,35 @@ def validate(data: dict) -> list[str]:
         if lab_tier is not None and (not isinstance(lab_tier, int) or lab_tier <= 0):
             errors.append(f"Постройка '{bid}': lab_tier должен быть null или положительным целым числом")
         check_click_delay(b.get("click_delay_ms"), f"Постройка '{bid}'")
-        unlocks = b.get("unlocks_autocraft", [])
-        if not isinstance(unlocks, list):
-            errors.append(f"Постройка '{bid}': unlocks_autocraft должен быть списком id ресурсов")
-        else:
-            for rid in unlocks:
-                if rid not in resource_ids:
-                    errors.append(f"Постройка '{bid}': unlocks_autocraft ссылается на неизвестный ресурс '{rid}'")
+        if "unlocks_autocraft" in b:
+            errors.append(
+                f"Постройка '{bid}': unlocks_autocraft устарело - автокрафт рецепта открывает его механизм: "
+                f"сборщик локации (autocraft_assembler) или улучшение «Автоматизация» (type autocraft)"
+            )
+        # autocraft_assembler {location | building, per_turn} - сборщик: делает рецепты
+        # этой локации (или ритуалы этого алтаря - building с ritual_circle) мгновенно при
+        # любой длительности, per_turn крафтов за ход на копию (null - без лимита).
+        # Держать в паре с game/engine.py: _assembler_capacity.
+        assembler = b.get("autocraft_assembler")
+        if assembler is not None:
+            where = f"Постройка '{bid}'.autocraft_assembler"
+            if not isinstance(assembler, dict):
+                errors.append(f"{where}: должен быть объектом {{location или building, per_turn}} или отсутствовать")
+            else:
+                has_location, has_building = "location" in assembler, "building" in assembler
+                if has_location == has_building:
+                    errors.append(f"{where}: нужно ровно одно из полей location (локация-механизм) или building (ритуальный алтарь)")
+                elif has_location and assembler["location"] not in locations:
+                    errors.append(f"{where}.location: неизвестная локация '{assembler['location']}'")
+                elif has_building:
+                    target = assembler["building"]
+                    if target not in buildings:
+                        errors.append(f"{where}.building: неизвестная постройка '{target}'")
+                    elif not buildings[target].get("ritual_circle"):
+                        errors.append(f"{where}.building: '{target}' не ритуальный алтарь (нет поля ritual_circle) - сборщик по постройке сейчас бывает только у ритуалов")
+                per_turn = assembler.get("per_turn")
+                if per_turn is not None and (not isinstance(per_turn, int) or isinstance(per_turn, bool) or per_turn <= 0):
+                    errors.append(f"{where}.per_turn: должен быть положительным целым (крафтов за ход) или null (без лимита)")
         converter = b.get("energy_converter")
         if converter is not None:
             if not isinstance(converter, dict):
@@ -504,6 +903,33 @@ def validate(data: dict) -> list[str]:
                 max_per_turn = converter.get("max_energy_per_turn")
                 if max_per_turn is not None and (not isinstance(max_per_turn, (int, float)) or max_per_turn <= 0):
                     errors.append(f"Постройка '{bid}': energy_converter.max_energy_per_turn должен быть null или положительным числом")
+        # Репликатор: делает любой ресурс с replication_cost из материи matter,
+        # не быстрее max_matter_per_turn за ход на одну репликацию (null - без лимита),
+        # slots репликаций сразу на копию. Держать в паре с game/engine.py: replicate.
+        replicator = b.get("replicator")
+        if replicator is not None:
+            if not isinstance(replicator, dict):
+                errors.append(f"Постройка '{bid}': replicator должен быть объектом")
+            else:
+                matter = replicator.get("matter")
+                if matter not in resource_ids:
+                    errors.append(f"Постройка '{bid}': replicator.matter ссылается на несуществующий ресурс '{matter}'")
+                elif matter == _ENERGY_RESOURCE_ID:
+                    errors.append(f"Постройка '{bid}': replicator.matter не может быть энергией - это отдельный ресурс-материя")
+                per_turn = replicator.get("max_matter_per_turn")
+                if per_turn is not None and (not isinstance(per_turn, (int, float)) or isinstance(per_turn, bool) or per_turn <= 0):
+                    errors.append(f"Постройка '{bid}': replicator.max_matter_per_turn должен быть null (без лимита) или положительным числом")
+                slots = replicator.get("slots", 1)
+                if not isinstance(slots, int) or isinstance(slots, bool) or slots <= 0:
+                    errors.append(f"Постройка '{bid}': replicator.slots должен быть положительным целым числом (репликаций сразу на копию)")
+        # «Только на излишках энергии»: берёт энергию после всех, кроме преобразователей
+        # (game/engine.py: advance_turn) - без энергии в consumes флаг ни на что не влияет.
+        surplus_only = b.get("energy_surplus_only")
+        if surplus_only is not None:
+            if not isinstance(surplus_only, bool):
+                errors.append(f"Постройка '{bid}': energy_surplus_only должен быть true или false")
+            elif surplus_only and not (b.get("consumes") or {}).get(_ENERGY_RESOURCE_ID):
+                errors.append(f"Постройка '{bid}': energy_surplus_only имеет смысл только у постройки, потребляющей энергию (consumes.{_ENERGY_RESOURCE_ID})")
         soul_collector = b.get("soul_collector")
         if soul_collector is not None:
             if not isinstance(soul_collector, dict):
@@ -525,6 +951,9 @@ def validate(data: dict) -> list[str]:
                 check_resource_dict(enchanting_table.get("cost", {}), f"Постройка '{bid}'.enchanting_table.cost")
                 if not enchanting_table.get("cost"):
                     errors.append(f"Постройка '{bid}': enchanting_table.cost пуст - попытка зачарования должна что-то стоить (обычно книгу зачарований)")
+                strip_on_fail = enchanting_table.get("strip_on_fail")
+                if strip_on_fail is not None and not isinstance(strip_on_fail, bool):
+                    errors.append(f"Постройка '{bid}': enchanting_table.strip_on_fail должен быть true/false")
         automation_hub = b.get("automation_hub")
         if automation_hub is not None:
             if not isinstance(automation_hub, dict):
@@ -533,6 +962,89 @@ def validate(data: dict) -> list[str]:
                 hub_slots = automation_hub.get("slots")
                 if not isinstance(hub_slots, int) or isinstance(hub_slots, bool) or hub_slots <= 0:
                     errors.append(f"Постройка '{bid}': automation_hub.slots должен быть положительным целым числом")
+        smeltery = b.get("smeltery")
+        if smeltery is not None:
+            if not isinstance(smeltery, dict):
+                errors.append(f"Постройка '{bid}': smeltery должен быть объектом {{slots, capacity, heat}}")
+            else:
+                for field_name in ("slots", "capacity", "heat"):
+                    val = smeltery.get(field_name)
+                    if not isinstance(val, int) or isinstance(val, bool) or val <= 0:
+                        errors.append(f"Постройка '{bid}': smeltery.{field_name} должен быть положительным целым числом")
+        ritual_circle = b.get("ritual_circle")
+        if ritual_circle is not None:
+            if not isinstance(ritual_circle, dict):
+                errors.append(f"Постройка '{bid}': ritual_circle должен быть объектом")
+            else:
+                ring_pedestals = ritual_circle.get("ring_pedestals")
+                if not isinstance(ring_pedestals, int) or isinstance(ring_pedestals, bool) or ring_pedestals <= 0:
+                    errors.append(f"Постройка '{bid}': ritual_circle.ring_pedestals должен быть положительным целым числом")
+        reactor = b.get("reactor")
+        if reactor is not None:
+            if not isinstance(reactor, dict):
+                errors.append(f"Постройка '{bid}': reactor должен быть объектом")
+            else:
+                for dim_field in ("grid_width", "grid_height", "zones_default"):
+                    dim_val = reactor.get(dim_field)
+                    if not isinstance(dim_val, int) or isinstance(dim_val, bool) or dim_val <= 0:
+                        errors.append(f"Постройка '{bid}': reactor.{dim_field} должен быть положительным целым числом")
+                accepts_roles = reactor.get("accepts_roles")
+                if not isinstance(accepts_roles, list) or not accepts_roles:
+                    errors.append(f"Постройка '{bid}': reactor.accepts_roles должен быть непустым списком тегов ролей")
+                else:
+                    for role in accepts_roles:
+                        if not isinstance(role, str) or not role:
+                            errors.append(f"Постройка '{bid}': reactor.accepts_roles содержит нестроковый/пустой элемент")
+                        elif role not in reactor_roles:
+                            errors.append(f"Постройка '{bid}': reactor.accepts_roles ссылается на тег роли '{role}', которого нет ни у одного ресурса-компонента реактора (см. resources.*.reactor_component.role)")
+                for pct_field in ("soft_threshold_pct",):
+                    pct_val = reactor.get(pct_field)
+                    if not isinstance(pct_val, (int, float)) or isinstance(pct_val, bool) or not (0 < pct_val <= 1):
+                        errors.append(f"Постройка '{bid}': reactor.{pct_field} должен быть числом от 0 (не включая) до 1 (включая)")
+                for step_field in (
+                    "heat_cap_per_cell", "fuel_adjacency_heat_step", "fuel_adjacency_output_step",
+                    "moderator_adjacency_output_bonus", "absorber_adjacency_reduction",
+                    "shield_adjacency_reduction",
+                    "reflector_adjacency_output_mult_step", "thermal_shock_flow_delta_pct",
+                    "thermal_shock_heat_bonus_pct",
+                ):
+                    step_val = reactor.get(step_field)
+                    if not isinstance(step_val, (int, float)) or isinstance(step_val, bool) or step_val < 0:
+                        errors.append(f"Постройка '{bid}': reactor.{step_field} должен быть неотрицательным числом")
+                # НЕОБЯЗАТЕЛЬНЫЕ поля: отсутствие = движок берёт безопасный
+                # дефолт (отражатель не греет; поглотитель режет выход так же,
+                # как тепло), т.е. контент без них работает как раньше -
+                # проверяем только если поле вообще задано
+                for opt_field in (
+                    "absorber_adjacency_output_reduction",
+                    "reflector_adjacency_heat_mult_step",
+                    "control_rod_burnup_factor",
+                    "control_rod_heat_damp_exponent",
+                    "catalyst_malus_radius",
+                    "fuel_min_heat_mult",
+                ):
+                    if opt_field not in reactor:
+                        continue
+                    opt_val = reactor.get(opt_field)
+                    if not isinstance(opt_val, (int, float)) or isinstance(opt_val, bool) or opt_val < 0:
+                        errors.append(f"Постройка '{bid}': reactor.{opt_field} должен быть неотрицательным числом")
+                burnup_factor = reactor.get("control_rod_burnup_factor")
+                if isinstance(burnup_factor, (int, float)) and not isinstance(burnup_factor, bool) and burnup_factor > 1:
+                    errors.append(f"Постройка '{bid}': reactor.control_rod_burnup_factor - доля от 0 до 1 (0 = заряд тратится независимо от стержней, 1 = ровно в темпе демпфирования)")
+                heat_exp = reactor.get("control_rod_heat_damp_exponent")
+                if isinstance(heat_exp, (int, float)) and not isinstance(heat_exp, bool) and heat_exp < 1:
+                    errors.append(f"Постройка '{bid}': reactor.control_rod_heat_damp_exponent должен быть >= 1 (1 = рычаг душит тепло и выход одинаково, больше 1 = тепло сильнее)")
+                malus_radius = reactor.get("catalyst_malus_radius")
+                if isinstance(malus_radius, (int, float)) and not isinstance(malus_radius, bool) and malus_radius != int(malus_radius):
+                    errors.append(f"Постройка '{bid}': reactor.catalyst_malus_radius должен быть целым (радиус Чебышёва в клетках)")
+                min_heat = reactor.get("fuel_min_heat_mult")
+                if isinstance(min_heat, (int, float)) and not isinstance(min_heat, bool) and min_heat >= 1:
+                    errors.append(f"Постройка '{bid}': reactor.fuel_min_heat_mult - доля собственного тепла стержня от 0 (включая) до 1 (не включая); 1 и выше означало бы, что соседи вообще не гасят тепло")
+                accident_table = reactor.get("accident_table")
+                if not isinstance(accident_table, str) or not accident_table:
+                    errors.append(f"Постройка '{bid}': reactor.accident_table должен быть непустой строкой (id из top-level reactor_accidents)")
+                elif accident_table not in reactor_accident_tables:
+                    errors.append(f"Постройка '{bid}': reactor.accident_table ссылается на неизвестную таблицу '{accident_table}' (см. top-level reactor_accidents)")
         stages = b.get("construction_stages")
         if stages is not None:
             if not isinstance(stages, list) or len(stages) < 1:
@@ -673,6 +1185,23 @@ def validate(data: dict) -> list[str]:
                         )
                         if not has_multiturn_dependent:
                             errors.append(f"{where}: action_duration_reduction имеет смысл только у построек, от которых зависит (requires_building самого действия или его локации) хотя бы одно многоходовое (duration_turns > 1) ручное действие")
+                    elif kind == "autocraft":
+                        # «Автоматизация» механизма: автокрафт может запускать рецепты
+                        # локации, которую открывает эта постройка (как игрок), либо
+                        # рецепты преобразователя. Держать в паре с engine.mechanism_automated/
+                        # automated_converter_types.
+                        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для autocraft должен быть положительным числом (само число не используется - куплено/не куплено)")
+                        if up.get("repeatable"):
+                            errors.append(f"{where}: autocraft не может быть repeatable - это переключатель, а не накопление")
+                        opens_location = any(l.get("requires_building") == bid for l in locations.values())
+                        if not opens_location and not b.get("energy_converter") and not b.get("replicator"):
+                            errors.append(f"{where}: autocraft имеет смысл только у постройки, которая открывает локацию-механизм (locations.*.requires_building), у преобразователя (energy_converter) или у репликатора (replicator)")
+                    elif kind == "replicator_throughput":
+                        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для replicator_throughput должен быть положительным числом (АБСОЛЮТНАЯ добавка к replicator.max_matter_per_turn этой же постройки - см. game/engine.py:replicator_max_matter_per_turn)")
+                        if not b.get("replicator"):
+                            errors.append(f"{where}: replicator_throughput имеет смысл только у репликатора (replicator)")
                     elif kind == "automation_slots":
                         if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
                             errors.append(f"{where}: value для automation_slots должен быть положительным числом (АБСОЛЮТНАЯ добавка к вместимости автоматизатора, уровни не складываются - см. game/engine.py:automation_slots_capacity)")
@@ -683,13 +1212,51 @@ def validate(data: dict) -> list[str]:
                             errors.append(f"{where}: value для research_speed должен быть положительным числом (АБСОЛЮТНОЕ сокращение времени исследования, В ХОДАХ, не доля - см. game/engine.py:tech_research_turns), уровни не складываются")
                         if not b.get("lab_tier"):
                             errors.append(f"{where}: research_speed имеет смысл только у построек-лабораторий (lab_tier) - действует на техи ТОГО ЖЕ тира, что lab_tier этой постройки")
+                    elif kind == "ritual_pedestals":
+                        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для ritual_pedestals должен быть положительным числом (АБСОЛЮТНАЯ добавка к ёмкости кольца ритуального круга, уровни не складываются - см. game/engine.py:ritual_pedestal_capacity)")
+                        if not b.get("ritual_circle"):
+                            errors.append(f"{where}: ritual_pedestals имеет смысл только у построек-алтарей (ritual_circle)")
+                    elif kind == "reactor_zoning":
+                        # Как environment_emulation - pick-one (замена, не накопление),
+                        # value тут ЦЕЛОЕ ЧИСЛО зон, а не мультипликатор.
+                        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для reactor_zoning должен быть положительным целым числом (сколько зон в решётке ПОСЛЕ покупки)")
+                        if not b.get("reactor"):
+                            errors.append(f"{where}: reactor_zoning имеет смысл только у построек-реакторов (reactor)")
+                        if repeatable:
+                            errors.append(f"{where}: reactor_zoning не может быть repeatable - это взаимоисключающий выбор зонирования, а не накопительный бонус")
+                    elif kind == "reactor_grid_size":
+                        if not isinstance(value, dict) or "width" not in value or "height" not in value:
+                            errors.append(f"{where}: value для reactor_grid_size должен быть объектом {{\"width\": N, \"height\": M}}")
+                        else:
+                            for dim_field in ("width", "height"):
+                                dim_val = value.get(dim_field)
+                                if not isinstance(dim_val, int) or isinstance(dim_val, bool) or dim_val <= 0:
+                                    errors.append(f"{where}: value.{dim_field} для reactor_grid_size должен быть положительным целым числом")
+                        if not b.get("reactor"):
+                            errors.append(f"{where}: reactor_grid_size имеет смысл только у построек-реакторов (reactor)")
+                        if repeatable:
+                            errors.append(f"{where}: reactor_grid_size не может быть repeatable - размер решётки прогрессия по позиции (как scale), а не накопление на каждую покупку")
+                    elif kind == "reactor_telemetry":
+                        if not isinstance(value, bool) or not value:
+                            errors.append(f"{where}: value для reactor_telemetry должен быть true (само значение не используется по величине - куплено/не куплено)")
+                        if not b.get("reactor"):
+                            errors.append(f"{where}: reactor_telemetry имеет смысл только у построек-реакторов (reactor)")
+                    elif kind in ("smeltery_slots", "smeltery_capacity", "smeltery_heat"):
+                        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                            errors.append(f"{where}: value для {kind} должен быть положительным целым числом (АБСОЛЮТНАЯ добавка к smeltery этой постройки, уровни не складываются - см. game/engine.py:smeltery_heat/smeltery_slot_capacity/smeltery_tank_capacity)")
+                        if not b.get("smeltery"):
+                            errors.append(f"{where}: {kind} имеет смысл только у плавилен (smeltery)")
                     else:
                         errors.append(
                             f"{where}: type должен быть 'scale', 'energy_efficiency', 'generation_efficiency', "
                             f"'breeding_output', 'breeding_slots_bonus', 'breeding_immortality', "
                             f"'breeding_mutation_chance', 'energy_converter_capacity', 'environment_emulation', "
                             f"'soul_collector_slots', 'soul_generation_efficiency', 'breakdown_immunity', "
-                            f"'action_duration_reduction', 'automation_slots' или 'research_speed' (сейчас: {kind!r})"
+                            f"'action_duration_reduction', 'automation_slots', 'research_speed', 'ritual_pedestals', "
+                            f"'reactor_zoning', 'reactor_grid_size', 'reactor_telemetry', 'smeltery_slots', "
+                            f"'smeltery_capacity', 'smeltery_heat' или 'autocraft' (сейчас: {kind!r})"
                         )
         if not b.get("name"):
             errors.append(f"Постройка '{bid}': не указано название")
@@ -814,6 +1381,23 @@ def validate(data: dict) -> list[str]:
                     errors.append(f"mine_field.{key}: должен быть не меньше предыдущего порога щупа (иначе более высокий тир ничего не добавляет)")
                 else:
                     prev_tier = value
+            reveal_all_tier = mine_field.get("scanner_reveal_all_tier")
+            radius_tiers = mine_field.get("scanner_radius_tiers", [])
+            if not isinstance(radius_tiers, list):
+                errors.append("mine_field.scanner_radius_tiers: должен быть списком порогов {tier, radius}")
+            else:
+                for i, entry in enumerate(radius_tiers):
+                    if not isinstance(entry, dict):
+                        errors.append(f"mine_field.scanner_radius_tiers[{i}]: должен быть объектом {{tier, radius}}")
+                        continue
+                    radius_tier = entry.get("tier")
+                    radius = entry.get("radius")
+                    if not isinstance(radius_tier, int) or isinstance(radius_tier, bool) or not (1 <= radius_tier <= scanner_tier_count):
+                        errors.append(f"mine_field.scanner_radius_tiers[{i}].tier: должен быть целым числом от 1 до {scanner_tier_count}")
+                    elif isinstance(reveal_all_tier, int) and radius_tier >= reveal_all_tier:
+                        errors.append(f"mine_field.scanner_radius_tiers[{i}].tier: должен быть меньше scanner_reveal_all_tier ({reveal_all_tier}) - иначе порог никогда не сработает")
+                    if not isinstance(radius, int) or isinstance(radius, bool) or radius <= 0:
+                        errors.append(f"mine_field.scanner_radius_tiers[{i}].radius: должен быть положительным целым числом")
         rock_resource = mine_field.get("rock_resource")
         if rock_resource not in resource_ids:
             errors.append(f"mine_field.rock_resource: ссылается на неизвестный ресурс '{rock_resource}'")
@@ -1073,6 +1657,7 @@ def validate(data: dict) -> list[str]:
             errors.append("combat.wounded_damage_multiplier: должен быть числом в диапазоне (0, 1], если указан")
 
     energy_recipes = data.get("energy_recipes", {})
+    converter_has_grid = isinstance(locations.get(_CONVERTER_LOCATION_ID, {}).get("crafting"), dict)
     for rid, recipe in energy_recipes.items():
         record_id(rid, "рецепт крафта за энергию")
         check_id("Рецепт крафта за энергию", rid)
@@ -1087,6 +1672,17 @@ def validate(data: dict) -> list[str]:
             errors.append(f"Рецепт крафта за энергию '{rid}': produces пустой - рецепт ничего не даёт")
         check_resource_dict(recipe.get("consumes", {}), f"Рецепт крафта за энергию '{rid}'.consumes")
         check_building_ref(recipe.get("machine"), f"Рецепт крафта за энергию '{rid}'.machine")
+        # Узор - слой над consumes, собирается в сетке преобразователя (у
+        # energy_recipes нет своего поля location). Пока у преобразователя есть
+        # сетка, рецепт без узора игрок не смог бы запустить руками вовсе.
+        label = f"Рецепт крафта за энергию '{rid}'"
+        check_grid_pattern(label, recipe, _CONVERTER_LOCATION_ID, "consumes")
+        register_pattern_shape(label, recipe, _CONVERTER_LOCATION_ID)
+        if converter_has_grid and recipe.get("pattern") is None:
+            errors.append(
+                f"{label}: у преобразователя есть крафт-сетка, а у рецепта нет узора (pattern) - "
+                f"запустить его руками будет нельзя"
+            )
 
     # Приёмы боя (id -> {"name", "description", "mode", ...}) - разблокируются НЕ
     # отсюда, а tools.*.tiers[].unlocks_moves (см. ниже) - здесь только сами
@@ -1331,6 +1927,128 @@ def validate(data: dict) -> list[str]:
         if resource is not None and not resource.get("soul_kind"):
             errors.append(f"{where}: у ресурса '{soul_id}' не задан soul_kind - его нельзя будет вставить ни в один синтезатор (см. resources.*.soul_kind)")
 
+    # ritual_recipes - свежие id (как manual_actions), а НЕ декорация существующего
+    # ресурса (в отличие от soul_recipes) - требуют обычной проверки check_id/record_id
+    # на уникальность среди ВСЕХ id проекта.
+    ritual_recipes = data.get("ritual_recipes", {})
+    for rid, recipe in ritual_recipes.items():
+        where = f"Ритуал '{rid}'"
+        check_id("Рецепт ритуала", rid)
+        record_id(rid, "рецепт ритуала")
+        if not recipe.get("name"):
+            errors.append(f"{where}: не указано название")
+        check_tech_ref(recipe.get("requires_tech"), where)
+        building_id = recipe.get("requires_building")
+        if building_id is None:
+            errors.append(f"{where}: requires_building обязателен - у каждого ритуала должен быть алтарь")
+        else:
+            check_building_ref(building_id, where)
+            if building_id in buildings and not buildings[building_id].get("ritual_circle"):
+                errors.append(f"{where}: requires_building '{building_id}' не является алтарём (нет поля ritual_circle)")
+        ring_cost = recipe.get("ring_cost", {})
+        check_resource_dict(ring_cost, f"{where}.ring_cost")
+        if not ring_cost:
+            errors.append(f"{where}: ring_cost пуст - ритуал должен требовать хотя бы один ингредиент в кольце")
+        center_cost = recipe.get("center_cost")
+        if not isinstance(center_cost, str) or not center_cost:
+            errors.append(f"{where}: center_cost должен быть непустой строкой (id ресурса для центрального пьедестала)")
+        elif center_cost not in resource_ids:
+            errors.append(f"{where}: center_cost ссылается на неизвестный ресурс '{center_cost}'")
+        check_resource_dict(recipe.get("extra_cost", {}), f"{where}.extra_cost")
+        duration = recipe.get("duration_turns", 1)
+        if not isinstance(duration, int) or isinstance(duration, bool) or duration < 1:
+            errors.append(f"{where}.duration_turns: должен быть целым числом не меньше 1")
+        extra_per_turn = recipe.get("extra_consumes_per_turn", {})
+        check_resource_dict(extra_per_turn, f"{where}.extra_consumes_per_turn")
+        check_chance_dict(recipe.get("extra_consumes_chance"), extra_per_turn, f"{where}.extra_consumes_chance")
+        if extra_per_turn and duration <= 1:
+            errors.append(f"{where}: extra_consumes_per_turn задан, но duration_turns <= 1 - тратить его не за что (добавьте ходов или перенесите расход в extra_cost)")
+        produces = recipe.get("produces", {})
+        check_resource_dict(produces, f"{where}.produces", allow_range=True)
+        if not produces:
+            errors.append(f"{where}: produces пустой - этот ритуал ничего не производит")
+        check_chance_dict(recipe.get("produces_chance"), produces, f"{where}.produces_chance")
+        check_sound(recipe.get("sound"), where)
+
+    # Плавильня (buildings.*.smeltery) - три раздела рецептов со СВОИМИ свежими id (как
+    # ritual_recipes). Жидкие металлы (resources.*.molten) бывают только в тигле: в input
+    # плавки их нет, у сплава весь input/output - металлы, литьё берёт ровно один металл.
+    def check_positive_int(value, where: str, field_name: str, default=None) -> None:
+        val = default if value is None else value
+        if not isinstance(val, int) or isinstance(val, bool) or val < 1:
+            errors.append(f"{where}.{field_name}: должен быть целым числом не меньше 1")
+
+    def check_smeltery_common(recipe, kind_name: str, rid: str) -> str:
+        where = f"{kind_name} '{rid}'"
+        check_id(kind_name, rid)
+        record_id(rid, kind_name.lower())
+        if not isinstance(recipe, dict):
+            errors.append(f"{where}: должен быть объектом")
+            return where
+        if not recipe.get("name"):
+            errors.append(f"{where}: не указано название")
+        check_tech_ref(recipe.get("requires_tech"), where)
+        return where
+
+    for rid, recipe in (data.get("melt_recipes") or {}).items():
+        where = check_smeltery_common(recipe, "Рецепт плавки", rid)
+        if not isinstance(recipe, dict):
+            continue
+        check_positive_int(recipe.get("heat"), where, "heat", default=1)
+        check_positive_int(recipe.get("turns"), where, "turns", default=1)
+        melt_input = recipe.get("input") or {}
+        check_resource_dict(melt_input, f"{where}.input")
+        if not melt_input:
+            errors.append(f"{where}: input пуст - плавить нечего")
+        for res in melt_input:
+            if res in molten_ids:
+                errors.append(f"{where}.input: '{res}' - жидкий металл, он бывает только в тигле (переплавку слитка задавайте слитком)")
+        melt_output = recipe.get("output") or {}
+        check_resource_dict(melt_output, f"{where}.output")
+        if not melt_output:
+            errors.append(f"{where}: output пуст - в тигель ничего не стечёт")
+
+    for rid, recipe in (data.get("alloy_recipes") or {}).items():
+        where = check_smeltery_common(recipe, "Рецепт сплава", rid)
+        if not isinstance(recipe, dict):
+            continue
+        check_positive_int(recipe.get("heat"), where, "heat", default=1)
+        if "hidden" in recipe and not isinstance(recipe["hidden"], bool):
+            errors.append(f"{where}.hidden: должен быть true/false")
+        for field_name in ("input", "output"):
+            amounts = recipe.get(field_name) or {}
+            check_resource_dict(amounts, f"{where}.{field_name}")
+            if not amounts:
+                errors.append(f"{where}: {field_name} пуст")
+            for res in amounts:
+                if res in resource_ids and res not in molten_ids:
+                    errors.append(f"{where}.{field_name}: '{res}' не жидкий металл (нет resources.*.molten) - сплав идёт только в тигле")
+
+    cast_pairs: dict = {}
+    for rid, recipe in (data.get("cast_recipes") or {}).items():
+        where = check_smeltery_common(recipe, "Рецепт литья", rid)
+        if not isinstance(recipe, dict):
+            continue
+        check_positive_int(recipe.get("turns"), where, "turns", default=1)
+        check_positive_int(recipe.get("amount"), where, "amount", default=1)
+        form = recipe.get("form")
+        if form not in resource_ids:
+            errors.append(f"{where}.form: '{form}' - не известный ресурс (форма - предмет склада, литьё его не тратит)")
+        elif form in molten_ids:
+            errors.append(f"{where}.form: '{form}' - жидкий металл, формой он быть не может")
+        metal = recipe.get("metal")
+        if metal not in molten_ids:
+            errors.append(f"{where}.metal: '{metal}' не жидкий металл (нужен ресурс с resources.*.molten)")
+        cast_output = recipe.get("output") or {}
+        check_resource_dict(cast_output, f"{where}.output")
+        if not cast_output:
+            errors.append(f"{where}: output пуст - отливке нечего дать")
+        pair = (form, metal)
+        if pair in cast_pairs:
+            errors.append(f"{where}: форма '{form}' с металлом '{metal}' уже есть в рецепте '{cast_pairs[pair]}' - литейный стол не поймёт, какой из них лить")
+        else:
+            cast_pairs[pair] = rid
+
     def check_conditions(conditions, label: str) -> None:
         """Список условий {type, ...} квеста. Пусто/не список - единственная
         обязательная проверка на этом уровне, каждое отдельное условие проверяется
@@ -1367,6 +2085,12 @@ def validate(data: dict) -> list[str]:
                 upgrade_ids = {u.get("id") for u in buildings[c["building"]].get("upgrades", [])}
                 if c["upgrade"] not in upgrade_ids:
                     errors.append(f"{where}: у постройки '{c['building']}' нет улучшения '{c['upgrade']}'")
+            if ctype == "storage_tier_at_least" and "resource" in c and c["resource"] in resource_ids:
+                res_def = next((r for r in resources if r.get("id") == c["resource"]), None)
+                if not res_def or not res_def.get("storage"):
+                    errors.append(f"{where}: у ресурса '{c['resource']}' не настроена вместимость склада (storage)")
+            if "upgrade_type" in c and c["upgrade_type"] not in _BUILDING_UPGRADE_TYPES:
+                errors.append(f"{where}: неизвестный тип улучшения '{c['upgrade_type']}'")
             if "amount" in c and (not isinstance(c["amount"], (int, float)) or c["amount"] <= 0):
                 errors.append(f"{where}: amount должен быть положительным числом")
 
@@ -1402,6 +2126,40 @@ def validate(data: dict) -> list[str]:
             weight = prize.get("weight", 1)
             if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
                 errors.append(f"{pwhere}.weight: должен быть положительным числом (или отсутствовать - тогда 1)")
+
+    # reactor_accidents - барабан аварий реактора (buildings.*.reactor.accident_table
+    # ссылается сюда по id), тот же алгоритм взвешенного розыгрыша, что у loot_cases
+    # (см. game/engine.py:_roll_reactor_accident - буквальная копия _roll_loot_case_prize),
+    # но "result" - не ресурс, а закрытый хардкод-enum (_REACTOR_ACCIDENT_RESULTS).
+    reactor_accidents = data.get("reactor_accidents", {})
+    if not isinstance(reactor_accidents, dict):
+        errors.append("reactor_accidents: ожидался словарь id_таблицы -> {entries}")
+        reactor_accidents = {}
+    else:
+        for tid, table in reactor_accidents.items():
+            record_id(tid, "таблица аварий реактора")
+            check_id("Таблица аварий реактора", tid)
+            where = f"Таблица аварий реактора '{tid}'"
+            if not isinstance(table, dict):
+                errors.append(f"{where}: должна быть объектом {{entries}}")
+                continue
+            entries = table.get("entries")
+            if not isinstance(entries, list) or not entries:
+                errors.append(f"{where}: entries должен быть непустым списком исходов")
+                continue
+            for i, entry in enumerate(entries, start=1):
+                ewhere = f"{where}, исход {i}"
+                if not isinstance(entry, dict):
+                    errors.append(f"{ewhere}: должен быть объектом")
+                    continue
+                result = entry.get("result")
+                if result not in _REACTOR_ACCIDENT_RESULTS:
+                    errors.append(f"{ewhere}.result: должен быть одним из {sorted(_REACTOR_ACCIDENT_RESULTS)} (сейчас: {result!r})")
+                weight = entry.get("weight", 1)
+                if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
+                    errors.append(f"{ewhere}.weight: должен быть положительным числом (или отсутствовать - тогда 1)")
+                if not entry.get("message"):
+                    errors.append(f"{ewhere}: не указано message - игроку должно быть понятно, что произошло")
 
     # eras - имя/главный цвет каждой эры квестбука (ключ - era квеста, как
     # строка). НЕОБЯЗАТЕЛЬНЫЙ раздел: у era, для которой тут нет записи,
@@ -1497,7 +2255,7 @@ def validate(data: dict) -> list[str]:
     if not isinstance(ui_sounds, dict):
         errors.append("ui.sounds должен быть словарём")
     else:
-        for key in ("background_music", "lootbox_open", "button_click"):
+        for key in ("background_music", "lootbox_open", "button_click", "mine_hit"):
             check_sound(ui_sounds.get(key), f"ui.sounds.{key}")
 
     for id_, owners in id_owners.items():

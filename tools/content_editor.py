@@ -36,6 +36,7 @@ import sys
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from pathlib import Path
 
 import webview
@@ -90,12 +91,16 @@ _SOUND_FILENAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.(wav|mp3|ogg)$")
 # Разумный потолок для короткого звукового эффекта - защита от случайной
 # загрузки огромного файла, а не полноценная квота хранилища.
 _MAX_SOUND_BYTES = 5 * 1024 * 1024
-# Тот же файл, что main.py/tools/web_ui.py используют как сейв игрока - редактор
+# Тот же файл, что main.py/tools/web_ui.py используют как автосейв игрока - редактор
 # специально не импортирует game/state.py (см. CLAUDE.md про изоляцию tools/ от
 # game/), поэтому "обнулить прогресс" здесь означает просто удалить файл: при
 # следующем запуске main.py/web_ui.py сами создадут свежий GameState() - им уже
 # известно как обращаться с сохранением, дублировать эту логику тут не нужно.
-SAVE_PATH = ROOT / "save.json"
+SAVE_PATH = ROOT / "saves" / "autosave.json"
+# Старое место автосохранения (до переноса в saves/) - если игрок открывает
+# редактор раньше web_ui.py/main.py (которые сами переносят файл при старте),
+# "Обнулить прогресс" должно почистить и его, а не молча оставить как есть.
+_LEGACY_SAVE_PATH = ROOT / "save.json"
 PORT = 8765
 
 
@@ -159,9 +164,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if self.path == "/api/reset_save":
-            existed = SAVE_PATH.exists()
-            if existed:
+            existed = SAVE_PATH.exists() or _LEGACY_SAVE_PATH.exists()
+            if SAVE_PATH.exists():
                 SAVE_PATH.unlink()
+            if _LEGACY_SAVE_PATH.exists():
+                _LEGACY_SAVE_PATH.unlink()
             self._send_json(200, {"ok": True, "existed": existed})
             return
 
@@ -265,6 +272,12 @@ class Handler(BaseHTTPRequestHandler):
         pass  # тише в консоли - не засоряем вывод обычными запросами
 
 
+class _ThreadedTestHTTPServer(ThreadingMixIn, HTTPServer):
+    # ТОЛЬКО для --server-only (автотесты) - см. tools/web_ui.py:
+    # _ThreadedTestHTTPServer, тот же приём и та же причина (CLAUDE.md).
+    daemon_threads = True
+
+
 def _serve(server: HTTPServer) -> None:
     try:
         server.serve_forever()
@@ -274,8 +287,10 @@ def _serve(server: HTTPServer) -> None:
 
 def main() -> None:
     url = f"http://127.0.0.1:{PORT}/"
+    server_only = "--server-only" in sys.argv
+    server_cls = _ThreadedTestHTTPServer if server_only else HTTPServer
     try:
-        server = HTTPServer(("127.0.0.1", PORT), Handler)
+        server = server_cls(("127.0.0.1", PORT), Handler)
     except OSError:
         _show_error(
             f"Не получилось занять порт {PORT} - возможно, редактор уже запущен в другом окне.\n"
@@ -284,12 +299,23 @@ def main() -> None:
         return
 
     print(f"Редактор контента запущен: {url}")
+
+    if server_only:
+        # Без нативного окна pywebview - для автотестов (Playwright и т.п.),
+        # см. tools/web_ui.py: main() - тот же приём и та же причина (CLAUDE.md).
+        print("Режим без окна: подключайся сам (напр. Playwright) к адресу выше.")
+        _serve(server)
+        print("Остановлено.")
+        return
+
     print("Закрой окно редактора, когда закончишь.")
     # serve_forever() уходит в фоновый поток - webview.start() ниже занимает
     # главный поток сам (см. tools/web_ui.py: main() - тот же приём).
     threading.Thread(target=_serve, args=(server,), daemon=True).start()
 
-    webview.create_window("Редактор контента игры", url, width=1400, height=900, min_size=(1024, 700))
+    webview.create_window(
+        "Редактор контента игры", url, width=1400, height=900, min_size=(1024, 700), maximized=True
+    )
     webview.start()
     server.shutdown()
     print("Остановлено.")

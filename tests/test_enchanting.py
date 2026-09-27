@@ -150,12 +150,57 @@ class EnchantToolTests(FixtureTestCase):
         self.assertTrue(result.ok)
         self.assertNotIn("pickaxe", s.tool_enchantments)
 
+    def test_failure_keeps_enchantments_when_strip_on_fail_is_disabled_in_content(self):
+        # strip_on_fail - настройка КОНТЕНТА (buildings.*.enchanting_table), не
+        # игрока, см. engine.enchanting_table_strip_on_fail.
+        s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
+                       tool_enchantments={"pickaxe": {"test_luck": 2, "test_durability": 1}})
+        picks = [
+            {"enchant_id": "test_luck", "level": 1, "value": 2.0},
+            {"enchant_id": "test_luck", "level": 2, "value": 3.0},
+            {"enchant_id": "test_durability", "level": 1, "value": 2.0},
+        ]
+        with mock.patch.dict(engine.BUILDINGS["ench_table"]["enchanting_table"], {"strip_on_fail": False}), \
+                mock.patch("random.choice", side_effect=picks):
+            result = engine.enchant_tool(s, "pickaxe")
+        self.assertFalse(result.enchant["success"])
+        # Щадящий режим - провал ничего не даёт, но и ничего не отбирает.
+        self.assertEqual(s.tool_enchantments["pickaxe"], {"test_luck": 2, "test_durability": 1})
+        # Цена попытки всё равно списывается - смягчён только сам исход провала.
+        self.assertEqual(s.resources["raw_a"], 4)
+
+    def test_success_still_takes_the_max_level_when_strip_on_fail_is_disabled_in_content(self):
+        # Щадящий режим не трогает ветку удачи - "сильнейшее побеждает" по-прежнему
+        # действует между текущим и выпавшим уровнем.
+        s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
+                       tool_enchantments={"pickaxe": {"test_luck": 2}})
+        pick = {"enchant_id": "test_luck", "level": 1, "value": 2.0}
+        with mock.patch.dict(engine.BUILDINGS["ench_table"]["enchanting_table"], {"strip_on_fail": False}), \
+                mock.patch("random.choice", return_value=pick):
+            result = engine.enchant_tool(s, "pickaxe")
+        self.assertTrue(result.enchant["success"])
+        self.assertEqual(s.tool_enchantments["pickaxe"], {"test_luck": 2})
+
     def test_does_not_advance_the_turn(self):
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5}, turn=7)
         pick = {"enchant_id": "test_luck", "level": 1, "value": 2.0}
         with mock.patch("random.choice", return_value=pick):
             engine.enchant_tool(s, "pickaxe")
         self.assertEqual(s.turn, 7)
+
+
+class EnchantingTableStripOnFailContentTests(FixtureTestCase):
+    def test_defaults_to_true_when_the_building_config_omits_the_key(self):
+        s = GameState(buildings={"ench_table": 1})
+        self.assertTrue(engine.enchanting_table_strip_on_fail(s))
+
+    def test_true_when_no_table_is_working_at_all(self):
+        self.assertTrue(engine.enchanting_table_strip_on_fail(GameState()))
+
+    def test_reads_false_from_the_building_config(self):
+        s = GameState(buildings={"ench_table": 1})
+        with mock.patch.dict(engine.BUILDINGS["ench_table"]["enchanting_table"], {"strip_on_fail": False}):
+            self.assertFalse(engine.enchanting_table_strip_on_fail(s))
 
 
 class DurabilityEnchantTests(FixtureTestCase):

@@ -369,6 +369,62 @@ class QuestValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertEqual(errors, [])
 
+    def test_accepts_building_upgrade_level_at_least_with_known_upgrade(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "building_upgrade_level_at_least", "building": "apiary", "upgrade": "apiary_slot_bonus", "amount": 2}
+        ]
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_rejects_building_upgrade_level_at_least_referencing_unknown_upgrade(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        any_building = next(iter(d["buildings"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "building_upgrade_level_at_least", "building": any_building, "upgrade": "no_such_upgrade", "amount": 1}
+        ]
+        errors = cv.validate(d)
+        self.assertTrue(any("no_such_upgrade" in e for e in errors))
+
+    def test_accepts_building_upgrade_type_purchased_any_with_known_type(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "building_upgrade_type_purchased_any", "upgrade_type": "autocraft"}
+        ]
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_rejects_building_upgrade_type_purchased_any_with_unknown_type(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "building_upgrade_type_purchased_any", "upgrade_type": "no_such_type"}
+        ]
+        errors = cv.validate(d)
+        self.assertTrue(any("no_such_type" in e for e in errors))
+
+    def test_accepts_storage_tier_at_least_with_resource_that_has_storage(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "storage_tier_at_least", "resource": "limited_res", "amount": 1}
+        ]
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_rejects_storage_tier_at_least_referencing_resource_without_storage(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        no_storage_resource = next(r["id"] for r in d["resources"] if not r.get("storage"))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "storage_tier_at_least", "resource": no_storage_resource, "amount": 1}
+        ]
+        errors = cv.validate(d)
+        self.assertTrue(any("не настроена вместимость склада" in e for e in errors))
+
     def test_rejects_quest_reward_case_referencing_unknown_case(self):
         d = copy.deepcopy(self.data)
         any_q = next(iter(d["quests"]))
@@ -578,6 +634,32 @@ class LocationsTimeAndTechDescriptionTests(unittest.TestCase):
         }
         errors = cv.validate(d)
         self.assertTrue(any("неизвестный ресурс" in e for e in errors))
+
+    def test_accepts_infinite_storage_tier_without_capacity_add(self):
+        # infinite: True - тир снимает ограничение склада совсем вместо capacity_add
+        # (game/engine.py:storage_capacity) - capacity_add ему не нужен.
+        d = copy.deepcopy(self.data)
+        d["resources"][0]["storage"] = {
+            "base_capacity": 10, "tiers": [{"infinite": True, "cost": {}, "requires_tech": None}],
+        }
+        errors = cv.validate(d)
+        self.assertEqual(errors, [])
+
+    def test_rejects_non_boolean_infinite_flag(self):
+        d = copy.deepcopy(self.data)
+        d["resources"][0]["storage"] = {
+            "base_capacity": 10, "tiers": [{"infinite": "yes", "capacity_add": 5, "cost": {}}],
+        }
+        errors = cv.validate(d)
+        self.assertTrue(any("infinite" in e for e in errors))
+
+    def test_rejects_non_infinite_tier_missing_capacity_add(self):
+        d = copy.deepcopy(self.data)
+        d["resources"][0]["storage"] = {
+            "base_capacity": 10, "tiers": [{"infinite": False, "cost": {}}],
+        }
+        errors = cv.validate(d)
+        self.assertTrue(any("capacity_add" in e for e in errors))
 
     def test_rejects_missing_shaft_location(self):
         d = copy.deepcopy(self.data)
@@ -856,13 +938,47 @@ class AutocraftAndComputeValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("unlocks_autocraft" in e for e in errors))
 
-    def test_accepts_valid_unlocks_autocraft(self):
+    def test_unlocks_autocraft_is_obsolete(self):
         d = copy.deepcopy(self.data)
         any_building = next(iter(d["buildings"]))
-        any_resource = d["resources"][0]["id"]
-        d["buildings"][any_building]["unlocks_autocraft"] = [any_resource]
+        d["buildings"][any_building]["unlocks_autocraft"] = []
+        self.assertTrue(any("unlocks_autocraft устарело" in e for e in cv.validate(d)))
+
+    def test_assembler_needs_a_known_location_and_a_positive_or_null_limit(self):
+        d = copy.deepcopy(self.data)
+        any_building = next(iter(d["buildings"]))
+        d["buildings"][any_building]["autocraft_assembler"] = {"location": "grid_loc", "per_turn": None}
+        self.assertEqual(cv.validate(copy.deepcopy(d)), [])
+        d["buildings"][any_building]["autocraft_assembler"] = {"location": "nowhere", "per_turn": 0}
         errors = cv.validate(d)
-        self.assertEqual(errors, [])
+        self.assertTrue(any("неизвестная локация 'nowhere'" in e for e in errors), errors)
+        self.assertTrue(any("per_turn" in e for e in errors), errors)
+
+    def test_ritual_assembler_targets_an_altar_building(self):
+        d = copy.deepcopy(self.data)
+        any_building = next(b for b in d["buildings"] if b != "ritual_altar")
+        d["buildings"][any_building]["autocraft_assembler"] = {"building": "ritual_altar", "per_turn": 1}
+        self.assertEqual(cv.validate(copy.deepcopy(d)), [])
+        d["buildings"][any_building]["autocraft_assembler"] = {"building": any_building, "per_turn": 1}
+        self.assertTrue(any("не ритуальный алтарь" in e for e in cv.validate(copy.deepcopy(d))))
+        d["buildings"][any_building]["autocraft_assembler"] = {"building": "nowhere", "per_turn": 1}
+        self.assertTrue(any("неизвестная постройка 'nowhere'" in e for e in cv.validate(copy.deepcopy(d))))
+
+    def test_assembler_needs_exactly_one_target(self):
+        d = copy.deepcopy(self.data)
+        any_building = next(iter(d["buildings"]))
+        for spec in ({"per_turn": 1}, {"location": "grid_loc", "building": "ritual_altar", "per_turn": 1}):
+            d["buildings"][any_building]["autocraft_assembler"] = spec
+            self.assertTrue(any("ровно одно из полей" in e for e in cv.validate(copy.deepcopy(d))), spec)
+
+    def test_autocraft_upgrade_only_on_a_mechanism_or_converter(self):
+        d = copy.deepcopy(self.data)
+        upgrade = {"id": "auto", "name": "Автоматизация", "description": ".", "type": "autocraft",
+                   "value": 1, "requires_tech": None, "cost": {}}
+        d["buildings"]["mechanism_a"].setdefault("upgrades", []).append(dict(upgrade))
+        self.assertEqual(cv.validate(copy.deepcopy(d)), [])
+        d["buildings"]["gen"].setdefault("upgrades", []).append(dict(upgrade))
+        self.assertTrue(any("autocraft имеет смысл только" in e for e in cv.validate(d)))
 
     def test_rejects_energy_converter_with_bad_max_energy_per_turn(self):
         d = copy.deepcopy(self.data)
@@ -899,13 +1015,13 @@ class AutocraftAndComputeValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("autocraft_slots" in e for e in errors))
 
-    def test_accepts_valid_autocraft_speed_and_slots(self):
+    def test_autocraft_speed_is_obsolete_but_slots_are_fine(self):
         d = copy.deepcopy(self.data)
         any_building = next(iter(d["buildings"]))
-        d["buildings"][any_building]["autocraft_speed"] = 8
         d["buildings"][any_building]["autocraft_slots"] = 1
-        errors = cv.validate(d)
-        self.assertEqual(errors, [])
+        self.assertEqual(cv.validate(copy.deepcopy(d)), [])
+        d["buildings"][any_building]["autocraft_speed"] = 8
+        self.assertTrue(any("autocraft_speed устарело" in e for e in cv.validate(d)))
 
     def test_rejects_non_positive_max_count(self):
         d = copy.deepcopy(self.data)
@@ -2020,6 +2136,20 @@ class CraftingPatternValidationTests(unittest.TestCase):
                 d["locations"][self.LOC]["crafting"]["width"] = width
                 errors = cv.validate(d)
                 self.assertTrue(any("crafting.width" in e for e in errors))
+
+    def test_accepts_batch_flag(self):
+        d = copy.deepcopy(self.data)
+        d["locations"][self.LOC]["crafting"]["batch"] = True
+        errors = cv.validate(d)
+        self.assertFalse(any("crafting.batch" in e for e in errors))
+
+    def test_rejects_non_boolean_batch_flag(self):
+        for value in ("yes", 1, None):
+            with self.subTest(value=value):
+                d = copy.deepcopy(self.data)
+                d["locations"][self.LOC]["crafting"]["batch"] = value
+                errors = cv.validate(d)
+                self.assertTrue(any("crafting.batch" in e for e in errors))
 
     def test_rejects_crafting_that_is_not_an_object(self):
         d = copy.deepcopy(self.data)

@@ -42,16 +42,22 @@ sys.path.insert(0, str(ROOT))
 
 from game import engine  # noqa: E402
 from game.content import (  # noqa: E402
-    BREAKDOWN_TYPES, BUILDINGS, COMBAT_SETTINGS, DEFAULT_ACTION_DELAY_MS,
+    ALLOY_RECIPES, BREAKDOWN_TYPES, BUILDINGS, CAST_RECIPES, COMBAT_SETTINGS, DEFAULT_ACTION_DELAY_MS,
     ENCHANTMENTS, ENERGY_RECIPES, ERAS, GENETIC_TRAITS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
-    MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, RESOURCE_ICONS, RESOURCE_NAMES, RESOURCE_ORDER,
-    RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TOOLS, UI_SOUNDS,
+    MELT_RECIPES, MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, RESOURCE_ICONS, RESOURCE_MOLTEN,
+    RESOURCE_NAMES, RESOURCE_ORDER, RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES,
+    TECHS, TOOLS, UI_SOUNDS,
 )
 from game.state import GameState  # noqa: E402
 
 # В exe-сборке ROOT указывает внутрь распакованной папки сборки - сохранения
 # должны лежать РЯДОМ С EXE (портативная папка), а не там же, где content.json/html.
-if getattr(sys, "frozen", False):
+# GAME_SAVE_ROOT - песочница вместо настоящей папки: её выставляет tests/fixtures.py,
+# иначе тест, дошедший до save_state (например, через craft_grid_view -> run_turn),
+# перезаписывал настоящий saves/autosave.json игрока.
+if os.environ.get("GAME_SAVE_ROOT"):
+    _SAVE_ROOT = Path(os.environ["GAME_SAVE_ROOT"])
+elif getattr(sys, "frozen", False):
     _SAVE_ROOT = Path(sys.executable).resolve().parent
 else:
     _SAVE_ROOT = ROOT
@@ -139,7 +145,9 @@ def _migrate_legacy_save() -> None:
 def load_state() -> GameState:
     _migrate_legacy_save()
     if SAVE_PATH.exists():
-        return GameState.load(str(SAVE_PATH))
+        state = GameState.load(str(SAVE_PATH))
+        engine.drop_removed_content(state)
+        return state
     return GameState()
 
 
@@ -240,21 +248,64 @@ def action_priority_view(state: GameState) -> list[dict]:
     переопределить приоритет по умолчанию (content.json) под своё сохранение.
     Показываются ВСЕ такие действия независимо от того, есть ли у ресурса сейчас
     конкурирующий рецепт - список маленький, а видеть будущие конфликты заранее
-    удобнее, чем гадать, почему приоритет "ни на что не влияет"."""
+    удобнее, чем гадать, почему приоритет "ни на что не влияет".
+
+    Рецепты преобразователя - тем же списком, id = ключ "energy_recipe:<id>" (kind
+    "energy_recipe"): приоритет выше обычного рецепта ресурса делает преобразователь
+    основным путём (engine.converter_preferred_resources). Так же репликация -
+    "replicator:<ресурс>" (kind "replicator", engine.replicator_preferred_resources).
+    "is_fallback" - рецепт сейчас запасной путь ресурса: берётся, если основной не
+    сможет (engine._order_route)."""
     recipe = engine.resource_recipe(state)
+    preferred = engine.converter_preferred_resources(state, recipe)
+    # Репликатор основным путём (приоритет "replicator:<ресурс>" выше остальных) делает
+    # запасными и обычный рецепт, и преобразователь этого ресурса.
+    replicated = engine.replicator_preferred_resources(state, recipe)
     result = []
     for aid, a in MANUAL_ACTIONS.items():
         if not a["cost"]:
             continue
         default_priority = a.get("priority", 0)
         result.append({
-            "id": aid, "name": a["name"],
+            "id": aid, "name": a["name"], "kind": "manual_action",
             "gain": [{"id": r, "name": RESOURCE_NAMES[r]} for r in a["gain"]],
             "priority": engine.action_priority(state, aid),
             "default_priority": default_priority,
             "overridden": aid in state.action_priority,
-            "is_active_recipe": any(recipe.get(r) == aid for r in a["gain"]),
+            "is_active_recipe": any(
+                recipe.get(r) == aid and r not in preferred and r not in replicated for r in a["gain"]
+            ),
+            "is_fallback": any(recipe.get(r) == aid and (r in preferred or r in replicated) for r in a["gain"]),
         })
+    for rid, r in ENERGY_RECIPES.items():
+        key = engine.grid_recipe_key("energy_recipe", rid)
+        own = [res for res in r.get("produces", {}) if engine.ENERGY_RECIPE_FOR_RESOURCE.get(res) == rid]
+        result.append({
+            "id": key, "name": r["name"], "kind": "energy_recipe",
+            "gain": [{"id": res, "name": RESOURCE_NAMES[res]} for res in r.get("produces", {})],
+            "priority": engine.action_priority(state, key),
+            "default_priority": 0,
+            "overridden": key in state.action_priority,
+            "is_active_recipe": any((res in preferred or res not in recipe) and res not in replicated for res in own),
+            "is_fallback": any((res in recipe and res not in preferred) or res in replicated for res in own),
+        })
+    # Репликация (resources.*.replication_cost) - только если в игре есть репликатор.
+    matters = {(b.get("replicator") or {}).get("matter") for b in BUILDINGS.values() if b.get("replicator")}
+    if matters:
+        for res in engine.replicable_resources():
+            if res in matters:
+                continue
+            key = engine.grid_recipe_key("replicator", res)
+            has_other = res in recipe or res in engine.ENERGY_RECIPE_FOR_RESOURCE
+            result.append({
+                "id": key, "name": f"Репликация: {RESOURCE_NAMES[res]}", "kind": "replicator",
+                "gain": [{"id": res, "name": RESOURCE_NAMES[res]}],
+                "priority": engine.action_priority(state, key),
+                "default_priority": 0,
+                "overridden": key in state.action_priority,
+                "is_active_recipe": res in replicated or not has_other,
+                "is_fallback": has_other and res not in replicated,
+            })
     return result
 
 
@@ -479,8 +530,14 @@ def converter_view(state: GameState) -> list[dict]:
     ДРУГИМИ рецептами, или подходящего типа вообще нет построенного)."""
     capacity = engine.energy_converter_capacity(state)
     busy = len(state.energy_jobs)
+    # Рецепты с узором, когда у преобразователя есть сетка, собираются только
+    # раскладкой в его модалке (crafting_view) - карточкой их не показываем, та
+    # же граница, что у сеточных ручных действий в build_view.
+    grid_recipes = set(engine.grid_energy_recipes_at(engine.CONVERTER_LOCATION_ID, state))
     items = []
     for rid in engine.available_energy_recipes(state):
+        if rid in grid_recipes:
+            continue
         recipe = ENERGY_RECIPES[rid]
         machine = recipe.get("machine")
         if machine:
@@ -1081,8 +1138,290 @@ def ritual_altars_view(state: GameState) -> list[dict]:
     return result
 
 
+def replicator_view(state: GameState, rates: dict | None = None) -> dict | None:
+    """Модалка репликатора (web_ui.html: openReplicatorModal): построенные
+    репликаторы (buildings.*.replicator) с лимитом материи за ход и слотами, запас
+    материи и её приток за ход (генераторы), каталог ресурсов с ценой репликации
+    (resources.*.replication_cost) и идущие репликации. None - в контенте нет ни
+    одного репликатора. Материя - у первого построенного типа (разные типы с разной
+    материей - экзотика контента, каталог у них общий)."""
+    types = [bid for bid, b in BUILDINGS.items() if b.get("replicator")]
+    if not types:
+        return None
+    machines = []
+    for bid in types:
+        count = state.buildings.get(bid, 0)
+        if count <= 0:
+            continue
+        per_turn = engine.replicator_max_matter_per_turn(state, bid)
+        machines.append({
+            "id": bid, "name": BUILDINGS[bid]["name"], "count": count,
+            "working": engine.working_count(state, bid),
+            "slots": engine.replicator_slot_capacity(state, bid),
+            "busy": sum(1 for j in state.replicator_jobs if j["building_id"] == bid),
+            "per_turn": None if per_turn is None else engine._format_amount(per_turn),
+            "automated": engine.has_autocraft_upgrade(state, bid),
+            "upgrades": building_upgrades_view(bid, state),
+        })
+    matter = engine.replicator_matter(machines[0]["id"] if machines else types[0])
+    catalog = []
+    for rid in engine.replicable_resources():
+        if rid == matter:
+            continue
+        free = engine.replication_storage_free(state, rid)
+        catalog.append({
+            "resource_id": rid, "name": RESOURCE_NAMES[rid],
+            "price": engine.RESOURCE_REPLICATION_COST[rid],
+            "have": state.resources.get(rid, 0),
+            # сколько ещё влезет на склад (null - без ограничения), см. engine.replicate
+            "storage_free": None if free is None else max(0, engine._format_amount(free)),
+        })
+    return {
+        "matter": {
+            "id": matter, "name": RESOURCE_NAMES.get(matter, matter),
+            "amount": engine._format_amount(state.resources.get(matter, 0)),
+            "rate": engine._format_amount((rates or {}).get(matter, 0)),
+            "fractional": bool(engine.RESOURCE_FRACTIONAL.get(matter, False)),
+        },
+        "machines": machines,
+        "free_slot": engine._pick_replicator_with_free_slot(state) is not None,
+        "catalog": catalog,
+        "jobs": engine.replicator_jobs_view(state),
+    }
+
+
+def _amounts_view(amounts: dict, have: dict | None = None) -> list[dict]:
+    """[{id, name, amount, molten, have?}] - ингредиенты/выход рецепта плавильни."""
+    out = []
+    for rid, amount in amounts.items():
+        item = {"id": rid, "name": RESOURCE_NAMES.get(rid, rid), "amount": amount, "molten": engine.is_molten(rid)}
+        if have is not None:
+            item["have"] = engine._format_amount(have.get(rid, 0))
+        out.append(item)
+    return out
+
+
+def _tank_layers(tank: dict) -> list[dict]:
+    """Содержимое тигля слоями СНИЗУ ВВЕРХ: металлы по плотности (тяжёлый тонет), шлак -
+    всегда сверху (всплывает). color/density - из resources.*.molten."""
+    layers = [
+        {
+            "id": rid, "name": RESOURCE_NAMES.get(rid, rid), "amount": amount, "molten": engine.is_molten(rid),
+            "color": RESOURCE_MOLTEN.get(rid, {}).get("color"),
+            "density": RESOURCE_MOLTEN.get(rid, {}).get("density", 0),
+        }
+        for rid, amount in tank.items() if amount > 0
+    ]
+    layers.sort(key=lambda l: (not l["molten"], -l["density"]))
+    return layers
+
+
+def smelteries_view(state: GameState) -> list[dict]:
+    """Построенные плавильни (buildings.*.smeltery) для модалки «Плавильня» (web_ui.html:
+    openSmelteryModal): слоты плавки, слои тигля, отливка на литейном столе и все рецепты,
+    доступные ИМЕННО этой плавильне (жар, технология) - каждый с reason, почему прямо
+    сейчас его не выполнить (null - можно), теми же проверками, что у самого действия
+    (engine.*_block_reason). bank - склад для клика «в слот»: melt_recipe - рецепт, которым
+    эта плавильня расплавит ресурс (самый «горячий» из доступных), null - не плавится."""
+    result = []
+    for bid, b in BUILDINGS.items():
+        if not b.get("smeltery") or state.buildings.get(bid, 0) <= 0:
+            continue
+        sm = state.smelteries.get(bid) or {"slots": [], "tank": {}, "cast": None}
+        slot_cap = engine.smeltery_slot_capacity(state, bid)
+        tank_cap = engine.smeltery_tank_capacity(state, bid)
+        used = engine.smeltery_tank_used(state, bid)
+        slots = []
+        for i in range(max(slot_cap, len(sm["slots"]))):
+            slot = sm["slots"][i] if i < len(sm["slots"]) else None
+            if slot is None:
+                if i < slot_cap:
+                    slots.append(None)
+                continue
+            recipe = MELT_RECIPES.get(slot["recipe_id"], {})
+            turns = recipe.get("turns", 1)
+            main = engine.melt_main_input(recipe) or next(iter(slot.get("cost") or {}), None)
+            need = sum((recipe.get("output") or {}).values())
+            slots.append({
+                "index": i, "recipe_id": slot["recipe_id"], "name": recipe.get("name", slot["recipe_id"]),
+                "main_id": main, "main_name": RESOURCE_NAMES.get(main, main),
+                "main_amount": (slot.get("cost") or {}).get(main, 1),
+                "turns_done": slot["turns_done"], "turns_total": turns,
+                # доплавилось, но не влезает в тигель; fits - уже влезет, стечёт в след. ход
+                "waiting": slot["turns_done"] >= turns, "need": need, "fits": used + need <= tank_cap,
+                # слот за пределами ёмкости (копия плавильни сломалась) - стоит
+                "paused": i >= slot_cap,
+            })
+        cast = sm.get("cast")
+        cast_view = None
+        if cast:
+            recipe = CAST_RECIPES.get(cast["recipe_id"], {})
+            cast_view = {
+                "recipe_id": cast["recipe_id"], "name": recipe.get("name", cast["recipe_id"]),
+                "form_id": recipe.get("form"), "metal_id": recipe.get("metal"),
+                "output": _amounts_view(recipe.get("output", {})),
+                "turns_done": cast["turns_done"], "turns_total": cast["turns_total"],
+            }
+        melt = []
+        for rid, recipe in MELT_RECIPES.items():
+            if not engine.is_smeltery_recipe_available(state, "melt", rid, bid):
+                continue
+            melt.append({
+                "key": engine.smeltery_recipe_key("melt", rid), "id": rid, "name": recipe["name"],
+                "main_id": engine.melt_main_input(recipe),
+                "input": _amounts_view(recipe.get("input", {}), state.resources),
+                "output": _amounts_view(recipe.get("output", {})),
+                "turns": recipe.get("turns", 1), "heat": recipe.get("heat", 1),
+                "reason": engine.melt_block_reason(state, bid, rid),
+            })
+        alloys = []
+        for rid, recipe in ALLOY_RECIPES.items():
+            if not engine.is_smeltery_recipe_available(state, "alloy", rid, bid):
+                continue
+            alloys.append({
+                "key": engine.smeltery_recipe_key("alloy", rid), "id": rid, "name": recipe["name"],
+                # пропорция скрыта до первой пробы (клиент рисует «???»)
+                "hidden": bool(recipe.get("hidden")) and rid not in state.discovered_alloys,
+                "input": _amounts_view(recipe.get("input", {}), sm["tank"]),
+                "output": _amounts_view(recipe.get("output", {})),
+                "batches": min(
+                    (sm["tank"].get(r, 0) // a for r, a in recipe.get("input", {}).items() if a > 0), default=0,
+                ),
+                "reason": engine.alloy_block_reason(state, bid, rid),
+            })
+        casts = []
+        for rid, recipe in CAST_RECIPES.items():
+            if not engine.is_smeltery_recipe_available(state, "cast", rid, bid):
+                continue
+            form = recipe.get("form")
+            casts.append({
+                "key": engine.smeltery_recipe_key("cast", rid), "id": rid, "name": recipe["name"],
+                "form_id": form, "form_name": RESOURCE_NAMES.get(form, form),
+                "form_have": state.resources.get(form, 0),
+                "metal_id": recipe["metal"], "metal_name": RESOURCE_NAMES.get(recipe["metal"], recipe["metal"]),
+                "amount": recipe.get("amount", 1), "output": _amounts_view(recipe.get("output", {})),
+                "turns": recipe.get("turns", 1), "reason": engine.cast_block_reason(state, bid, rid),
+            })
+        forms = []
+        for c in casts:
+            if c["form_id"] and all(f["id"] != c["form_id"] for f in forms):
+                forms.append({"id": c["form_id"], "name": c["form_name"], "have": c["form_have"]})
+        bank = []
+        for rid in RESOURCE_ORDER:
+            amount = state.resources.get(rid, 0)
+            if amount <= 0 or rid == engine.ENERGY_RESOURCE_ID:
+                continue
+            bank.append({
+                "id": rid, "name": RESOURCE_NAMES[rid], "amount": engine._format_amount(amount),
+                "melt_recipe": engine.best_melt_recipe_for(state, bid, rid),
+            })
+        result.append({
+            "building_id": bid, "name": b["name"], "count": state.buildings.get(bid, 0),
+            "working": engine.working_count(state, bid), "heat": engine.smeltery_heat(state, bid),
+            "slot_capacity": slot_cap, "capacity": tank_cap, "used": used,
+            "slots": slots, "tank": _tank_layers(sm["tank"]),
+            "dross": sum(a for r, a in sm["tank"].items() if not engine.is_molten(r)),
+            "cast": cast_view, "melt_recipes": melt, "alloy_recipes": alloys, "cast_recipes": casts,
+            "forms": forms, "bank": bank,
+        })
+    return result
+
+
+def pinned_recipes_view(state: GameState, crafting: list[dict], smelteries: list[dict]) -> list[dict]:
+    """Плитки левой колонки «Закреплённые» (web_ui.html: globalPinnedRecipes/
+    craftGridPinnedTile) в модалках механизмов, плавильни и склада - по одной на
+    state.pinned_recipes, в порядке закрепления. action_id - ключ закрепления (им же
+    клиент находит способ в справочнике), gain[0] - ресурс, чью карточку открывает
+    клик. enough: True/False - точка «хватает сырья», None - точки нет (у способа
+    нет разовой цены: постройка, шахта, лут...). Ключ, который контент больше не
+    знает, пропускается (открепить такой можно, но показывать нечего)."""
+    grid = {r["action_id"]: dict(r, location_id=e["location_id"], location_name=e["name"])
+            for e in crafting for r in e["recipes"]}
+    sources_cache: dict[str, list[dict]] = {}
+    out = []
+    for key in state.pinned_recipes:
+        if key in grid:
+            out.append(grid[key])
+            continue
+        smelt = engine.parse_smeltery_recipe_key(key)
+        source = engine.parse_source_pin_key(key)
+        if smelt is not None:
+            tile = _smeltery_pinned_tile(key, smelt, smelteries)
+        elif source is not None:
+            tile = _source_pinned_tile(state, key, source[0], sources_cache)
+        else:
+            tile = _locked_grid_pinned_tile(key)
+        if tile is not None:
+            out.append(tile)
+    return out
+
+
+def _smeltery_pinned_tile(key: str, parsed: tuple[str, str], smelteries: list[dict]) -> dict | None:
+    """Рецепт плавильни (ключ engine.smeltery_recipe_key). enough - хоть одна
+    построенная плавильня может выполнить его прямо сейчас."""
+    kind, rid = parsed
+    recipe = engine.smeltery_recipes(kind).get(rid)
+    if recipe is None:
+        return None
+    able = [s for s in smelteries if any(r["key"] == key for r in s[f"{kind}_recipes"])]
+    ready = [s for s in able if next(r for r in s[f"{kind}_recipes"] if r["key"] == key)["reason"] is None]
+    types = [bid for bid in BUILDINGS if engine.is_smeltery(bid)]
+    location_name = (able[0]["name"] if able else BUILDINGS[types[0]]["name"] if types else "Плавильня")
+    return {
+        "action_id": key, "kind": kind, "name": recipe["name"], "location_name": location_name,
+        "gain": _amounts_view(recipe.get("output") or {}), "enough": bool(ready), "pinned": True,
+    }
+
+
+def _locked_grid_pinned_tile(key: str) -> dict | None:
+    """Сеточный рецепт, которого нет в crafting_view (не изучена технология, механизм
+    не открыт) - по контенту, без реальной цены. Сырьё к нему «не хватает» заведомо."""
+    kind, target_id = engine.parse_grid_recipe_key(key)
+    if kind == "energy_recipe":
+        recipe = ENERGY_RECIPES.get(target_id)
+        location_id = engine.CONVERTER_LOCATION_ID
+        gain = manual_action_gain_list(recipe.get("produces", {}), {}) if recipe else []
+    elif kind == "manual_action":
+        recipe = MANUAL_ACTIONS.get(target_id)
+        location_id = recipe.get("location") if recipe else None
+        gain = manual_action_gain_list(recipe.get("gain", {}), recipe.get("gain_chance", {})) if recipe else []
+    else:
+        return None
+    if recipe is None or not recipe.get("pattern"):
+        return None
+    return {
+        "action_id": key, "kind": kind, "name": recipe["name"], "location_id": location_id,
+        "location_name": LOCATIONS.get(location_id, {}).get("name", location_id),
+        "gain": gain, "enough": False, "pinned": True, "locked": True,
+    }
+
+
+# Виды источников, у которых cost - разовая цена за раз (точка «хватает сырья» на
+# плитке). У постройки cost - это consumes за ход, у остальных цены нет вовсе.
+_SOURCE_PIN_COST_KINDS = {"manual", "spawn", "energy", "ritual", "replicator"}
+
+
+def _source_pinned_tile(state: GameState, key: str, resource_id: str, cache: dict) -> dict | None:
+    """Любой другой способ из справочника (ключ engine.source_pin_key)."""
+    if resource_id not in RESOURCE_NAMES:
+        return None
+    if resource_id not in cache:
+        cache[resource_id] = resource_sources(resource_id)
+    src = next((s for s in cache[resource_id] if s["pin_key"] == key), None)
+    if src is None:
+        return None
+    enough = None
+    if src["kind"] in _SOURCE_PIN_COST_KINDS and src.get("cost"):
+        enough = all(state.resources.get(c["id"], 0) >= c["amount"] for c in src["cost"])
+    return {
+        "action_id": key, "kind": "source", "source_kind": src["kind"], "name": src["name"],
+        "location_name": None, "gain": [{"id": resource_id, "name": RESOURCE_NAMES[resource_id]}],
+        "enough": enough, "pinned": True,
+    }
+
+
 def _automation_target_name(kind: str, target_id: str) -> str:
-    names = MANUAL_ACTIONS if kind == "manual_action" else ENERGY_RECIPES
+    names = {"manual_action": MANUAL_ACTIONS, "energy_recipe": ENERGY_RECIPES, "ritual_recipe": RITUAL_RECIPES}.get(kind, {})
     return names.get(target_id, {}).get("name", target_id)
 
 
@@ -1135,7 +1474,15 @@ def storage_view(state: GameState) -> list[dict]:
     они поштучно живут в state.creatures со своим геномом и показаны в модалке
     "Особи"/банке особей, а не на складе. "jump_to" - см. _recipe_board_jump:
     плитка САМОГО ресурса (не только его next_cost) кликабельна, пока работает
-    RECIPE_BOARD_BUILDING_ID и у ресурса есть рецепт."""
+    RECIPE_BOARD_BUILDING_ID и у ресурса есть рецепт.
+
+    "capacity": None означает ДВЕ разные вещи с одинаковым видом в JSON - у
+    ресурса либо вообще нет storage (тогда max_tier == 0), либо storage есть, но
+    куплен infinite-тир (см. engine.storage_capacity) - панель их и не различает,
+    рисует как одно и то же "без ограничений". "next_infinite" - следующий ещё не
+    купленный тир снимет ограничение СОВСЕМ вместо прибавки next_capacity_add
+    (тогда next_capacity_add может быть None - см. content_editor: чекбокс
+    "Делает вместимость безграничной")."""
     upgradable = set(engine.upgradable_storage(state))
     jump = _recipe_board_jump(state)
     items = []
@@ -1160,7 +1507,8 @@ def storage_view(state: GameState) -> list[dict]:
             "capacity": engine.storage_capacity(state, resource_id),
             "tier": state.storage_tier.get(resource_id, 0),
             "max_tier": len(config["tiers"]),
-            "next_capacity_add": next_info["capacity_add"] if next_info else None,
+            "next_capacity_add": next_info.get("capacity_add") if next_info else None,
+            "next_infinite": bool(next_info and next_info.get("infinite")),
             "next_cost": cost_list(next_info["cost"], state) if next_info else None,
             "next_tech_name": TECHS[tech_missing]["name"] if tech_missing else None,
             "can_upgrade": resource_id in upgradable,
@@ -1170,25 +1518,45 @@ def storage_view(state: GameState) -> list[dict]:
 
 
 def autocraft_view(state: GameState) -> dict:
-    """Данные для панели "Автокрафт": пропускная способность (скорость) и число
-    слотов автокрафта, активные фоновые задачи (с именем ресурса и прогрессом) и
-    действия, ждущие, пока эти задачи докрафтят нужное."""
-    jobs = []
-    for job in engine.autocraft_jobs_view(state):
-        jobs.append({
-            "resource_id": job["resource_id"],
-            "resource_name": RESOURCE_NAMES[job["resource_id"]],
-            "fires_done": job["fires_done"],
-            "fires_total": job["fires_total"],
-            "eta_turns": job["eta_turns"],
+    """Данные для панели «Заказы»: слоты заказов процессоров и сами заказы (шаги с
+    прогрессом, что лежит в резерве, причина простоя, ждёт ли энергию) - см.
+    engine.orders_view/_place_order."""
+    orders = []
+    for order in engine.orders_view(state):
+        orders.append({
+            **order,
+            "steps": [
+                {**step, "name": (
+                    # заказ «рецепт преобразователя ×N» считает партии - подписываем рецептом
+                    ENERGY_RECIPES[step["batches_of"]]["name"] if step.get("batches_of") in ENERGY_RECIPES
+                    else f"Репликация: {RESOURCE_NAMES.get(step['resource_id'], step['resource_id'])}"
+                    if step["kind"] == "replicate"
+                    else RESOURCE_NAMES.get(step["resource_id"], step["resource_id"])
+                )}
+                for step in order["steps"]
+            ],
+            "reserved": [
+                {"id": rid, "name": RESOURCE_NAMES.get(rid, rid), "amount": amount}
+                for rid, amount in order["reserved"].items()
+            ],
         })
     return {
-        "speed_capacity": engine.autocraft_speed_capacity(state),
         "slot_capacity": engine.autocraft_slot_capacity(state),
-        "slots_used": len(state.autocraft_jobs),
-        "jobs": jobs,
-        "pending_actions": [p["label"] for p in state.pending_actions],
+        "slots_used": sum(1 for o in state.orders if o["steps"]),
+        "orders": orders,
     }
+
+
+def assembler_view(building_id: str) -> dict | None:
+    """Сборщик (buildings.*.autocraft_assembler) - для подписи на карточке постройки."""
+    spec = BUILDINGS[building_id].get("autocraft_assembler")
+    if not spec:
+        return None
+    if "building" in spec:  # сборщик ритуалов алтаря
+        altar = BUILDINGS.get(spec["building"], {})
+        return {"location_name": altar.get("name", spec["building"]), "per_turn": spec.get("per_turn"), "ritual": True}
+    location = LOCATIONS.get(spec.get("location"), {})
+    return {"location_name": location.get("name", spec.get("location")), "per_turn": spec.get("per_turn"), "ritual": False}
 
 
 def active_research_view(state: GameState) -> dict | None:
@@ -1330,7 +1698,12 @@ def crafting_view(state: GameState) -> list[dict]:
             action = MANUAL_ACTIONS[aid]
             cost, gain = engine.effective_manual_action_stats(aid, state, chosen_scale=1)
             recipes.append({
+                # action_id - КЛЮЧ сеточного рецепта (engine.grid_recipe_key): у
+                # ручного действия это сам его id, у рецепта крафта за энергию -
+                # "energy_recipe:<id>" (см. _energy_grid_recipe_view). Клиент
+                # сравнивает только ключи и не разбирает их.
                 "action_id": aid,
+                "kind": "manual_action",
                 "name": action["name"],
                 "pattern": action["pattern"],
                 "pattern_mirror": bool(action.get("pattern_mirror")),
@@ -1339,16 +1712,136 @@ def crafting_view(state: GameState) -> list[dict]:
                 "enough": all(state.resources.get(rid, 0) >= amt for rid, amt in cost.items()),
                 "pinned": aid in state.pinned_recipes,
                 "sound_url": sound_url(action.get("sound")),
+                # Антиавтокликерная задержка кнопки "Скрафтить" - та же, что у
+                # карточки обычного ручного действия (build_view: click_delay_ms),
+                # клиент подставляет ui.default_action_delay_ms, если тут None.
+                "click_delay_ms": action.get("click_delay_ms"),
+                # Реальная длительность (с апгрейдами action_duration_reduction) -
+                # >1 значит рецепт запускает многоходовой job (прогресс-бар в
+                # модалке механизма), а не отдаёт результат мгновенно.
+                "duration_turns": engine.manual_action_duration(aid, state),
             })
+        # Многоходовой job, занявший ЭТОТ механизм (одна задача на локацию, см.
+        # CLAUDE.md "Многоходовое ручное действие") - прогресс-бар и блокировка
+        # кнопки "Скрафтить" в модалке. Ищется по ВСЕМ действиям локации, не
+        # только сеточным: обычная карточка-действие той же локации блокирует
+        # механизм точно так же (do_manual_action).
+        job = None
+        for job_aid, running in state.manual_jobs.items():
+            if MANUAL_ACTIONS[job_aid].get("location") == lid:
+                _, job_gain = engine.effective_manual_action_stats(job_aid, state, chosen_scale=1)
+                job = {
+                    "action_id": job_aid,
+                    "name": MANUAL_ACTIONS[job_aid]["name"],
+                    "turns_done": running["turns_done"],
+                    "turns_total": running["turns_total"],
+                    "gain": manual_action_gain_list(job_gain, MANUAL_ACTIONS[job_aid].get("gain_chance", {})),
+                }
+                break
+        # Преобразователь: рецепты крафта за энергию с узором и все идущие крафты
+        # за энергию (несколько преобразователей ведут их параллельно, по одному
+        # на копию) - первый из них показывается стрелкой, как job печи.
+        recipes.extend(_energy_grid_recipe_view(rid, state) for rid in engine.grid_energy_recipes_at(lid, state))
+        energy_jobs = _converter_jobs_view(state) if lid == engine.CONVERTER_LOCATION_ID else []
+        if job is None and energy_jobs:
+            job = energy_jobs[0]
         result.append({
             "location_id": lid,
             "name": LOCATIONS[lid]["name"],
             "width": crafting["width"],
             "height": crafting["height"],
+            # Крафт пачкой ("Скрафтить ×N") - только у механизма с явным
+            # crafting.batch (сейчас - верстак); остальным его позже дадут
+            # улучшения. craft_grid_view режет times до 1 сам, не доверяя клиенту.
+            "batch": bool(crafting.get("batch")),
             "bank": bank,
             "recipes": recipes,
+            "job": job,
+            "energy_jobs": energy_jobs,
+            # Слоты преобразователей (одна копия - один крафт за раз), None у
+            # остальных механизмов.
+            "converter_slots": (
+                {"busy": len(state.energy_jobs), "capacity": engine.energy_converter_capacity(state)}
+                if lid == engine.CONVERTER_LOCATION_ID else None
+            ),
         })
     return result
+
+
+def _energy_eta_turns(state: GameState, remaining: float, per_turn) -> int | None:
+    """Не меньше скольких ходов ещё копить энергию: не быстрее потолка per_turn энергии
+    за ход (energy_converter_max_energy_per_turn) и не быстрее, чем её притечёт в сеть
+    (свободный запас + чистый приток, engine.energy_wait_eta_turns) - нижняя оценка:
+    энергию делят все преобразователи и заказы. None - нет ни потолка, ни притока."""
+    remaining = max(0, remaining)
+    by_cap = max(1, -(-remaining // per_turn)) if per_turn else None
+    free = state.resources.get(engine.ENERGY_RESOURCE_ID, 0) - engine.energy_reserved(state)
+    by_energy = engine.energy_wait_eta_turns(state, remaining - max(0, free))
+    if by_cap is None:
+        return by_energy or None
+    return max(by_cap, by_energy or 0)
+
+
+def _energy_grid_recipe_view(recipe_id: str, state: GameState) -> dict:
+    """Рецепт крафта за энергию в той же форме, что сеточное действие в
+    crafting_view (pattern/cost/gain/enough/pinned), плюс то, что нужно шкале
+    энергии: threshold, потолок энергии за ход и оценка срока. cost - это
+    consumes рецепта (именно их узор и раскладывает), энергия в cost не входит -
+    она не предмет, а копится по ходам (см. _process_energy_jobs)."""
+    recipe = ENERGY_RECIPES[recipe_id]
+    consumes = recipe.get("consumes", {})
+    machine = recipe.get("machine")
+    key = engine.grid_recipe_key("energy_recipe", recipe_id)
+    # Какой тип преобразователя его поведёт (тот же выбор, что у start_energy_recipe);
+    # если свободного нет - потолок того типа, что вообще построен, для оценки срока.
+    free_building = engine._pick_converter_building_with_free_slot(state, state.energy_jobs, machine)
+    building_id = free_building or machine or next(iter(engine.energy_converter_building_types(state)), None)
+    per_turn = engine.energy_converter_max_energy_per_turn(state, building_id) if building_id else None
+    return {
+        "action_id": key,
+        "kind": "energy_recipe",
+        "recipe_id": recipe_id,
+        "name": recipe["name"],
+        "pattern": recipe["pattern"],
+        "pattern_mirror": bool(recipe.get("pattern_mirror")),
+        "cost": cost_list(consumes, state),
+        "gain": manual_action_gain_list(recipe.get("produces", {}), {}),
+        "enough": all(state.resources.get(rid, 0) >= amt for rid, amt in consumes.items()),
+        "pinned": key in state.pinned_recipes,
+        "sound_url": None,
+        "click_delay_ms": None,
+        "duration_turns": None,
+        "threshold": recipe["threshold"],
+        "energy_per_turn": per_turn,
+        "eta_turns": _energy_eta_turns(state, recipe["threshold"], per_turn),
+        # Свободный преобразователь подходящего типа есть - можно запустить ещё
+        # один крафт (даже если этот рецепт уже идёт в другом преобразователе).
+        "available": free_building is not None,
+        "machine_name": BUILDINGS[machine]["name"] if machine else None,
+    }
+
+
+def _converter_jobs_view(state: GameState) -> list[dict]:
+    """Идущие крафты за энергию в форме job'а модалки механизма: action_id - ключ
+    рецепта (grid_recipe_key), index - позиция в state.energy_jobs для
+    cancel_energy_job, progress/threshold - накопленная энергия."""
+    jobs = []
+    for job in engine.energy_jobs_view(state):
+        building_id = job["building_id"]
+        per_turn = engine.energy_converter_max_energy_per_turn(state, building_id) if building_id else None
+        jobs.append({
+            "kind": "energy_recipe",
+            "action_id": engine.grid_recipe_key("energy_recipe", job["recipe_id"]),
+            "index": job["index"],
+            "name": job["name"],
+            "progress": job["progress"],
+            "threshold": job["threshold"],
+            "energy_per_turn": per_turn,
+            "eta_turns": _energy_eta_turns(state, job["threshold"] - job["progress"], per_turn),
+            "gain": manual_action_gain_list(job["produces"], {}),
+            "building_name": BUILDINGS[building_id]["name"] if building_id else None,
+        })
+    return jobs
 
 
 # ---------- Справочник источников ("Откуда берётся", см. PLAN_grid_crafting.md, этап 5) ----------
@@ -1418,7 +1911,8 @@ def resource_sources(resource_id: str) -> list[dict]:
     крафт и обычное ручное действие (manual_actions), постройка (buildings.
     produces), особь на ферме (species.produces), душа в синтезаторе
     (soul_recipes), крафт за энергию (energy_recipes), ритуал
-    (ritual_recipes), шахта (mining_info), лут/душа с моба (mobs.loot/soul_id),
+    (ritual_recipes), репликатор (resources.*.replication_cost), шахта
+    (mining_info), лут/душа с моба (mobs.loot/soul_id),
     приз лутбокса (loot_cases.prizes, с именем квеста-награды, если есть)."""
     sources: list[dict] = []
 
@@ -1436,7 +1930,13 @@ def resource_sources(resource_id: str) -> list[dict]:
         if chance is not None and chance < 1:
             entry["chance"] = chance
         if pattern:
-            entry["location_id"] = action.get("location")
+            location_id = action.get("location")
+            entry["location_id"] = location_id
+            entry["location_name"] = LOCATIONS.get(location_id, {}).get("name", location_id)
+            # Сам узор - карточка рецепта рисует его сеткой (игрок должен видеть
+            # целевую раскладку, а не только список ингредиентов). Размер rows =
+            # размер сетки механизма (валидатор: check_action_pattern).
+            entry["pattern"] = pattern
             entry["pattern_mirror"] = bool(action.get("pattern_mirror"))
         sources.append(entry)
 
@@ -1462,6 +1962,7 @@ def resource_sources(resource_id: str) -> list[dict]:
                 "kind": "breeding",
                 "name": f"Скрещивание: {RESOURCE_NAMES[mutation['parent_a']]} × {RESOURCE_NAMES[mutation['parent_b']]}",
                 "building_id": building_id, "amount": 1,
+                "pin_ident": f"{mutation['parent_a']}+{mutation['parent_b']}",
             }
             chance = mutation.get("chance")
             if chance is not None and chance < 1:
@@ -1507,10 +2008,25 @@ def resource_sources(resource_id: str) -> list[dict]:
         amount = (recipe.get("produces") or {}).get(resource_id)
         if not amount:
             continue
-        sources.append({
+        entry = {
             "kind": "energy", "name": recipe["name"], "action_id": rid,
             "amount": _amount_display(amount), "cost": _plain_cost_list(recipe.get("consumes", {})),
-        })
+            "threshold": recipe.get("threshold"),
+        }
+        pattern = recipe.get("pattern")
+        converter_crafting = LOCATIONS.get(engine.CONVERTER_LOCATION_ID, {}).get("crafting")
+        if pattern and converter_crafting:
+            # Собирается в сетке преобразователя - та же карточка, что у рецепта
+            # печи (узор + "Разложить узор"), action_id - ключ сеточного рецепта.
+            entry.update({
+                "kind": "grid_craft",
+                "action_id": engine.grid_recipe_key("energy_recipe", rid),
+                "location_id": engine.CONVERTER_LOCATION_ID,
+                "location_name": LOCATIONS[engine.CONVERTER_LOCATION_ID]["name"],
+                "pattern": pattern,
+                "pattern_mirror": bool(recipe.get("pattern_mirror")),
+            })
+        sources.append(entry)
 
     for rid, recipe in RITUAL_RECIPES.items():
         amount = (recipe.get("produces") or {}).get(resource_id)
@@ -1519,11 +2035,71 @@ def resource_sources(resource_id: str) -> list[dict]:
         entry = {
             "kind": "ritual", "name": recipe["name"], "action_id": rid,
             "building_id": recipe.get("requires_building"), "amount": _amount_display(amount),
+            # кольцо + центр + разовая цена - всё, что списывается при запуске
+            "cost": _plain_cost_list(engine._ritual_full_cost(recipe)),
         }
         chance = (recipe.get("produces_chance") or {}).get(resource_id)
         if chance is not None and chance < 1:
             entry["chance"] = chance
         sources.append(entry)
+
+    # Плавильня (buildings.*.smeltery): плавка (сырьё -> металл/шлак в тигель), сплав
+    # (металлы тигля -> металл), литьё (металл тигля + форма -> изделие на склад).
+    # action_id - ключ engine.smeltery_recipe_key (закрепление звездой); heat - нужный
+    # жар: клиент сам выберет построенную плавильню, которой его хватит (VIEW.smelteries).
+    smeltery_types = [bid for bid in BUILDINGS if engine.is_smeltery(bid)]
+
+    def _able_smelteries(heat: int) -> list[str]:
+        return [bid for bid in smeltery_types if BUILDINGS[bid]["smeltery"].get("heat", 1) >= heat]
+
+    for rid, recipe in MELT_RECIPES.items():
+        amount = (recipe.get("output") or {}).get(resource_id)
+        if not amount:
+            continue
+        sources.append({
+            "kind": "smelt", "name": recipe["name"], "action_id": engine.smeltery_recipe_key("melt", rid),
+            "recipe_id": rid, "amount": amount, "cost": _plain_cost_list(recipe.get("input", {})),
+            "outputs": _amounts_view(recipe.get("output", {})), "main_id": engine.melt_main_input(recipe),
+            "heat": recipe.get("heat", 1), "turns": recipe.get("turns", 1),
+            "building_ids": _able_smelteries(recipe.get("heat", 1)),
+        })
+    for rid, recipe in ALLOY_RECIPES.items():
+        amount = (recipe.get("output") or {}).get(resource_id)
+        if not amount:
+            continue
+        sources.append({
+            "kind": "alloy", "name": recipe["name"], "action_id": engine.smeltery_recipe_key("alloy", rid),
+            "recipe_id": rid, "amount": amount, "cost": _plain_cost_list(recipe.get("input", {})),
+            "heat": recipe.get("heat", 1), "hidden": bool(recipe.get("hidden")),
+            "building_ids": _able_smelteries(recipe.get("heat", 1)),
+        })
+    for rid, recipe in CAST_RECIPES.items():
+        amount = (recipe.get("output") or {}).get(resource_id)
+        if not amount:
+            continue
+        form = recipe.get("form")
+        sources.append({
+            "kind": "cast", "name": recipe["name"], "action_id": engine.smeltery_recipe_key("cast", rid),
+            "recipe_id": rid, "amount": amount,
+            "cost": _plain_cost_list({recipe["metal"]: recipe.get("amount", 1)}),
+            "form": {"id": form, "name": RESOURCE_NAMES.get(form, form)} if form else None,
+            "metal_id": recipe["metal"], "turns": recipe.get("turns", 1), "building_ids": smeltery_types,
+        })
+
+    # Репликатор: любой ресурс с ценой репликации (resources.*.replication_cost) -
+    # одна запись на КАЖДЫЙ тип репликатора; action_id - ключ заказа «Репликация ×N»
+    # (engine.grid_recipe_key("replicator", ...)), amount/cost - за ОДНУ единицу.
+    price = engine.RESOURCE_REPLICATION_COST.get(resource_id)
+    if price:
+        for bid, b in BUILDINGS.items():
+            matter = (b.get("replicator") or {}).get("matter")
+            if not matter or matter == resource_id or matter not in RESOURCE_NAMES:
+                continue
+            sources.append({
+                "kind": "replicator", "name": b["name"], "building_id": bid,
+                "action_id": engine.grid_recipe_key("replicator", resource_id),
+                "amount": 1, "cost": _plain_cost_list({matter: price}),
+            })
 
     mining = MINING_INFO.get(resource_id)
     if mining:
@@ -1540,7 +2116,7 @@ def resource_sources(resource_id: str) -> list[dict]:
         if mob.get("soul_id") == resource_id:
             sources.append({
                 "kind": "loot", "name": f"Охота: {mob['name']} (душа)", "mob_id": mid,
-                "amount": 1, "chance": mob.get("soul_chance", 1.0),
+                "amount": 1, "chance": mob.get("soul_chance", 1.0), "pin_ident": f"{mid}+soul",
             })
 
     for cid, case in LOOT_CASES.items():
@@ -1553,7 +2129,29 @@ def resource_sources(resource_id: str) -> list[dict]:
             name += f" (награда за квест «{quest_name}»)"
         sources.append({"kind": "lootbox", "name": name, "case_id": cid, "amount": matched.get("amount", 1)})
 
+    for src in sources:
+        src["pin_key"] = _source_pin_key(resource_id, src)
     return sources
+
+
+_SMELTERY_SOURCE_KINDS = ("smelt", "alloy", "cast")
+# Поле записи resource_sources, которое отличает способ от других того же вида
+# (кроме сеточного крафта/плавильни - у них свой ключ, см. _source_pin_key).
+_SOURCE_PIN_IDENT_FIELD = {
+    "manual": "action_id", "spawn": "action_id", "energy": "action_id", "ritual": "action_id",
+    "building": "building_id", "replicator": "building_id", "creature": "species_id",
+    "soul": "soul_id", "loot": "mob_id", "lootbox": "case_id",
+}
+
+
+def _source_pin_key(resource_id: str, src: dict) -> str:
+    """Ключ закрепления способа (звезда в карточке, state.pinned_recipes). Сеточный
+    крафт и плавильня - прежние ключи рецептов (их знают crafting_view/сохранения),
+    всё остальное - engine.source_pin_key: ресурс + вид + id способа."""
+    if src["kind"] == "grid_craft" or src["kind"] in _SMELTERY_SOURCE_KINDS:
+        return src["action_id"]
+    ident = src.pop("pin_ident", None) or src.get(_SOURCE_PIN_IDENT_FIELD.get(src["kind"], "")) or src["kind"]
+    return engine.source_pin_key(resource_id, src["kind"], str(ident))
 
 
 def sources_summary_view() -> list[dict]:
@@ -1570,6 +2168,24 @@ def sources_summary_view() -> list[dict]:
             continue
         items.append({"id": rid, "name": RESOURCE_NAMES[rid], "kinds": sorted({s["kind"] for s in srcs})})
     return items
+
+
+def _location_opens_as_button(location_id: str) -> bool:
+    """Локация-механизм (сетка крафта или преобразователь), в которой нет НИЧЕГО,
+    кроме самого механизма, - в игре это не "комната", куда заходят, а кнопка
+    «Открыть: ...» прямо в родительской локации (например, печь в «Механизмах»).
+    Считается по КОНТЕНТУ, а не по тому, что открыто игроку сейчас: иначе локация
+    переключалась бы между кнопкой и комнатой, когда внутри открывается ещё одно
+    действие. Обычное действие без узора (верстак: «Набрать воды») или дочерняя
+    локация оставляют её комнатой - у кнопки им негде было бы показаться."""
+    if not (engine.location_crafting(location_id) or location_id == engine.CONVERTER_LOCATION_ID):
+        return False
+    if any(l.get("parent_location") == location_id for l in LOCATIONS.values()):
+        return False
+    return not any(
+        a.get("location") == location_id and not a.get("pattern")
+        for a in MANUAL_ACTIONS.values()
+    )
 
 
 def build_view(state: GameState) -> dict:
@@ -1617,9 +2233,8 @@ def build_view(state: GameState) -> dict:
             "working_count": engine.working_count(state, bid),
             "active_count": engine.building_active_count(state, bid),
             "compute_power": b.get("compute_power", 0),
-            "autocraft_speed": b.get("autocraft_speed", 0),
             "autocraft_slots": b.get("autocraft_slots", 0),
-            "unlocks_autocraft": [RESOURCE_NAMES[r] for r in b.get("unlocks_autocraft", [])],
+            "autocraft_assembler": assembler_view(bid),
             "energy_converter": energy_converter_view(bid),
             "automation": automation_view(bid, state),
             # Кнопка "⚙ Улучшения" теперь живёт ТОЛЬКО в панели "Производственные
@@ -1665,6 +2280,12 @@ def build_view(state: GameState) -> dict:
             # upgrades=None выше), покупаются в самой модалке, не через общую
             # "⚙ Улучшения".
             "is_reactor": bool(b.get("reactor")),
+            # Кнопка "Репликатор" на карточке - открывает openReplicatorModal
+            # (VIEW.replicator ниже), тот же приём, что is_ritual_circle.
+            "is_replicator": bool(b.get("replicator")),
+            # Кнопка "Плавильня" на карточке - openSmelteryModal ЭТОЙ постройки
+            # (VIEW.smelteries ниже), тот же приём, что is_ritual_circle.
+            "is_smeltery": bool(b.get("smeltery")),
         })
 
     manual = []
@@ -1730,6 +2351,8 @@ def build_view(state: GameState) -> dict:
             "is_converter": lid == engine.CONVERTER_LOCATION_ID,
             "is_hunting": lid in hunting_location_ids,
             "crafting": engine.location_crafting(lid),
+            "as_button": _location_opens_as_button(lid),
+            "shows_building_mechanisms": bool(LOCATIONS[lid].get("shows_building_mechanisms")),
         }
         for lid in engine.available_locations(state)
     ]
@@ -1750,6 +2373,12 @@ def build_view(state: GameState) -> dict:
         stage = engine.current_construction_stage(bid, state)
         build.append({
             "id": bid, "name": BUILDINGS[bid]["name"],
+            # Тот же tags, что у уже построенных копий (см. buildings.append выше) -
+            # даёт каталогу "Построить" фильтр по типу постройки, идентичный панели
+            # "Производственные мощности" (web_ui.html: renderBuildCatalogFilterBar/
+            # buildCatalogTagFilter), но без фильтра по состоянию/поломке - постройка
+            # из каталога ещё не построена, ломаться ей нечему.
+            "tags": BUILDINGS[bid].get("tags", []),
             "cost": cost_list(stage["cost"] if stage else BUILDINGS[bid]["cost"], state),
             "stage_number": stage["number"] if stage else None,
             "stage_total": stage["total"] if stage else None,
@@ -1759,9 +2388,8 @@ def build_view(state: GameState) -> dict:
             "max_count": max_count,
             "produces": cost_list(produces), "consumes": cost_list(consumes),
             "compute_power": BUILDINGS[bid].get("compute_power", 0),
-            "autocraft_speed": BUILDINGS[bid].get("autocraft_speed", 0),
             "autocraft_slots": BUILDINGS[bid].get("autocraft_slots", 0),
-            "unlocks_autocraft": [RESOURCE_NAMES[r] for r in BUILDINGS[bid].get("unlocks_autocraft", [])],
+            "autocraft_assembler": assembler_view(bid),
             "energy_converter": energy_converter_view(bid),
             "click_delay_ms": BUILDINGS[bid].get("click_delay_ms"),
             "upgrades": None if BUILDINGS[bid].get("breeding_slots") or BUILDINGS[bid].get("soul_collector") or BUILDINGS[bid].get("reactor") else building_upgrades_view(bid, state),
@@ -1811,12 +2439,18 @@ def build_view(state: GameState) -> dict:
             },
         })
 
+    smelteries = smelteries_view(state)
+    crafting = crafting_view(state)
     return {
         "turn": state.turn,
         "save_name": state.save_name,
         "time": time_info,
         "resources": state.resources,
         "pinned": state.pinned,
+        # Закреплённые сеточные рецепты целиком, включая ещё не открытые игроку
+        # (их нет в crafting[].recipes) - звезда в карточке справочника должна
+        # показывать ★ и у такого рецепта, иначе повторный клик тихо откреплял бы.
+        "pinned_recipes": list(state.pinned_recipes),
         "resource_names": RESOURCE_NAMES,
         "resource_order": RESOURCE_ORDER,
         "energy_resource_id": engine.ENERGY_RESOURCE_ID,
@@ -1841,8 +2475,10 @@ def build_view(state: GameState) -> dict:
         },
         "rates": rates,
         "energy": {"stock": stock, "capacity": capacity, "generation": gen, "consumption": cons},
+        # id энергии для клиента (энергия в цене сеточного рецепта сверх узора) -
+        # чтобы web_ui.html не держал ещё одну ручную копию хардкод-id.
+        "energy_resource_id": engine.ENERGY_RESOURCE_ID,
         "compute_capacity": engine.compute_capacity(state),
-        "autocraft_enabled": state.autocraft_enabled,
         "autocraft": autocraft_view(state),
         "action_priorities": action_priority_view(state),
         "energy_priorities": energy_priority_view(state),
@@ -1859,6 +2495,14 @@ def build_view(state: GameState) -> dict:
         "reactor_catalyst_bank": reactor_catalyst_bank_view(state),
         "reactor_fluid_bank": reactor_coolant_fluid_bank_view(state),
         "ritual_altars": ritual_altars_view(state),
+        "replicator": replicator_view(state, rates),
+        "smelteries": smelteries,
+        # Плитки левой колонки «Закреплённые» - любой закреплённый способ (сеточный
+        # рецепт, плавильня, ритуал, постройка...), см. web_ui.html: globalPinnedRecipes.
+        "pinned_tiles": pinned_recipes_view(state, crafting, smelteries),
+        # Цвет/плотность жидких металлов (resources.*.molten) - слои тигля и чипы металлов.
+        "molten": RESOURCE_MOLTEN,
+        "discovered_alloys": sorted(state.discovered_alloys),
         "known_alleles": engine.known_alleles_view(state),
         "genetics_lab_available": engine.genetics_lab_available(state),
         "breeding_station_available": engine.breeding_station_available(state),
@@ -1869,7 +2513,7 @@ def build_view(state: GameState) -> dict:
         },
         "buildings": buildings,
         "locations": locations,
-        "crafting": crafting_view(state),
+        "crafting": crafting,
         "tools": tools,
         "enchanting": enchanting_view(state),
         "hunting": hunting,
@@ -1949,6 +2593,10 @@ def resource_deltas(before: dict, after: dict) -> list[dict]:
 def dispatch_action(state: GameState, action_type: str, action_id, scale: int | None = None):
     if action_type == "manual":
         return engine.do_manual_action(state, action_id, scale=scale)
+    if action_type == "order":
+        # action_id - составной "action_id:qty" (кнопка «Заказать ×N» в карточке рецепта).
+        recipe_id, _, qty = str(action_id).rpartition(":")
+        return engine.order_recipe(state, recipe_id, int(qty or 1))
     if action_type == "build":
         return engine.build(state, action_id)
     if action_type == "tech":
@@ -1975,6 +2623,10 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
         return engine.start_energy_recipe(state, action_id)
     if action_type == "start_ritual":
         return engine.start_ritual(state, action_id)
+    if action_type == "replicate":
+        # action_id - составной "resource_id:qty" (модалка репликатора), как у "order".
+        resource_id, _, qty = str(action_id).rpartition(":")
+        return engine.replicate(state, resource_id, int(qty or 1))
     if action_type == "breed":
         # action_id - составной "parent_a_id:parent_b_id" (тот же приём, что
         # "building_id:upgrade_id" у building_upgrade ниже) - никакой фермы тут
@@ -1994,7 +2646,36 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
         # недостаточно, чтобы адресовать конкретное.
         building_id, upgrade_id = action_id.split(":", 1)
         return engine.purchase_building_upgrade(state, building_id, upgrade_id)
+    if action_type in ("smelt_load", "smelt_alloy", "smelt_pour"):
+        # action_id - составной "building_id:recipe_id" (модалка плавильни): у каждой
+        # построенной плавильни свой тигель, рецепт без постройки не адресуем.
+        building_id, _, recipe_id = str(action_id).partition(":")
+        if action_type == "smelt_load":
+            return engine.load_melt(state, building_id, recipe_id)
+        if action_type == "smelt_alloy":
+            return engine.alloy_smeltery(state, building_id, recipe_id)
+        return engine.pour_cast(state, building_id, recipe_id)
     raise ValueError(f"неизвестный тип действия: {action_type}")
+
+
+def _smeltery_event_view(event: dict) -> dict:
+    building = BUILDINGS.get(event["building_id"], {}).get("name", event["building_id"])
+    kind = event["kind"]
+    output = event.get("output") or {}
+    if kind == "melted":
+        name = MELT_RECIPES.get(event["recipe_id"], {}).get("name", event["recipe_id"])
+        message = f"{building}: расплавлено ({name}) - " + ", ".join(
+            f"{RESOURCE_NAMES.get(r, r)} +{a}" for r, a in output.items()
+        )
+    elif kind == "cast_done":
+        message = f"{building}: отливка остыла - " + ", ".join(f"{RESOURCE_NAMES.get(r, r)} +{a}" for r, a in output.items())
+    else:
+        name = MELT_RECIPES.get(event["recipe_id"], {}).get("name", event["recipe_id"])
+        message = f"{building}: тигель полон - «{name}» ждёт места (сними шлак или залей металл)"
+    return {
+        "building_id": event["building_id"], "kind": kind, "slot": event.get("slot"),
+        "recipe_id": event.get("recipe_id"), "output": _amounts_view(output), "message": message,
+    }
 
 
 def run_turn(state: GameState, action_type: str, action_id, scale: int | None = None) -> dict:
@@ -2003,9 +2684,9 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
         "message": None, "ok": True, "action_deltas": [], "production_deltas": [],
         "idle": [], "broken": [], "quests_completed": [], "autocraft_completed": [],
         "pending_finished": [], "energy_crafted": [], "sound_url": None,
-        "manual_completed": [], "combat": None, "boss_fled": None,
+        "manual_completed": [], "manual_completed_ids": [], "energy_completed_keys": [], "combat": None, "boss_fled": None,
         "automation_fired": [], "ritual_completed": [], "breed": None,
-        "reactor_accidents": [],
+        "reactor_accidents": [], "pending": False, "replicated": [], "smeltery": [],
     }
 
     if action_type != "skip":
@@ -2013,6 +2694,9 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
         result = dispatch_action(state, action_type, action_id, scale=scale)
         log["message"] = result.message
         log["ok"] = result.ok
+        # Действие не выполнено, а поставлено в очередь (ждёт автокрафта/энергии, см.
+        # engine._pay_or_defer) - может завершиться уже в advance_turn этого же хода.
+        log["pending"] = bool(result.pending)
         if action_type == "manual":
             # Резолвится сервером (а не клиентом по своей копии VIEW), чтобы
             # источником истины оставался content.json - см. manual_actions.*.sound.
@@ -2045,8 +2729,22 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
     log["broken"] = [{"name": BUILDINGS[b]["name"], "count": n} for b, n in report.newly_broken.items()]
     log["autocraft_completed"] = [RESOURCE_NAMES[r] for r in report.autocraft_completed]
     log["manual_completed"] = [MANUAL_ACTIONS[a]["name"] for a in report.manual_completed]
+    # id, а не только имена - модалка механизма (web_ui.html: openCraftGridModal)
+    # сопоставляет завершившийся job со своими рецептами, чтобы проиграть эффект
+    # готового результата (тот же принцип, что ritual_completed ниже).
+    log["manual_completed_ids"] = list(report.manual_completed)
     log["pending_finished"] = list(report.pending_finished)
     log["energy_crafted"] = [ENERGY_RECIPES[rid]["name"] for rid, count in report.crafted.items() for _ in range(count)]
+    # Ключи сеточных рецептов (engine.grid_recipe_key) завершившихся крафтов за
+    # энергию - для эффекта готового результата в модалке преобразователя, тот
+    # же приём, что manual_completed_ids у печи.
+    log["energy_completed_keys"] = [engine.grid_recipe_key("energy_recipe", rid) for rid in report.crafted]
+    # Что выдали репликаторы в этот ход - модалка репликатора проигрывает по нему
+    # эффект выхода (web_ui.html: openReplicatorModal), лог - строку «Репликатор».
+    log["replicated"] = [
+        {"resource_id": rid, "name": RESOURCE_NAMES.get(rid, rid), "amount": engine._format_amount(amount)}
+        for rid, amount in report.replicated.items()
+    ]
     # {id, name, building_id} и не просто имя - клиент (openRitualCircleModal) должен
     # надёжно сопоставить завершившийся ритуал с открытой модалкой конкретного алтаря,
     # чтобы проиграть финальную анимацию, даже если игрок довёл ход каким-то ДРУГИМ
@@ -2059,6 +2757,10 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
         {"building_name": BUILDINGS[e["building_id"]]["name"], "message": e["message"]}
         for e in report.automation_fired
     ]
+    # События плавилен (engine._process_smelteries) - строка журнала + эффекты модалки
+    # плавильни (капля в тигель из слота slot, вспышка готовой отливки): building_id -
+    # чтобы открытая модалка проигрывала только свои.
+    log["smeltery"] = [_smeltery_event_view(e) for e in report.smeltery_events]
     # Аварии реакторных зон, сработавшие именно в этот ход - см. game/engine.py:
     # _process_reactors/ProductionReport.reactor_accidents. instance_id даёт клиенту
     # проиграть эффект аварии ИМЕННО в открытой модалке этого экземпляра (тот же
@@ -2100,34 +2802,69 @@ def craft_grid_view(state: GameState, location_id, placed, times) -> dict:
 
     Раскладка перепроверяется здесь же, на сервере (см. match_grid) - клиентский
     подсчёт совпадения узора в модалке верстака только для мгновенной реакции,
-    доверять ему нельзя (см. план, этап 4)."""
+    доверять ему нельзя (см. план, этап 4).
+
+    times > 1 допустим только у механизма с crafting.batch (см. crafting_view) -
+    у остальных молча режется до 1, клиентский ввод "×N" не в счёт."""
     times_requested = max(1, int(times)) if times is not None else 1
-    action_id = engine.match_grid(state, location_id, placed)
-    if action_id is None:
+    crafting = engine.location_crafting(location_id) if location_id in LOCATIONS else None
+    if not (crafting and crafting.get("batch")):
+        times_requested = 1
+    target = engine.match_grid_target(state, location_id, placed)
+    if target is None:
         return {
             "ok": False,
             "message": "Раскладка не совпадает ни с одним открытым рецептом.",
             "action_id": None, "times_requested": times_requested, "times_done": 0,
             "logs": [],
         }
+    kind, target_id = target
+    # Рецепт крафта за энергию (сетка преобразователя) - обычный запуск, как
+    # кнопкой-карточкой: start_energy_recipe списывает consumes и занимает
+    # свободный преобразователь, энергия копится по ходам. Пачкой не бывает.
+    if kind == "energy_recipe":
+        times_requested = 1
+        action_type = "start_energy_recipe"
+    else:
+        action_type = "manual"
+        # Многоходовой рецепт занимает механизм целиком (одна задача на локацию), так
+        # что вторая итерация пачки гарантированно упёрлась бы в "уже выполняется" -
+        # режем до одного запуска сразу, а не отдаём игроку "Скрафчено 1 из N".
+        if engine.manual_action_duration(target_id, state) > 1:
+            times_requested = 1
+    action_id = engine.grid_recipe_key(kind, target_id)
     logs = []
+    waiting = False
     for _ in range(times_requested):
-        log = run_turn(state, "manual", action_id)
+        log = run_turn(state, action_type, target_id)
         logs.append(log)
         if not log["ok"]:
             break
-    times_done = sum(1 for entry in logs if entry["ok"])
-    if times_done == times_requested:
+        # Итерация ушла в очередь (например, ждёт энергию) и не успела завершиться в
+        # advance_turn этого же хода - дальше пачку не гоним: очередь держит одно
+        # ожидание на действие, остальные итерации молча потерялись бы.
+        if log["pending"] and any(
+            o["kind"] == action_type and o["target_id"] == target_id for o in state.orders
+        ):
+            waiting = True
+            break
+    times_done = sum(1 for entry in logs if entry["ok"]) - (1 if waiting else 0)
+    if waiting:
+        message = logs[-1]["message"] if times_done == 0 else (
+            f"Скрафчено {times_done} из {times_requested}, следующий ждёт: {logs[-1]['message']}"
+        )
+    elif times_done == times_requested:
         message = logs[-1]["message"]
     elif times_done == 0:
         message = logs[0]["message"]
     else:
         message = f"Скрафчено {times_done} из {times_requested}: {logs[-1]['message']}"
     return {
-        "ok": times_done > 0,
+        "ok": times_done > 0 or waiting,
         "message": message,
         "action_id": action_id,
         "times_requested": times_requested, "times_done": times_done,
+        "waiting": waiting,
         "logs": logs,
     }
 
@@ -2155,9 +2892,24 @@ def _preview_node_view(node: dict) -> dict:
         "stock_before": node["stock_before"],
         "taken": node["taken"],
         "action_id": node["action_id"],
-        "action_name": MANUAL_ACTIONS[node["action_id"]]["name"] if node["action_id"] else None,
+        "energy_recipe_id": node.get("energy_recipe_id"),
+        "ritual_recipe_id": node.get("ritual_recipe_id"),
+        "replicator_id": node.get("replicator_id"),
+        # Шаг на преобразователе - имя рецепта крафта за энергию, fires - партии;
+        # ритуал - имя ритуала, fires - число ритуалов; репликация - имя
+        # репликатора, fires - единицы ресурса.
+        "action_name": (
+            MANUAL_ACTIONS[node["action_id"]]["name"] if node["action_id"]
+            else f"{ENERGY_RECIPES[node['energy_recipe_id']]['name']} (преобразователь)" if node.get("energy_recipe_id")
+            else f"{RITUAL_RECIPES[node['ritual_recipe_id']]['name']} (ритуал)" if node.get("ritual_recipe_id")
+            else f"{BUILDINGS[node['replicator_id']]['name']} (репликация)" if node.get("replicator_id")
+            else None
+        ),
         "fires": node["fires"],
         "turns": node["turns"],
+        "energy_wait": bool(node.get("energy_wait")),
+        # Сколько не хватает того, что автокрафт сделать не может (сырьё или рецепт ему недоступен).
+        "missing": node["missing"],
         "children": [_preview_node_view(c) for c in node["children"]],
     }
 
@@ -2172,15 +2924,26 @@ def _collect_preview_totals(nodes: list[dict], totals: dict | None = None) -> di
         totals = {}
     for node in nodes:
         rid = node["resource_id"]
-        entry = totals.setdefault(rid, {"taken": 0, "needed": 0, "fires": 0, "action_id": None})
+        entry = totals.setdefault(rid, {
+            "taken": 0, "needed": 0, "fires": 0, "missing": 0,
+            "action_id": None, "energy_recipe_id": None, "ritual_recipe_id": None,
+        })
         entry["taken"] += node["taken"]
         entry["needed"] += node["needed"]
         entry["fires"] += node["fires"]
-        # Рецепт у ресурса один на всё дерево (engine.resource_recipe) - нужен для
-        # оценки ходов многоходового действия (engine.autocraft_eta_turns).
+        entry["missing"] += node["missing"]
+        # Рецепт у ресурса один на всё дерево (engine.resource_recipe или преобразователь,
+        # см. engine._order_route) - нужен для оценки ходов (autocraft_eta_turns/
+        # converter_eta_turns).
         entry["action_id"] = entry["action_id"] or node["action_id"]
+        entry["energy_recipe_id"] = entry["energy_recipe_id"] or node.get("energy_recipe_id")
+        entry["ritual_recipe_id"] = entry["ritual_recipe_id"] or node.get("ritual_recipe_id")
         _collect_preview_totals(node["children"], totals)
     return totals
+
+
+def _preview_crafts_anything(nodes: list[dict]) -> bool:
+    return any(n["fires"] > 0 or _preview_crafts_anything(n["children"]) for n in nodes)
 
 
 def _action_label(state: GameState, action_type: str, action_id: str) -> str | None:
@@ -2202,6 +2965,9 @@ def _action_label(state: GameState, action_type: str, action_id: str) -> str | N
         return ENERGY_RECIPES[action_id]["name"] if action_id in ENERGY_RECIPES else None
     if action_type == "start_ritual":
         return RITUAL_RECIPES[action_id]["name"] if action_id in RITUAL_RECIPES else None
+    if action_type == "replicate":
+        resource_id = str(action_id).rpartition(":")[0]
+        return f"репликация «{RESOURCE_NAMES[resource_id]}»" if resource_id in RESOURCE_NAMES else None
     if action_type == "building_upgrade":
         building_id, _, upgrade_id = action_id.partition(":")
         upgrade = next((u for u in BUILDINGS[building_id].get("upgrades", []) if u["id"] == upgrade_id), None)
@@ -2233,8 +2999,9 @@ def autocraft_preview_view(state: GameState, action_type: str, action_id, scale:
     """Предпросмотр расхода ресурсов перед запуском действия - для окна
     подтверждения автокрафта (см. CLAUDE.md, "Подтверждение автокрафта").
     {"needs_confirm": False} - подтверждение не нужно (см. engine.autocraft_preview:
-    либо весь cost уже покрыт запасом, либо автокрафт сейчас не при делах) - в
-    этом случае фронтенд должен выполнить действие сразу, без модалки.
+    либо весь cost уже покрыт запасом, либо автокрафт сейчас не при делах, либо
+    докрафтить нечего, а заказ всё равно не оформится) - в этом случае фронтенд
+    должен выполнить действие сразу, без модалки, и сервер сам скажет, чего не хватает.
 
     "summary" - ОДНА строка на resource_id (агрегат по всему дереву, см.
     _collect_preview_totals) для компактного списка в самом окне подтверждения -
@@ -2251,19 +3018,98 @@ def autocraft_preview_view(state: GameState, action_type: str, action_id, scale:
     preview = engine.autocraft_preview(state, cost) if cost else None
     if preview is None:
         return {"needs_confirm": False}
+    # "reason" - почему заказ не оформится (не хватает того, что автокрафт не делает,
+    # мощность, слоты...): окно показывает её и не даёт нажать «Запустить».
+    failure = engine.autocraft_failure(state, cost, action_type, action_id, scale)
+    if failure is not None and not _preview_crafts_anything(preview["nodes"]):
+        # Докрафтить нечего - подтверждать нечего: действие само ответит, чего не хватает.
+        return {"needs_confirm": False}
+    return {
+        "needs_confirm": True,
+        "label": _action_label(state, action_type, action_id),
+        "reason": engine.describe_autocraft_failure(failure) if failure else None,
+        # общий срок всего заказа (шаги одного механизма складываются, очередь заказов
+        # учтена) - строки сводки показывают срок только своего шага
+        "eta_turns": None if failure else engine.cost_eta_turns(state, cost, action_type, action_id, scale),
+        **_preview_payload(state, preview),
+    }
+
+
+def order_preview_view(state: GameState, action_id: str, qty: int) -> dict:
+    """Карточка рецепта, блок «Заказать ×N» (POST /api/order_preview, read-only): можно
+    ли заказать (engine.check_order) и если нет - почему, план докрафта (то же дерево,
+    что в окне подтверждения) и оценка ходов для самого рецепта. action_id - ключ
+    рецепта (engine.grid_recipe_key): id действия или "energy_recipe:<id>" - рецепт
+    преобразователя, тогда qty - число партий, или "ritual_recipe:<id>" - ритуал, или
+    "replicator:<ресурс>" - репликация qty единиц."""
+    kind, target_id = engine.parse_grid_recipe_key(action_id)
+    qty = max(1, int(qty))
+    if kind == "energy_recipe":
+        if target_id not in ENERGY_RECIPES:
+            raise KeyError("неизвестный рецепт")
+        recipe = ENERGY_RECIPES[target_id]
+        total = {rid: amount * qty for rid, amount in recipe.get("consumes", {}).items()}
+        # Порог энергии всех партий - в сводке строкой «подождёт энергию», если её мало.
+        total[engine.ENERGY_RESOURCE_ID] = total.get(engine.ENERGY_RESOURCE_ID, 0) + recipe["threshold"] * qty
+        eta = engine.converter_eta_turns(state, target_id, qty)
+    elif kind == "ritual_recipe":
+        if target_id not in RITUAL_RECIPES:
+            raise KeyError("неизвестный ритуал")
+        total = {rid: amount * qty for rid, amount in engine._ritual_full_cost(RITUAL_RECIPES[target_id]).items()}
+        eta = engine.ritual_eta_turns(state, target_id, qty)
+    elif kind == "replicator":
+        # qty - единицы ресурса; материя - у репликатора, которым пойдёт заказ
+        # (автоматизированного), иначе у первого репликатора контента.
+        replicators = [bid for bid, b in BUILDINGS.items() if b.get("replicator")]
+        if target_id not in engine.RESOURCE_REPLICATION_COST or not replicators:
+            raise KeyError("этот ресурс не реплицируется")
+        matter = engine.replicator_matter(engine._autocraft_replicator_building(state) or replicators[0])
+        total = {matter: engine.replication_matter_cost(target_id, qty, matter)}
+        eta = engine.replicator_eta_turns(state, target_id, qty)
+    else:
+        if target_id not in MANUAL_ACTIONS:
+            raise KeyError("неизвестный рецепт")
+        cost, _ = engine.effective_manual_action_stats(target_id, state)
+        total = {rid: amount * qty for rid, amount in cost.items()}
+        eta = engine.autocraft_eta_turns(state, qty, target_id)
+    failure = engine.check_order(state, action_id, qty)
+    if failure is None:
+        # Срок всего заказа: шаги в одном механизме делят его лимит, заказы впереди в
+        # очереди берут его первыми (engine.order_eta_turns) - оценка одного шага выше
+        # этого не видит и занижала срок.
+        eta = engine.order_eta_turns(state, action_id, qty)
+    preview = engine.autocraft_preview(state, total) if total else None
+    payload = _preview_payload(state, preview) if preview else {"summary": [], "tree": []}
+    return {
+        "action_id": action_id, "qty": qty,
+        "can_order": failure is None,
+        "reason": engine.describe_autocraft_failure(failure) if failure else None,
+        "eta_turns": eta,
+        **payload,
+    }
+
+
+def _preview_payload(state: GameState, preview: dict) -> dict:
+    """summary (по строке на ресурс) + tree (полное дерево) из engine.autocraft_preview."""
     totals = _collect_preview_totals(preview["nodes"])
     summary = []
     for rid, t in totals.items():
         stock = state.resources.get(rid, 0)
+        # Энергию автокрафт не делает, а ждёт - оценка ходов по текущему притоку.
+        energy_wait = rid == engine.ENERGY_RESOURCE_ID and t["needed"] > t["taken"]
         summary.append({
             "resource_id": rid, "name": RESOURCE_NAMES[rid],
-            "needed": t["needed"], "taken": t["taken"], "stock": stock, "fires": t["fires"],
+            "needed": t["needed"], "taken": t["taken"], "stock": stock, "fires": t["fires"], "missing": t["missing"],
             "percent": (t["taken"] / stock) if stock > 0 else (1.0 if t["taken"] > 0 else None),
-            "turns": engine.autocraft_eta_turns(state, t["fires"], t["action_id"]),
+            "turns": (
+                engine.energy_wait_eta_turns(state, t["needed"] - t["taken"]) if energy_wait
+                else engine.converter_eta_turns(state, t["energy_recipe_id"], t["fires"]) if t["energy_recipe_id"]
+                else engine.ritual_eta_turns(state, t["ritual_recipe_id"], t["fires"]) if t["ritual_recipe_id"]
+                else engine.autocraft_eta_turns(state, t["fires"], t["action_id"])
+            ),
+            "energy_wait": energy_wait,
         })
     return {
-        "needs_confirm": True,
-        "label": _action_label(state, action_type, action_id),
         "summary": summary,
         "tree": [_preview_node_view(n) for n in preview["nodes"]],
     }
@@ -2354,12 +3200,30 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(e)})
                 return
             self._json(200, preview)
+        elif self.path == "/api/order_preview":
+            # Read-only, как /api/autocraft_preview: карточка рецепта спрашивает, можно ли
+            # заказать ×N и что докрафтится. Сам заказ - обычный /api/action type="order".
+            try:
+                view = order_preview_view(STATE, payload.get("action_id"), int(payload.get("qty", 1)))
+            except (KeyError, ValueError, TypeError) as e:
+                self._json(400, {"error": str(e)})
+                return
+            self._json(200, view)
         elif self.path == "/api/pin":
             result = engine.toggle_pin(STATE, payload.get("resource_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/pin_recipe":
-            result = engine.toggle_pinned_recipe(STATE, payload.get("action_id"))
+            key = payload.get("action_id")
+            source = engine.parse_source_pin_key(key) if isinstance(key, str) else None
+            # Ключ способа из справочника движок проверить не может (список способов
+            # знает только resource_sources) - сверяем тут; открепить можно любой.
+            if (source is not None and key not in STATE.pinned_recipes
+                    and (source[0] not in RESOURCE_NAMES
+                         or all(s["pin_key"] != key for s in resource_sources(source[0])))):
+                result = engine.ActionResult(False, "Такого способа получить ресурс нет.")
+            else:
+                result = engine.toggle_pinned_recipe(STATE, key)
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/craft_grid":
@@ -2383,10 +3247,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "неизвестный ресурс"})
                 return
             self._json(200, {"resource_id": resource_id, "sources": resource_sources(resource_id)})
-        elif self.path == "/api/autocraft_toggle":
-            result = engine.toggle_autocraft(STATE)
-            save_state(STATE)
-            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/set_action_priority":
             # Как toggle_pin/toggle_autocraft - настройка конкретного сохранения,
             # не тратит ход. priority: null сбрасывает переопределение игрока к
@@ -2431,8 +3291,12 @@ class Handler(BaseHTTPRequestHandler):
             # cancel_autocraft_job/cancel_energy_job/cancel_manual_job) - игрок не должен
             # ждать advance_turn, чтобы освободить слот, который сам же занял.
             kind = payload.get("kind")
-            if kind == "autocraft":
-                result = engine.cancel_autocraft_job(STATE, payload.get("resource_id"))
+            if kind == "order":
+                try:
+                    result = engine.cancel_order(STATE, int(payload.get("order_id")))
+                except (TypeError, ValueError):
+                    self._json(400, {"error": "order_id должен быть числом"})
+                    return
             elif kind == "energy":
                 result = engine.cancel_energy_job(STATE, payload.get("index"))
             elif kind == "manual":
@@ -2441,6 +3305,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = engine.cancel_research(STATE)
             elif kind == "ritual":
                 result = engine.cancel_ritual(STATE, payload.get("building_id"))
+            elif kind == "replicator":
+                result = engine.cancel_replicator_job(STATE, payload.get("job_id"))
             else:
                 self._json(400, {"error": "неизвестный тип задачи"})
                 return
@@ -2498,6 +3364,22 @@ class Handler(BaseHTTPRequestHandler):
             # головоломки - клиент уже прогнал BFS локально (см. CLAUDE.md про
             # отсутствие анти-чита в однопользовательской игре).
             result = engine.solve_hypothesis(STATE, payload.get("tech_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/smelt_cancel_slot":
+            # Вынуть порцию из слота плавки - как cancel_manual_job, НЕ тратит ход,
+            # сырьё возвращается (engine.cancel_melt_slot).
+            try:
+                index = int(payload.get("index"))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "index должен быть целым числом"})
+                return
+            result = engine.cancel_melt_slot(STATE, payload.get("building_id"), index)
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/smelt_skim":
+            # Снять шлак из тигля на склад - не тратит ход (engine.skim_smeltery).
+            result = engine.skim_smeltery(STATE, payload.get("building_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/insert_soul":
@@ -2696,6 +3578,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "Такого сохранения нет."})
                 return
             STATE = GameState.load(str(path))
+            engine.drop_removed_content(STATE)
             STATE.save_name = name  # имя определяется выбранным слотом, а не тем, что лежало в файле
             _LAST_ENERGY_SHORTFALL = {}  # снимок относится к предыдущей партии, а не к загруженной
             save_state(STATE)  # загруженное сохранение становится текущим автосохранением

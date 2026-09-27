@@ -2,12 +2,13 @@
 Энергия в цене рецепта и ожидание её притока (на заказах автокрафта).
 
 - Заказ не отклоняется из-за нехватки энергии: его шаги каждый ход делают столько
-  прокруток, на сколько хватает накопленного (engine._energy_wait_failure,
-  _aggregate_autocraft_demand "energy_wait").
+  прокруток, на сколько хватает накопленного (_aggregate_autocraft_demand
+  "energy_wait").
 - Ручной клик, которому не хватает ТОЛЬКО энергии, тоже ждёт (заказ без шагов,
   процессор ему не нужен).
-- Ждать бессмысленно - сразу отказ: нет ни одного источника энергии или один
-  платёж больше ёмкости хранилищ.
+- Энергия никогда не причина отказа: нет источника или платёж больше ёмкости
+  хранилищ - заказ стоит, а статус объясняет почему (engine.energy_wait_note).
+  Энергия хода сперва идёт на крафты, в хранилища - только остаток.
 - Преобразователи тратят энергию ПОСЛЕДНИМИ в ходу и не трогают то, что копят
   заказы (engine.energy_reserved).
 - Сетка: энергия в cost сверх узора (валидатор), пачка «×N» останавливается на
@@ -193,14 +194,19 @@ class EnergyWaitEngineTests(unittest.TestCase):
         self.assertIsInstance(placed["reserved"]["e_ingot"], int)
         self.assertGreaterEqual(s.resources["energy"], 0)
 
-    # --- когда ждать бессмысленно ---
+    # --- энергия не причина отказа ---
 
-    def test_no_energy_source_fails_fast(self):
+    def test_without_an_energy_source_the_order_waits_with_a_reason(self):
         s = self.state(resources={"raw_a": 10, "energy": 0}, buildings={"e_gen": 0})
         failure, placed = order(s, {"e_ingot": 1})
-        self.assertEqual((failure.reason, placed), ("no_energy_source", None))
-        self.assertIn("источника энергии", engine.describe_autocraft_failure(failure))
-        self.assertEqual(s.resources["raw_a"], 10)
+        self.assertIsNone(failure)
+        run_turns(s, 2)
+        self.assertEqual(s.orders, [placed])
+        self.assertTrue(placed["waits_energy"])
+        self.assertIn("нет ни одного источника", placed["status"])
+        s.buildings["e_gen"] = 1  # построили генератор - заказ пошёл сам
+        run_turns(s, 1)
+        self.assertEqual((s.orders, s.resources.get("e_ingot")), ([], 1))
 
     def test_disabled_generator_is_not_a_source(self):
         s = self.state(resources={"energy": 0, "raw_b": 5}, buildings={"e_gen": 0, "e_fuel_gen": 1})
@@ -215,21 +221,34 @@ class EnergyWaitEngineTests(unittest.TestCase):
         self.assertFalse(engine.is_daytime(s))
         self.assertTrue(engine.has_energy_source(s))
 
-    def test_single_payment_over_storage_fails_fast(self):
+    def test_payment_over_storage_is_paid_with_the_inflow_of_the_turn(self):
+        # 60 за раз при банке на 50: запас между ходами - до 50, но за ход приходит ещё 10.
         s = self.state(resources={"energy": 0})
-        failure, _ = order(s, {"energy": 60})
-        self.assertEqual(failure.reason, "energy_over_capacity")
-        self.assertIn("вмещают только 50", engine.describe_autocraft_failure(failure))
         result = engine.do_manual_action(s, "big_energy")
-        self.assertFalse(result.ok)
-        self.assertIn("вмещают только 50", result.message)
-        self.assertEqual(s.orders, [])
+        self.assertTrue(result.ok and result.pending, result.message)
+        self.assertIn("хранилища вмещают 50", result.message)
+        run_turns(s, 5)
+        self.assertIn("за раз нужно 60", s.orders[0]["status"])
+        run_turns(s, 1)  # 50 в запасе + 10 притока
+        self.assertEqual((s.orders, s.resources.get("e_big")), ([], 1))
 
-    def test_per_fire_energy_over_storage_fails_fast_in_a_chain(self):
+    def test_generation_without_storage_is_spent_on_crafts(self):
+        # Хранилищ нет вовсе: энергия хода идёт на крафт, в хранилища (0) - остаток.
+        s = self.state(resources={"energy": 0}, buildings={"e_bank": 0})
+        result = engine.do_manual_action(s, "spark_click")
+        self.assertTrue(result.pending, result.message)
+        run_turns(s, 1)
+        self.assertEqual((s.orders, s.resources.get("e_spark"), s.resources["energy"]), ([], 1, 0))
+
+    def test_per_fire_energy_over_what_a_turn_gives_waits_with_a_reason(self):
         actions = {**EXTRA_ACTIONS, "make_ingot": _action("Тест: слиток", "e_loc", {"raw_a": 1, "energy": 70}, {"e_ingot": 1})}
         engine.MANUAL_ACTIONS = {**engine.MANUAL_ACTIONS, **actions}
         s = self.state(resources={"raw_a": 10, "energy": 0})
-        self.assertEqual(order(s, {"e_ingot": 1})[0].reason, "energy_over_capacity")
+        failure, placed = order(s, {"e_ingot": 1})
+        self.assertIsNone(failure)
+        run_turns(s, 8)
+        self.assertEqual(s.orders, [placed])
+        self.assertIn("за раз нужно 70, хранилища вмещают 50", placed["status"])
 
     # --- ручной клик ---
 

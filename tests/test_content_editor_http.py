@@ -32,10 +32,14 @@ class ContentEditorHttpTests(unittest.TestCase):
         cls._orig_content_path = ce.CONTENT_PATH
         cls._orig_backup_dir = ce.BACKUP_DIR
         cls._orig_save_path = ce.SAVE_PATH
+        cls._orig_legacy_save_path = ce._LEGACY_SAVE_PATH
         cls._orig_sounds_dir = ce.SOUNDS_DIR
         ce.CONTENT_PATH = tmp_content
         ce.BACKUP_DIR = Path(cls._tmpdir.name) / "content_backups"
         ce.SAVE_PATH = Path(cls._tmpdir.name) / "save.json"
+        # Тоже подменяем на tmp-путь - иначе /api/reset_save тронул бы РЕАЛЬНЫЙ
+        # save.json в корне репозитория, если бы он там оказался (см. ce.py).
+        ce._LEGACY_SAVE_PATH = Path(cls._tmpdir.name) / "legacy_save.json"
         ce.SOUNDS_DIR = Path(cls._tmpdir.name) / "sounds"
 
         cls.server = HTTPServer(("127.0.0.1", PORT), ce.Handler)
@@ -48,6 +52,7 @@ class ContentEditorHttpTests(unittest.TestCase):
         ce.CONTENT_PATH = cls._orig_content_path
         ce.BACKUP_DIR = cls._orig_backup_dir
         ce.SAVE_PATH = cls._orig_save_path
+        ce._LEGACY_SAVE_PATH = cls._orig_legacy_save_path
         ce.SOUNDS_DIR = cls._orig_sounds_dir
         cls._tmpdir.cleanup()
 
