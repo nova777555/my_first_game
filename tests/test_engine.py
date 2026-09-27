@@ -1341,6 +1341,46 @@ class MechanismToggleTests(FixtureTestCase):
         self.assertEqual(s.broken["soul_synth"], 1)
 
 
+class PausedJobsTests(FixtureTestCase):
+    """Долгая задача без работающего механизма (алтаря, лаборатории) стоит на паузе."""
+
+    def test_long_action_pauses_while_its_mechanism_is_broken(self):
+        s = GameState(resources={"raw_a": 3}, buildings={"mechanism_a": 1})
+        self.assertTrue(engine.do_manual_action(s, "mechanism_a_delayed_action").ok)
+        engine.advance_turn(s)
+        s.broken["mechanism_a"] = 1
+        self.assertIn("Механизм А", engine.manual_job_pause_reason(s, "mechanism_a_delayed_action"))
+        for _ in range(5):
+            engine.advance_turn(s)
+        self.assertEqual(s.manual_jobs["mechanism_a_delayed_action"]["turns_done"], 1)
+        s.broken["mechanism_a"] = 0
+        for _ in range(3):
+            engine.advance_turn(s)
+        self.assertNotIn("mechanism_a_delayed_action", s.manual_jobs)
+        self.assertEqual(s.resources["mech_output"], 5)
+
+    def test_ritual_pauses_while_its_altar_is_broken(self):
+        s = GameState(buildings={"ritual_altar": 1}, resources={"raw_a": 5, "raw_b": 1})
+        self.assertTrue(engine.start_ritual(s, "ritual_slow").ok)
+        s.broken["ritual_altar"] = 1
+        before = s.resources["raw_a"]
+        engine.advance_turn(s)
+        self.assertEqual(s.ritual_jobs["ritual_altar"]["turns_done"], 0)
+        self.assertEqual(s.resources["raw_a"], before)  # доп. расход на паузе не списывается
+        self.assertIsNotNone(engine.ritual_job_pause_reason(s, "ritual_altar"))
+
+    def test_research_pauses_without_a_working_lab_of_its_tier(self):
+        s = GameState(buildings={"lab2": 1}, broken={"lab2": 1}, active_research={
+            "tech_id": "tech_tier2_slow", "turns_total": 5, "turns_done": 2, "cost": {"raw_a": 1},
+        })
+        engine.advance_turn(s)
+        self.assertEqual(s.active_research["turns_done"], 2)
+        self.assertIn("тира 2", engine.research_pause_reason(s))
+        s.broken["lab2"] = 0
+        engine.advance_turn(s)
+        self.assertEqual(s.active_research["turns_done"], 3)
+
+
 class ResourceCapTests(FixtureTestCase):
     def test_manual_action_gain_is_capped(self):
         s = GameState(resources={"raw_a": engine.MAX_RESOURCE_AMOUNT - 1})

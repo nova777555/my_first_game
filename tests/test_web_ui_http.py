@@ -797,7 +797,7 @@ class WebUiHttpTests(unittest.TestCase):
         # успел тикнуть один раз (тот же принцип, что у craft_delayed выше).
         self.assertEqual(state["active_research"], {
             "tech_id": "tech_tier2_slow", "name": "Технология тира 2 (долгая)",
-            "turns_done": 1, "turns_total": 5,
+            "turns_done": 1, "turns_total": 5, "paused": None,
         })
         tech_entry = next(t for t in state["tech_tree"] if t["id"] == "tech_tier2_slow")
         self.assertEqual(tech_entry["research_turns"], 5)

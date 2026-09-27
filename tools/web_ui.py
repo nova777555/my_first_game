@@ -1251,6 +1251,7 @@ def ritual_altars_view(state: GameState) -> list[dict]:
                     "recipe_name": RITUAL_RECIPES.get(active_job["recipe_id"], {}).get("name", active_job["recipe_id"]),
                     "turns_done": active_job["turns_done"],
                     "turns_total": active_job["turns_total"],
+                    "paused": engine.ritual_job_pause_reason(state, bid),
                 }
                 if active_job else None
             ),
@@ -1706,6 +1707,7 @@ def active_research_view(state: GameState) -> dict | None:
         "name": TECHS[job["tech_id"]]["name"],
         "turns_done": job["turns_done"],
         "turns_total": job["turns_total"],
+        "paused": engine.research_pause_reason(state),
     }
 
 
@@ -1720,6 +1722,7 @@ def manual_jobs_view(state: GameState) -> list[dict]:
             "turns_done": job["turns_done"],
             "turns_total": job["turns_total"],
             "autocraft": job["autocraft"],
+            "paused": job["paused"],
         }
         for job in engine.manual_jobs_view(state)
     ]
@@ -1885,6 +1888,7 @@ def crafting_view(state: GameState) -> list[dict]:
                     "name": MANUAL_ACTIONS[job_aid]["name"],
                     "turns_done": running["turns_done"],
                     "turns_total": running["turns_total"],
+                    "paused": engine.manual_job_pause_reason(state, job_aid),
                     "gain": manual_action_gain_list(job_gain, MANUAL_ACTIONS[job_aid].get("gain_chance", {})),
                 }
                 break
@@ -2629,6 +2633,7 @@ def build_view(state: GameState) -> dict:
             # не уходя с карточки.
             "turns_done": running_job["turns_done"] if running_job else None,
             "turns_total": running_job["turns_total"] if running_job else None,
+            "job_paused": engine.manual_job_pause_reason(state, aid) if running_job else None,
         })
     hunting = hunting_view(state)
     hunting_location_ids = {m["location"] for m in hunting["mobs"]}

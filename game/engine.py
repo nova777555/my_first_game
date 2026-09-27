@@ -5384,6 +5384,8 @@ def _process_ritual_jobs(state: GameState, report: ProductionReport) -> None:
     старте). По достижении turns_total - produces/produces_chance
     разворачиваются РОВНО ОДИН РАЗ, job удаляется."""
     for building_id, job in list(state.ritual_jobs.items()):
+        if ritual_job_pause_reason(state, building_id):
+            continue  # алтарь сломан - ритуал ждёт ремонта, доп. расход не списывается
         extra = job.get("extra_consumes_per_turn")
         if extra:
             to_consume = extra
@@ -9588,6 +9590,8 @@ def _process_manual_jobs(state: GameState, report: ProductionReport) -> None:
     turns_done доходит до turns_total - gain_chance/диапазон разворачиваются РОВНО ОДИН
     РАЗ прямо здесь (тот же момент, что produces у _process_energy_jobs), job удаляется."""
     for action_id, job in list(state.manual_jobs.items()):
+        if manual_job_pause_reason(state, action_id):
+            continue  # механизм сломан - задача ждёт ремонта
         job["turns_done"] += 1
         if job["turns_done"] < job["turns_total"]:
             continue
@@ -9604,15 +9608,43 @@ def _process_manual_jobs(state: GameState, report: ProductionReport) -> None:
         report.manual_completed.append(action_id)
 
 
+def manual_job_pause_reason(state: GameState, action_id: str) -> str | None:
+    """Почему многоходовая задача стоит (None - идёт): механизм рецепта
+    (action_mechanism_building) сломан. Такая задача не тикает, пока его не починят."""
+    building_id = action_mechanism_building(MANUAL_ACTIONS.get(action_id, {}))
+    if building_id and working_count(state, building_id) <= 0:
+        return f"на паузе: «{BUILDINGS[building_id]['name']}» не работает"
+    return None
+
+
+def ritual_job_pause_reason(state: GameState, building_id: str) -> str | None:
+    """Почему ритуал стоит (None - идёт): алтарь сломан."""
+    if working_count(state, building_id) <= 0:
+        return f"на паузе: «{BUILDINGS.get(building_id, {}).get('name', building_id)}» не работает"
+    return None
+
+
+def research_pause_reason(state: GameState) -> str | None:
+    """Почему исследование стоит (None - идёт): нет работающей лаборатории его тира."""
+    job = state.active_research
+    if job is None:
+        return None
+    tier = TECHS[job["tech_id"]].get("tier", 1)
+    if tier > lab_tier_capacity(state):
+        return f"на паузе: нужна работающая лаборатория тира {tier}"
+    return None
+
+
 def manual_jobs_view(state: GameState) -> list[dict]:
     """Список активных многоходовых ручных задач для UI - какое действие, сколько ходов
     прошло/нужно всего (см. autocraft_jobs_view - тот же принцип, только без ETA: тиканье
     здесь не зависит ни от какой пропускной способности, ровно 1 ход/тик). "autocraft" -
-    партию запустил автокрафт, а не игрок (см. _new_manual_job)."""
+    партию запустил автокрафт, а не игрок (см. _new_manual_job). "paused" - почему
+    задача стоит (manual_job_pause_reason) или None."""
     return [
         {
             "action_id": aid, "turns_done": j["turns_done"], "turns_total": j["turns_total"],
-            "autocraft": bool(j.get("autocraft")),
+            "autocraft": bool(j.get("autocraft")), "paused": manual_job_pause_reason(state, aid),
         }
         for aid, j in state.manual_jobs.items()
     ]
@@ -9625,7 +9657,7 @@ def _process_research(state: GameState, report: ProductionReport) -> None:
     записи. cost уже списан целиком в момент старта - тиканье не ограничено никаким
     сырьём/бюджетом, просто +1 turns_done безусловно."""
     job = state.active_research
-    if job is None:
+    if job is None or research_pause_reason(state):
         return
     job["turns_done"] += 1
     if job["turns_done"] < job["turns_total"]:

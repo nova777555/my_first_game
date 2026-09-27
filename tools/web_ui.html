@@ -4517,13 +4517,15 @@ function renderEnergyCraft() {
 // карточка своё название уже показывает сама (см. main.name выше), так что там
 // прогресс идёт голым числом. Отмена (cancel_manual_job) возвращает игроку cost,
 // списанный при старте, - "✕" тут не расходный клик.
-function manualJobProgressRow(actionId, turnsDone, turnsTotal, label) {
+// paused - почему задача стоит (сломан механизм, engine.manual_job_pause_reason).
+function manualJobProgressRow(actionId, turnsDone, turnsTotal, label, paused) {
   const ratio = turnsTotal > 0 ? turnsDone / turnsTotal : 0;
   const row = el("div", { class: "autocraft-job" });
   const head = el("div", { class: "job-head" });
   const text = label ? `${label}: ${turnsDone}/${turnsTotal} ход(ов)` : `${turnsDone}/${turnsTotal} ход(ов)`;
   head.appendChild(el("span", { text }));
   const right = el("span", { class: "job-right" });
+  if (paused) right.appendChild(jobPausedBadge(paused));
   right.appendChild(jobCancelButton(() => cancelJob("manual", { action_id: actionId })));
   head.appendChild(right);
   row.appendChild(head);
@@ -4549,7 +4551,7 @@ function renderManualJobs() {
   VIEW.manual_jobs.forEach(job => {
     // job.autocraft - партию запустил автокрафт (см. engine._new_manual_job), а не игрок.
     const label = job.autocraft ? `${job.name} (автокрафт)` : job.name;
-    container.appendChild(manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, label));
+    container.appendChild(manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, label, job.paused));
   });
 }
 
@@ -4602,6 +4604,7 @@ function researchProgressRow(job, label) {
   const text = label ? `${label}: ${job.turns_done}/${job.turns_total} ход(ов)` : `${job.turns_done}/${job.turns_total} ход(ов)`;
   head.appendChild(el("span", { text }));
   const right = el("span", { class: "job-right" });
+  if (job.paused) right.appendChild(jobPausedBadge(job.paused));
   right.appendChild(jobCancelButton(() => cancelJob("research", {})));
   head.appendChild(right);
   row.appendChild(head);
@@ -5870,6 +5873,12 @@ async function analyzeCreature(creatureId) {
 // Кнопка "✕" в строке фоновой задачи (автокрафт/крафт за энергию) - отменяет задачу
 // НЕМЕДЛЕННО, без траты хода (см. game/engine.py:cancel_autocraft_job/cancel_energy_job) -
 // чтобы игрок, запустивший что-то слишком долгое/дорогое, не был этим заложником.
+// «пауза» у долгой задачи, механизм (алтарь, лаборатория) которой не работает -
+// задача не тикает, пока его не починят; полная причина - в подсказке.
+function jobPausedBadge(reason) {
+  return el("span", { class: "job-eta bad", text: "пауза", title: reason });
+}
+
 function jobCancelButton(onClick) {
   const btn = el("button", { class: "job-cancel", text: "✕", title: "Отменить" });
   btn.addEventListener("click", onClick);
@@ -7221,13 +7230,14 @@ function ritualFindMatch(entry) {
   }) || null;
 }
 
-function ritualJobProgressRow(buildingId, turnsDone, turnsTotal, label) {
+function ritualJobProgressRow(buildingId, turnsDone, turnsTotal, label, paused) {
   const ratio = turnsTotal > 0 ? turnsDone / turnsTotal : 0;
   const row = el("div", { class: "autocraft-job" });
   const head = el("div", { class: "job-head" });
   const text = label ? `${label}: ${turnsDone}/${turnsTotal} ход(ов)` : `${turnsDone}/${turnsTotal} ход(ов)`;
   head.appendChild(el("span", { text }));
   const right = el("span", { class: "job-right" });
+  if (paused) right.appendChild(jobPausedBadge(paused));
   right.appendChild(jobCancelButton(() => cancelJob("ritual", { building_id: buildingId })));
   head.appendChild(right);
   row.appendChild(head);
@@ -7498,7 +7508,7 @@ function openRitualCircleModal(buildingId) {
     const controls = el("div", { id: "ritControlsArea", style: "width:100%;max-width:520px;display:flex;flex-direction:column;align-items:center;" });
     body.appendChild(controls);
     if (activeJob && jobRecipe) {
-      controls.appendChild(ritualJobProgressRow(buildingId, activeJob.turns_done, activeJob.turns_total, activeJob.recipe_name));
+      controls.appendChild(ritualJobProgressRow(buildingId, activeJob.turns_done, activeJob.turns_total, activeJob.recipe_name, activeJob.paused));
     } else if (!activeJob) {
       ritualBuildIdleControls(controls);
     }
@@ -7512,7 +7522,9 @@ function openRitualCircleModal(buildingId) {
 
   if (entry) {
     if (activeJob) {
-      ritualSetStatus(`Ход ${activeJob.turns_done} из ${activeJob.turns_total}`);
+      ritualSetStatus(activeJob.paused
+        ? `Ход ${activeJob.turns_done} из ${activeJob.turns_total} - ${activeJob.paused}`
+        : `Ход ${activeJob.turns_done} из ${activeJob.turns_total}`);
       const prevTurns = ritualKnownTurnsDone[buildingId];
       ritualKnownTurnsDone[buildingId] = activeJob.turns_done;
       if (prevTurns !== undefined && activeJob.turns_done > prevTurns) {
@@ -11897,7 +11909,7 @@ function craftGridAnimateWidth(node, from, to) {
 // (ключ "skip").
 function craftGridJobRow(job, fromRatio, toRatio) {
   const wrap = el("div", { class: "cg-job" });
-  const row = manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, job.name);
+  const row = manualJobProgressRow(job.action_id, job.turns_done, job.turns_total, job.name, job.paused);
   const right = row.querySelector(".job-right");
   const waitBtn = el("button", { class: "small cg-wait-btn", text: "Ждать ход", title: "Пропустить ход - механизм продолжит работу" });
   const remaining = cooldownRemainingMs("skip");
@@ -13988,7 +14000,7 @@ function actionCard(kind, item) {
   group.dataset.actionId = item.id;
   group.appendChild(btn);
 
-  if (manualJobRunning) group.appendChild(manualJobProgressRow(item.id, item.turns_done, item.turns_total));
+  if (manualJobRunning) group.appendChild(manualJobProgressRow(item.id, item.turns_done, item.turns_total, undefined, item.job_paused));
 
   if (!hasScale) return group;
 
