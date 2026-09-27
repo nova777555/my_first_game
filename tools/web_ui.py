@@ -3675,13 +3675,6 @@ class Handler(BaseHTTPRequestHandler):
             )
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
-        elif self.path == "/api/demolish_building":
-            # Снос одной копии постройки (см. engine.demolish_building) - без
-            # возврата ресурсов, не тратит ход (тот же принцип, что и у
-            # set_building_active_count выше - административное действие).
-            result = engine.demolish_building(STATE, payload.get("building_id"))
-            save_state(STATE)
-            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/cancel_job":
             # Отмена задачи (автокрафт/крафт за энергию/долгое ручное действие) - как
             # toggle_pin/toggle_autocraft, НЕ тратит ход (см. game/engine.py:

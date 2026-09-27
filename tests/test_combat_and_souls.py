@@ -842,18 +842,6 @@ class SoulCollectorTests(FixtureTestCase):
         self.assertTrue(all(inst["installed"] == ["test_soul"] for inst in s.soul_collector_instances.values()))
         self.assertEqual(s.soul_slots["soul_synth"], [])
 
-    def test_demolish_removes_the_physical_instance_and_its_installed_soul(self):
-        # Снос постройки-синтезатора (engine.demolish_building) удаляет ЦЕЛИКОМ
-        # физический экземпляр вместе со вставленной душой - без возврата чего-либо
-        # (тот же принцип, что у обычных построек, см. CLAUDE.md).
-        s = GameState(buildings={"soul_synth": 1})
-        instance_id = self._instance(s)
-        engine.insert_soul(s, instance_id, "test_soul")
-        result = engine.demolish_building(s, "soul_synth")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.buildings["soul_synth"], 0)
-        self.assertNotIn(instance_id, s.soul_collector_instances)
-
 
 class RepeatableUpgradeTests(FixtureTestCase):
     """Апгрейды soul_collector переехали на per-instance (см. SoulCollectorTests

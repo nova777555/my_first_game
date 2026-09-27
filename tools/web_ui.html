@@ -4048,7 +4048,7 @@ function openAutocraftConfirmModal(preview) {
   });
 }
 
-// Игровая замена браузерных confirm() (снос постройки, загрузка сохранения,
+// Игровая замена браузерных confirm() (отмена с переполнением склада, загрузка сохранения,
 // обнуление прогресса) - тот же "чертёж"-каркас, что у остальных модалок
 // (скобки вставляются автоматически, см. ensureModalBrackets), вместо
 // системного диалога, выбивающегося из дизайна игры. Возвращает
@@ -4353,7 +4353,7 @@ function renderAll() {
     if (smelteryEntry(smelteryOverlay.dataset.buildingId)) openSmelteryModal(smelteryOverlay.dataset.buildingId);
     else closeSmelteryModal();
   }
-  // Преобразователь сломан/снесён - его локация пропала из VIEW.locations, модалка
+  // Преобразователь сломан - его локация пропала из VIEW.locations, модалка
   // закрывается (openConverterModal сам ничего не строит без локации).
   const converterOverlay = document.getElementById("converterOverlay");
   if (converterOverlay) {
@@ -4396,7 +4396,7 @@ function renderAll() {
     // Кнопка "Улучшения" открывается из VIEW.buildings (панель "Производственные
     // мощности") - только у уже построенной копии.
     const freshItem = VIEW.buildings.find(b => b.id === upgradesOverlay.dataset.buildingId);
-    // Постройка теоретически могла исчезнуть совсем (например, разобрана) -
+    // Постройка теоретически могла исчезнуть совсем (например, из контента) -
     // тогда просто закрываем модалку вместо показа устаревших данных.
     if (freshItem) openBuildingUpgradesModal(freshItem);
     else closeBuildingUpgradesModal();
@@ -8361,27 +8361,6 @@ async function setBuildingActiveCount(buildingId, activeCount) {
   }
 }
 
-// Снос одной копии постройки (см. engine.demolish_building) - ресурсы не
-// возвращаются, поэтому подтверждение обязательно (тот же приём, что у
-// "Начать заново"). Не тратит ход - как setBuildingActiveCount выше.
-async function demolishBuilding(buildingId, name) {
-  if (busy) return;
-  if (!await confirmModal(`Снести «${name}»? Затраченные на неё ресурсы не вернутся.`, { title: "Снести постройку", confirmText: "Снести", danger: true })) return;
-  busy = true;
-  try {
-    const res = await fetch("/api/demolish_building", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ building_id: buildingId }),
-    });
-    const payload = await res.json();
-    VIEW = payload.state;
-    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
-    renderAll();
-  } finally {
-    busy = false;
-  }
-}
-
 async function abandonEncounter() {
   if (busy) return;
   busy = true;
@@ -9334,12 +9313,6 @@ function renderBuildings() {
         btn.addEventListener("click", () => openReactorModal(b.id));
         actions.appendChild(btn);
       }
-      // Снос - всегда доступен для уже построенной копии (эта панель и так
-      // показывает только b.count >= 1), поэтому вне условия выше.
-      const demolishBtn = el("button", { class: "upgrade-open-btn", text: "💥 Снести" });
-      demolishBtn.title = "Снести одну копию. Затраченные ресурсы не возвращаются.";
-      demolishBtn.addEventListener("click", () => demolishBuilding(b.id, b.name));
-      actions.appendChild(demolishBtn);
       head.appendChild(actions);
     }
 

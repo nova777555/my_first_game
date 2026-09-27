@@ -5733,7 +5733,7 @@ def _process_smelteries(state: GameState, report: ProductionReport) -> None:
 
 
 def _drop_smeltery(state: GameState, building_id: str) -> None:
-    """Плавильни больше нет (снесена последняя копия / исчезла из контента): сырьё из
+    """Плавильни больше нет (исчезла из контента): сырьё из
     слотов возвращается на склад, металл в тигле и недоостывшая отливка пропадают."""
     sm = state.smelteries.pop(building_id, None) or {}
     for slot in sm.get("slots", []):
@@ -6871,7 +6871,7 @@ def _process_replicator_jobs(state: GameState, report: ProductionReport) -> None
     ресурса, сколько уже переработано (партия заказа - в его резерв, см.
     _deliver_job_output). Материя списана при запуске - поэтому энергия и чужие
     потребители тут ни при чём. Репликаций типа больше, чем его слотов (копия
-    сломалась/снесена), - лишние ждут, по порядку запуска."""
+    сломалась), - лишние ждут, по порядку запуска."""
     if not state.replicator_jobs:
         return
     busy: dict[str, int] = {}
@@ -8264,66 +8264,6 @@ def repair(state: GameState, building_id: str) -> ActionResult:
     remaining_broken = state.broken.get(building_id, 0)
     suffix = f" Осталось сломано: {remaining_broken} шт. (не хватает инструмента)." if remaining_broken else ""
     return ActionResult(True, f"Отремонтировано: {name} ({fixed} шт.).{suffix}")
-
-
-def demolish_building(state: GameState, building_id: str) -> ActionResult:
-    """Сносит РОВНО ОДНУ копию building_id - противоположность build(), без
-    возврата затраченных на неё ресурсов (прямое пожелание - снос не компенсация,
-    а способ избавиться от лишней/устаревшей копии). Не тратит ход - это
-    административное действие того же рода, что set_building_active_count/
-    toggle_autocraft, а не игровое действие вроде build/repair.
-
-    Приоритетно сносит СЛОМАННУЮ копию, если такая есть (снос работающей копии
-    первой при наличии уже бесполезной сломанной был бы странным выбором по
-    умолчанию), иначе - любую работающую. state.building_disabled нарочно не
-    трогается: building_disabled_count() сам зажимает значение сверху текущим
-    working_count при чтении, лишнее там не мешает.
-
-    У построек с физическими экземплярами (see _uses_physical_instances - фермы/
-    синтезаторы душ/реакторы) сносится ЦЕЛИКОМ один конкретный экземпляр вместе
-    со всем его содержимым (вставленные души, топливо в решётке реактора,
-    купленные ИМЕННО этим экземпляром апгрейды) - тоже без возврата. Особи
-    фермы, заселённые именно в этот экземпляр, не пропадают - расселяются
-    обратно в "банк" (farm_instance_id = None), тот же приём, что при миграции
-    старых сохранений в _ensure_farm_instances."""
-    if building_id not in BUILDINGS:
-        return ActionResult(False, "Неизвестная постройка.")
-    total = state.buildings.get(building_id, 0)
-    if total <= 0:
-        return ActionResult(False, "Эта постройка не построена.")
-    name = BUILDINGS[building_id]["name"]
-    broken_count = state.broken.get(building_id, 0)
-    demolish_broken = broken_count > 0
-
-    if _uses_physical_instances(building_id):
-        _ensure_physical_instances(state)
-        instances = _physical_instances(state, building_id)
-        candidates = [
-            iid for iid, inst in instances.items()
-            if inst["building_id"] == building_id and inst["broken"] == demolish_broken
-        ]
-        if not candidates:
-            # Рассинхрон агрегата с экземплярами не должен происходить, но на
-            # всякий случай берём любую копию нужного building_id, а не падаем.
-            candidates = [iid for iid, inst in instances.items() if inst["building_id"] == building_id]
-        instance_id = candidates[0]
-        del instances[instance_id]
-        if _is_farm_building(building_id):
-            for creature in state.creatures.values():
-                if creature.get("farm_instance_id") == instance_id:
-                    creature["farm_instance_id"] = None
-
-    if demolish_broken:
-        state.broken[building_id] = broken_count - 1
-        if not _uses_physical_instances(building_id):
-            remaining_types = _broken_type_entries(state, building_id)[:-1]
-            state.broken_types[building_id] = remaining_types
-
-    state.buildings[building_id] = total - 1
-    if total - 1 <= 0 and building_id in state.smelteries:
-        _drop_smeltery(state, building_id)
-        return ActionResult(True, f"Снесено: {name}. Сырьё из слотов плавки вернулось на склад, металл в тигле пропал.")
-    return ActionResult(True, f"Снесено: {name}.")
 
 
 def resolve_action_cost(state: GameState, action_type: str, action_id: str, scale: int | None = None) -> dict[str, int] | None:

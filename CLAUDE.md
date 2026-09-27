@@ -283,7 +283,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Repeatable-апгрейды (покупка N раз, цена растёт геометрически) | `engine.py`: `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `building_upgrade_purchase_count`, `farm_instance_upgrade_purchase_count`; контент `upgrades[].repeatable`/`cost_growth`/`max_purchases` |
 | Ползунок масштаба ручного действия | `engine.py`: `mechanism_scale_cap`, `effective_manual_action_stats(chosen_scale=...)`; `POST /api/action {scale}` |
 | Меню "Механизмы": вкл/выкл N из M копий пассивной постройки (produces И consumes непустые) | `state.building_disabled`; `engine.py`: `is_disableable_building`, `building_active_count`, `set_building_active_count`; `POST /api/set_building_active_count`; `web_ui.html: renderMechanismToggle` |
-| Снос постройки (1 копия за вызов, без возврата ресурсов, ход не тратится; сначала сносит сломанную копию, если есть; у ферм/синтезаторов душ/реакторов удаляет весь физический экземпляр, расселяя заселённых особей обратно в банк) | `engine.py: demolish_building`; `POST /api/demolish_building`; `web_ui.html: demolishBuilding` |
+| Сноса построек НЕТ (вырезан по прямому пожеланию, 2026-09-28: лишнее выключают ползунком). Постройку, удалённую из контента, со всем содержимым снимает загрузка сейва | `engine.py: drop_removed_content` |
 | "Механизмы" (постройка без produces/consumes + завязанные действия; рецепты наследуют постройку локации; кнопки механизмов в «Механизмах») | `locations.*.requires_building`/`shows_building_mechanisms`, `manual_actions.*.requires_building`, `engine.py: action_mechanism_building`, `effective_manual_action_stats`; `web_ui.py: _location_opens_as_button`; `web_ui.html: mechanismButtonsAt`/`mechanismOpenCard`/`buildingMechanismsAt`/`openConverterModal` |
 | Дробные/целые ресурсы | `content.json resources.*.fractional`; `engine.py: _round_amounts`; `content.py: RESOURCE_FRACTIONAL` |
 | Приоритет автокрафт-рецептов (и рецептов преобразователя — ключ `energy_recipe:<id>`) | `engine.py`: `resource_recipe`, `action_priority`, `set_action_priority`, `converter_preferred_resources`; контент `manual_actions.*.priority`, `state.action_priority`; `web_ui.py: action_priority_view`; `web_ui.html: renderAutocraftPriorityTab` |
@@ -689,7 +689,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
   сам меч с `instant_kill_max_hp`.
 - Синтезатор душ (`buildings.*.soul_collector: {slots, accepts_kind}`) — душа,
   вставленная в слот (`state.soul_slots`), ВЕЧНАЯ (не расходуется), пока
-  копия постройки не сломана/не разобрана или игрок сам её не вынул.
+  копия постройки не сломана или игрок сам её не вынул.
   Продукция — `soul_recipes[soul_id]`, та же форма (`produces`/
   `produces_chance`), что `gain`/`gain_chance` ручного действия. Вставка/выемка
   живёт в СВОЕЙ модалке (кнопка "Души" на карточке постройки, см.

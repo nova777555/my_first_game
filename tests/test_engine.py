@@ -1019,57 +1019,6 @@ class BuildResearchRepairTests(FixtureTestCase):
         self.assertTrue(result.ok)
         self.assertEqual(s.broken["gen"], 0)
 
-    def test_demolish_unbuilt_building_fails(self):
-        s = GameState()
-        result = engine.demolish_building(s, "gen")
-        self.assertFalse(result.ok)
-
-    def test_demolish_unknown_building_fails(self):
-        s = GameState()
-        result = engine.demolish_building(s, "no_such_building")
-        self.assertFalse(result.ok)
-
-    def test_demolish_removes_one_copy_without_refunding_resources(self):
-        # gen.cost = {"raw_b": 5} - демонтаж не начисляет его обратно.
-        s = GameState(resources={"raw_b": 100}, buildings={"gen": 2})
-        result = engine.demolish_building(s, "gen")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.buildings["gen"], 1)
-        self.assertEqual(s.resources["raw_b"], 100)  # ни один ресурс не вернулся
-
-    def test_demolish_prefers_a_broken_copy_over_a_working_one(self):
-        s = GameState(buildings={"gen": 3}, broken={"gen": 1})
-        result = engine.demolish_building(s, "gen")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.buildings["gen"], 2)
-        self.assertEqual(s.broken.get("gen", 0), 0)  # снесена именно сломанная копия
-        self.assertEqual(engine.working_count(s, "gen"), 2)  # ни одна рабочая копия не пострадала
-
-    def test_demolish_a_working_copy_when_none_are_broken(self):
-        s = GameState(buildings={"gen": 2})
-        result = engine.demolish_building(s, "gen")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.buildings["gen"], 1)
-        self.assertEqual(engine.working_count(s, "gen"), 1)
-
-    def test_demolish_clamps_manually_disabled_count_to_new_working_count(self):
-        # factory - disableable (produces И consumes непустые в фикстуре) -
-        # выключено ползунком 2 из 2 копий; снос одной рабочей не должен оставить
-        # "призрачных" выключенных копий сверх реально существующих
-        # (building_disabled_count зажимает значение сверху working_count при чтении).
-        s = GameState(buildings={"factory": 2}, building_disabled={"factory": 2})
-        result = engine.demolish_building(s, "factory")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(engine.working_count(s, "factory"), 1)
-        self.assertEqual(engine.building_disabled_count(s, "factory"), 1)
-
-    def test_demolish_last_copy_leaves_building_unbuilt(self):
-        s = GameState(buildings={"gen": 1})
-        result = engine.demolish_building(s, "gen")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.buildings["gen"], 0)
-        self.assertEqual(engine.working_count(s, "gen"), 0)
-
 
 class TypedBreakdownAndToolDurabilityTests(FixtureTestCase):
     """flaky_typed (breakdown_types=["worn_gear"], breakdown_chance=1.0) + TOOLS["wrench"]
@@ -3122,21 +3071,6 @@ class GeneticsTests(FixtureTestCase):
         self.assertTrue(result.ok, result.message)
         self.assertEqual(s.creatures[cid]["farm_instance_id"], instance_id)
         self.assertEqual(s.creatures[cid]["turns_alive"], 0)
-
-    def test_demolish_evicts_a_housed_creature_back_to_the_bank(self):
-        # Снос экземпляра фермы (engine.demolish_building) удаляет ЦЕЛИКОМ этот
-        # физический экземпляр (state.farm_instances), но заселённая в него особь
-        # не пропадает - расселяется в "банк" (farm_instance_id = None), тот же
-        # приём, что при миграции старых сохранений в _ensure_farm_instances.
-        s = GameState(buildings={"apiary": 1})
-        instance_id = self._farm_instance(s, "apiary")
-        cid = self._spawn(s, "critter_a")
-        engine.house_creature(s, cid, instance_id)
-        result = engine.demolish_building(s, "apiary")
-        self.assertTrue(result.ok, result.message)
-        self.assertEqual(s.buildings["apiary"], 0)
-        self.assertNotIn(instance_id, s.farm_instances)
-        self.assertIsNone(s.creatures[cid]["farm_instance_id"])
 
     def test_house_creature_fails_without_a_free_slot_in_that_farm(self):
         s = GameState(buildings={"apiary": 1})  # 2 слота

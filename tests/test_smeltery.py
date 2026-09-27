@@ -232,14 +232,6 @@ class LifecycleTests(FixtureTestCase):
         self.assertEqual(restored.smelteries, s.smelteries)
         self.assertEqual(restored.discovered_alloys, {"alloy_hidden"})
 
-    def test_demolishing_last_copy_returns_slot_input(self):
-        s = self.forge(smelt_ore_b=1)
-        engine.load_melt(s, "smelt_forge", "melt_b")
-        s.smelteries["smelt_forge"]["tank"] = {"molten_a": 2}
-        engine.demolish_building(s, "smelt_forge")
-        self.assertNotIn("smelt_forge", s.smelteries)
-        self.assertEqual(s.resources["smelt_ore_b"], 1)
-
     def test_drop_removed_content(self):
         s = self.forge()
         s.smelteries["smelt_forge"] = {

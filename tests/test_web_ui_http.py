@@ -1368,20 +1368,6 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertFalse(resp["ok"])
 
-    def test_demolish_building_removes_one_copy_without_advancing_turn(self):
-        web_ui.STATE.buildings["gen"] = 2
-        status, resp = self._post("/api/demolish_building", {"building_id": "gen"})
-        self.assertEqual(status, 200)
-        self.assertTrue(resp["ok"], resp["message"])
-        self.assertEqual(resp["state"]["turn"], 1)  # настройка, не игровое действие - ход не тратится
-        row = next(b for b in resp["state"]["buildings"] if b["id"] == "gen")
-        self.assertEqual(row["count"], 1)
-
-    def test_demolish_building_rejects_a_building_that_is_not_built(self):
-        status, resp = self._post("/api/demolish_building", {"building_id": "gen"})
-        self.assertEqual(status, 200)
-        self.assertFalse(resp["ok"])
-
     def test_energy_priorities_view_lists_every_machine_type_with_quota(self):
         status, resp = self._get("/api/state")
         by_id = {e["id"]: e for e in resp["energy_priorities"]}
