@@ -2714,6 +2714,11 @@ def autocraft_preview(state: GameState, cost: dict[str, int]) -> dict | None:
     return {"nodes": nodes}
 
 
+def is_already_ordered(state: GameState, kind: str | None, target_id) -> bool:
+    """Идёт ли уже заказ на это действие (kind/target_id - как у _pay_or_defer)."""
+    return any(o["kind"] == kind and o["target_id"] == target_id for o in state.orders)
+
+
 def autocraft_failure(
     state: GameState, cost: dict[str, int], kind: str | None = None, target_id=None, scale: int | None = None,
 ) -> AutocraftFailure | None:
@@ -2722,7 +2727,7 @@ def autocraft_failure(
     заказ оформится; иначе - та же причина, с которой откажет _place_order."""
     if all(state.resources.get(r, 0) >= amount for r, amount in cost.items()):
         return None
-    if any(o["kind"] == kind and o["target_id"] == target_id for o in state.orders):
+    if is_already_ordered(state, kind, target_id):
         return None
     return _order_failure(state, cost, output=action_order_output(state, kind, target_id, scale))[0]
 
@@ -2737,7 +2742,7 @@ def _pay_or_defer(
       хватает только энергии, и она притечёт): оформлен ЗАКАЗ (state.orders) - всё нужное
       изъято со склада в его резерв, действие выполнится само по готовности
       (_process_orders). Повторный клик по тому же действию, пока заказ идёт, нового
-      не оформляет;
+      не оформляет и хода не тратит (отказ);
     - ActionResult(False, ...) - настоящая ошибка, ничего не изменилось.
 
     retry_extra - доп. поля для повторного выполнения (например, "scale" ручного
@@ -2748,9 +2753,8 @@ def _pay_or_defer(
         for r, amount in cost.items():
             state.resources[r] -= amount
         return None
-    for order in state.orders:
-        if order["kind"] == kind and order["target_id"] == target_id:
-            return ActionResult(True, f"{action_desc}: уже заказано, ждёт выполнения.", pending=True)
+    if is_already_ordered(state, kind, target_id):
+        return ActionResult(False, f"{action_desc}: уже заказано, ждёт выполнения.")
     failure, order = _place_order(
         state, kind, target_id, action_desc, cost, extra=retry_extra,
         final_energy=cost.get(ENERGY_RESOURCE_ID, 0), output=output,

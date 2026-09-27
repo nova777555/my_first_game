@@ -330,9 +330,25 @@ class ExecutionTests(OrdersTestCase):
         s = self.mech_state(resources={"raw_a": 5})
         engine.do_manual_action(s, "use_m_out")
         again = engine.do_manual_action(s, "use_m_out")
-        self.assertTrue(again.pending)
+        # Отказ, а не «заказ»: повторный клик хода не тратит.
+        self.assertFalse(again.ok)
         self.assertIn("уже заказано", again.message)
         self.assertEqual(len(s.orders), 1)
+
+    def test_repeat_click_skips_the_confirm_window_and_the_turn(self):
+        import web_ui
+        from unittest import mock
+        patch = mock.patch.multiple(web_ui, MANUAL_ACTIONS=engine.MANUAL_ACTIONS, RESOURCE_NAMES=engine.RESOURCE_NAMES)
+        patch.start()
+        self.addCleanup(patch.stop)
+        s = self.mech_state(resources={"raw_a": 5})
+        self.assertTrue(web_ui.autocraft_preview_view(s, "manual", "use_m_out")["needs_confirm"])
+        engine.do_manual_action(s, "use_m_out")
+        self.assertEqual(web_ui.autocraft_preview_view(s, "manual", "use_m_out"), {"needs_confirm": False})
+        turn = s.turn
+        log = web_ui.run_turn(s, "manual", "use_m_out")
+        self.assertFalse(log["ok"])
+        self.assertEqual(s.turn, turn)
 
     def test_building_through_an_order(self):
         s = self.mech_state(resources={"raw_a": 5, "raw_b": 1})

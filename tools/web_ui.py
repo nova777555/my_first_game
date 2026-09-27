@@ -3282,6 +3282,8 @@ def autocraft_preview_view(state: GameState, action_type: str, action_id, scale:
     None, если этот докрафт уложится в один ход, иначе через сколько ходов он
     завершится при ТЕКУЩЕЙ скорости автокрафта - чтобы игрок видел ДО подтверждения,
     что операция растянется на несколько ходов, а не мгновенна."""
+    if engine.is_already_ordered(state, action_type, action_id):
+        return {"needs_confirm": False}  # клик просто ответит «уже заказано», хода не тратя
     cost = engine.resolve_action_cost(state, action_type, action_id, scale)
     preview = engine.autocraft_preview(state, cost) if cost else None
     if preview is None:
