@@ -126,6 +126,12 @@ class ContentEditorHttpTests(unittest.TestCase):
             self.assertEqual(r.status, 200)
             self.assertIn(b"MECH_FX_PARTICLES", r.read())
 
+    def test_hunt_fx_js_is_served(self):
+        # Превью «Бой»/«Сцена охоты» - тот же файл, что у игры (tools/hunt_fx.js).
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/hunt_fx.js", timeout=5) as r:
+            self.assertEqual(r.status, 200)
+            self.assertIn(b"HUNT_ATTACK_STYLES", r.read())
+
     def test_reset_save_deletes_existing_file(self):
         ce.SAVE_PATH.write_text("{}", encoding="utf-8")
         status, resp = self._post("/api/reset_save", {})

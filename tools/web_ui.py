@@ -42,7 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 from game import engine  # noqa: E402
 from game.content import (  # noqa: E402
-    ALLOY_RECIPES, BREAKDOWN_TYPES, BUILDINGS, CAST_RECIPES, COMBAT_SETTINGS, DEFAULT_ACTION_DELAY_MS,
+    ALLOY_RECIPES, BREAKDOWN_TYPES, BUILDINGS, CAST_RECIPES, COMBAT_MOVES, COMBAT_SETTINGS, DEFAULT_ACTION_DELAY_MS,
     ENCHANTMENTS, ENERGY_RECIPES, ERAS, GENETIC_TRAITS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
     MELT_RECIPES, MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, RESOURCE_ICONS, RESOURCE_MOLTEN,
     RESOURCE_NAMES, RESOURCE_ORDER, RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES,
@@ -77,6 +77,9 @@ HTML_PATH = Path(__file__).with_name("web_ui.html")
 # Оформление модалки механизма (locations.*.appearance) - общий JS с превью в
 # редакторе, content_editor.py отдаёт тот же файл (см. докстринг mechanism_fx.js).
 MECHANISM_FX_PATH = Path(__file__).with_name("mechanism_fx.js")
+# Сцена схватки (модалка «Охота») - общий JS с превью «Бой»/«Сцена охоты» в редакторе,
+# см. докстринг tools/hunt_fx.js.
+HUNT_FX_PATH = Path(__file__).with_name("hunt_fx.js")
 # Кастомные звуки ручных действий, загруженные через content_editor.py
 # (см. manual_actions.*.sound в content.json) - живёт рядом с web_ui.py/
 # content_editor.py в tools/, не под _SAVE_ROOT (это контент, а не прогресс игрока).
@@ -838,6 +841,40 @@ def enchanting_view(state: GameState) -> dict:
     }
 
 
+def _combat_gear_view(state: GameState) -> dict:
+    """Снаряжение для панели схватки: линейки оружия/брони (tools.*.weapon/armor),
+    которые игрок реально выковал - тир 2+ (стартовый тир 1 вроде «Кулаки»/«Не выковано»
+    предметом не считается, тот же порог, что engine.tool_usable_for_repair). Прочность -
+    как в tools_view; slash_color - цвет разреза этого оружия в сцене (tools.*.tiers[].
+    slash_color, необязателен). damage_reduction - итоговое снижение ответки ВСЕЙ бронёй
+    (с зачарованиями), для чипа «броня −N»."""
+    weapons, armor = [], []
+    for tool_id, tool in TOOLS.items():
+        if not (tool.get("weapon") or tool.get("armor")):
+            continue
+        tier = engine.tool_tier(state, tool_id)
+        if tier < 2:
+            continue
+        tier_def = tool["tiers"][tier - 1]
+        entry = {
+            "tool_id": tool_id, "tier": tier, "name": tier_def.get("name") or tool["name"],
+            "max_durability": tier_def.get("max_durability"),
+            "durability_remaining": engine.tool_durability_remaining(state, tool_id),
+            "is_broken": engine.tool_is_broken(state, tool_id),
+        }
+        if tool.get("weapon"):
+            entry.update(
+                damage_multiplier=tier_def.get("damage_multiplier", 1.0),
+                instant_kill_max_hp=tier_def.get("instant_kill_max_hp", 0),
+                slash_color=tier_def.get("slash_color"),
+            )
+            weapons.append(entry)
+        else:
+            entry.update(damage_reduction=tier_def.get("damage_reduction", 0), max_hp_bonus=tier_def.get("max_hp_bonus", 0))
+            armor.append(entry)
+    return {"weapons": weapons, "armor": armor, "damage_reduction": engine.armor_damage_reduction(state)}
+
+
 def hunting_view(state: GameState) -> dict:
     """Данные "Охоты" - глобальная активная схватка (state.active_encounter, ОДНА
     на всю игру, см. CLAUDE.md) + список открытых мобов/боссов КАЖДОЙ локации
@@ -856,10 +893,17 @@ def hunting_view(state: GameState) -> dict:
             "mob_id": state.active_encounter["mob_id"],
             "name": mob["name"],
             "location": mob.get("location"),
+            "location_name": LOCATIONS.get(mob.get("location"), {}).get("name", ""),
             "is_boss": bool(mob.get("is_boss")),
             "remaining_hp": state.active_encounter["remaining_hp"],
             "max_hp": mob["hp"],
             "turns_left": max(0, deadline - state.turn) if deadline is not None else None,
+            "turn_limit": mob.get("turn_limit"),
+            # Визуал схватки - целиком из контента (mobs.*.combat_fx, locations.*.hunt_scene),
+            # как есть: недостающие поля клиент сам заполняет значениями по умолчанию
+            # (web_ui.html: huntMobFx/huntSceneCfg) - единственное место этих умолчаний.
+            "fx": dict(mob.get("combat_fx") or {}),
+            "scene": dict(LOCATIONS.get(mob.get("location"), {}).get("hunt_scene") or {}),
         }
     entries = []
     for mid, mob in MOBS.items():
@@ -877,9 +921,40 @@ def hunting_view(state: GameState) -> dict:
         })
     skills = engine.skills_view(state)
     combat_skill = next((e for e in skills if e["id"] == engine.COMBAT_SKILL_ID), None)
+    if combat_skill is not None:
+        levels = SKILLS.get(engine.COMBAT_SKILL_ID, {}).get("levels", [])
+        # Эффекты ВСЕХ уровней - экран «Добыча» показывает, что дал новый уровень
+        # (урон/HP было -> стало), не зная структуры effects заранее.
+        combat_skill = {**combat_skill, "level_effects": [lvl.get("effects", {}) for lvl in levels],
+                        "level_xp": [lvl.get("xp_required", 0) for lvl in levels]}
+    moves = engine.combat_moves_view(state)
+    for entry in moves:
+        move = COMBAT_MOVES.get(entry["id"], {})
+        entry["fx"] = dict(move.get("fx") or {})
+        entry["icon"] = move.get("icon")
+    predictions = {}
+    attack_prediction = None
+    if state.active_encounter:
+        # Прогноз удара - тот же расчёт, что у настоящей атаки (engine.attack_preview).
+        # "qte" - тот же прогноз при попадании в QTE-кольцо (None, если бонуса нет).
+        bonus = engine.qte_damage_bonus() > 0
+
+        def predict(move_id):
+            p = engine.attack_preview(state, move_id)
+            if p is not None:
+                p["qte"] = engine.attack_preview(state, move_id, qte_hit=True) if bonus else None
+            return p
+        attack_prediction = predict(None)
+        predictions = {m["id"]: predict(m["id"]) for m in moves if m["unlocked"]}
     return {
         "active_encounter": encounter, "mobs": entries, "combat_skill": combat_skill,
-        "combat_moves": engine.combat_moves_view(state),
+        "combat_moves": moves,
+        "attack_prediction": attack_prediction, "predictions": predictions,
+        "gear": _combat_gear_view(state),
+        # Каждый удар - ход; сцена двигает небо на столько часов, таймер босса
+        # подписан ещё и в часах.
+        "hours_per_turn": engine.TIME["hours_per_turn"],
+        "qte_damage_bonus": engine.qte_damage_bonus(),
         # HP игрока/дебафф "Ранен" - см. game/engine.py:current_player_hp/
         # player_max_hp/is_wounded. wounded_turns_left - сколько ходов ЕЩЁ
         # действует дебафф (0, если не ранен - is_wounded уже сам сверяет
@@ -2726,7 +2801,7 @@ def resource_deltas(before: dict, after: dict) -> list[dict]:
     return out
 
 
-def dispatch_action(state: GameState, action_type: str, action_id, scale: int | None = None):
+def dispatch_action(state: GameState, action_type: str, action_id, scale: int | None = None, qte_hit: bool = False):
     if action_type == "manual":
         return engine.do_manual_action(state, action_id, scale=scale)
     if action_type == "order":
@@ -2748,7 +2823,9 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
     if action_type == "hunt_attack":
         # action_id - id приёма боя (content.json["combat_moves"]) или None для
         # обычной атаки без приёма (см. game/engine.py:attack_encounter/unlocked_attack_moves).
-        return engine.attack_encounter(state, move_id=action_id)
+        # qte_hit - игрок попал в QTE-кольцо (web_ui.html: huntTryMove) - бонус к урону
+        # combat.qte_damage_bonus, см. engine._move_damage.
+        return engine.attack_encounter(state, move_id=action_id, qte_hit=qte_hit)
     if action_type == "summon_boss":
         return engine.summon_boss(state, action_id)
     if action_type == "upgrade_tool":
@@ -2814,7 +2891,7 @@ def _smeltery_event_view(event: dict) -> dict:
     }
 
 
-def run_turn(state: GameState, action_type: str, action_id, scale: int | None = None) -> dict:
+def run_turn(state: GameState, action_type: str, action_id, scale: int | None = None, qte_hit: bool = False) -> dict:
     global _LAST_ENERGY_SHORTFALL
     log = {
         "message": None, "ok": True, "action_deltas": [], "production_deltas": [],
@@ -2827,7 +2904,7 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
 
     if action_type != "skip":
         before = dict(state.resources)
-        result = dispatch_action(state, action_type, action_id, scale=scale)
+        result = dispatch_action(state, action_type, action_id, scale=scale, qte_hit=qte_hit)
         log["message"] = result.message
         log["ok"] = result.ok
         # Действие не выполнено, а поставлено в очередь (ждёт автокрафта/энергии, см.
@@ -3298,8 +3375,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/mechanism_fx.js":
-            body = MECHANISM_FX_PATH.read_bytes()
+        elif self.path in ("/mechanism_fx.js", "/hunt_fx.js"):
+            body = (MECHANISM_FX_PATH if self.path == "/mechanism_fx.js" else HUNT_FX_PATH).read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -3353,7 +3430,7 @@ class Handler(BaseHTTPRequestHandler):
                 # от клиента должно давать те же 400, что и остальные bad-payload случаи.
                 raw_scale = payload.get("scale")
                 scale = int(raw_scale) if raw_scale is not None else None
-                log = run_turn(STATE, payload.get("type"), payload.get("id"), scale=scale)
+                log = run_turn(STATE, payload.get("type"), payload.get("id"), scale=scale, qte_hit=payload.get("qte") is True)
             except (KeyError, ValueError) as e:
                 self._json(400, {"error": str(e)})
                 return

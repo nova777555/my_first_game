@@ -4172,6 +4172,12 @@ def _armor_bonuses(state: GameState) -> dict:
     return {"max_hp_bonus": max_hp_bonus, "damage_reduction": damage_reduction}
 
 
+def armor_damage_reduction(state: GameState) -> float:
+    """Итоговое плоское снижение ответного удара всей бронёй (с зачарованиями) -
+    публичная обёртка над _armor_bonuses для UI (чип «броня −N» в схватке)."""
+    return _armor_bonuses(state)["damage_reduction"]
+
+
 def _consume_weapon_durability(state: GameState) -> None:
     """Прочность ВСЕХ владеемых линеек оружия (weapon=true) тратится за КАЖДЫЙ
     удар (attack_encounter), не только за победный - зеркало прочности кирки,
@@ -4354,7 +4360,19 @@ def abandon_encounter(state: GameState) -> ActionResult:
     return ActionResult(True, "Схватка прекращена.")
 
 
-def _move_damage(state: GameState, mob: dict, remaining_hp: int, move: dict | None) -> tuple[int, bool]:
+def qte_damage_bonus() -> float:
+    """Добавка к урону за попадание в QTE-кольцо (content.json["combat"].qte_damage_bonus,
+    доля: 0.2 = +20%). 0, если не задана - тогда QTE чистая косметика."""
+    return COMBAT_SETTINGS.get("qte_damage_bonus", 0.0)
+
+
+def _ceil_damage(value: float) -> int:
+    """Урон вверх до целого, но без артефактов плавающей точки: 10 * 1.1 =
+    11.000000000000002 должно дать 11, а не 12."""
+    return max(1, math.ceil(round(value, 6)))
+
+
+def _move_damage(state: GameState, mob: dict, remaining_hp: int, move: dict | None, qte_hit: bool = False) -> tuple[int, bool]:
     """Считает урон одного удара - move=None это обычная атака (mode "multiplier"
     с коэффициентом 1.0, т.е. чистый расчёт по навыку/оружию). Каждый mode - свой,
     полностью независимый способ посчитать число, при этом ЛЮБОЙ из них всё ещё
@@ -4378,24 +4396,28 @@ def _move_damage(state: GameState, mob: dict, remaining_hp: int, move: dict | No
     Дебафф "Ранен" (is_wounded) домножает ИТОГОВЫЙ урон игрока НА ЛЮБОЙ mode (в т.ч.
     forced_kill - добивание раненым игроком всё ещё добивание, просто урон обычной
     ветки перед этим уже снижен) - единственная точка, куда встроен этот множитель,
-    как и остальные бонусы урона."""
+    как и остальные бонусы урона. Туда же - бонус за попадание в QTE-кольцо (qte_hit,
+    qte_damage_bonus): тоже на ЛЮБОЙ mode, кроме добивания ниже порога (цель и так умирает).
+    Попадание решает клиент (одиночная игра, тот же уровень доверия, что у click_delay_ms)."""
     bonuses = _weapon_bonuses(state)
     base_damage = skill_level_effects(state, COMBAT_SKILL_ID).get("damage", 1)
-    wound_multiplier = COMBAT_SETTINGS.get("wounded_damage_multiplier", 1.0) if is_wounded(state) else 1.0
+    scale = COMBAT_SETTINGS.get("wounded_damage_multiplier", 1.0) if is_wounded(state) else 1.0
+    if qte_hit:
+        scale *= 1 + qte_damage_bonus()
     mode = move.get("mode", "multiplier") if move else "multiplier"
     if mode == "percent_max_hp":
-        return max(1, math.ceil(move["percent"] * mob["hp"] * wound_multiplier)), False
+        return _ceil_damage(move["percent"] * mob["hp"] * scale), False
     if mode == "percent_remaining_hp":
-        return max(1, math.ceil(move["percent"] * remaining_hp * wound_multiplier)), False
+        return _ceil_damage(move["percent"] * remaining_hp * scale), False
     if mode == "execute" and remaining_hp <= move["execute_threshold_percent"] * mob["hp"]:
         return remaining_hp, True
     move_multiplier = 1.0
     if move is not None:
         move_multiplier = move.get("damage_multiplier", 1.0) if mode == "execute" else move["damage_multiplier"]
-    return max(1, math.ceil(base_damage * bonuses["damage_multiplier"] * move_multiplier * wound_multiplier)), False
+    return _ceil_damage(base_damage * bonuses["damage_multiplier"] * move_multiplier * scale), False
 
 
-def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResult:
+def attack_encounter(state: GameState, move_id: str | None = None, qte_hit: bool = False) -> ActionResult:
     """Атака активной цели (state.active_encounter) - урон снимает HP, лут/опыт/
     душа выдаются ОДНИМ пакетом при финальном убийстве, не по частям за удар (см.
     CLAUDE.md). Расчёт урона одного удара - см. _move_damage (несколько независимых
@@ -4419,42 +4441,33 @@ def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResu
         if cooldown_left > 0:
             return ActionResult(False, f"«{move['name']}» ещё не восстановился: {cooldown_left} х.")
     mob = MOBS[encounter["mob_id"]]
-    bonuses = _weapon_bonuses(state)
     remaining = encounter["remaining_hp"]
-    damage, forced_kill = _move_damage(state, mob, remaining, move)
-    instant = forced_kill or remaining <= bonuses["instant_kill_max_hp"]
-    killed = instant or damage >= remaining
     if move is not None:
         cooldown_turns = move.get("cooldown_turns", 0)
         if cooldown_turns > 0:
             state.move_cooldowns[move_id] = cooldown_turns
-    _consume_weapon_durability(state)
+    outcome = _strike(state, mob, remaining, move, qte_hit)
+    bonuses = outcome["bonuses"]
+    damage, instant, killed = outcome["damage"], outcome["instant_kill"], outcome["killed"]
+    base_info = {"mob_id": encounter["mob_id"], "move_id": move_id, "forced_kill": outcome["forced_kill"], "qte_hit": bool(qte_hit)}
     if not killed:
-        _consume_armor_durability(state)
         encounter["remaining_hp"] = remaining - damage
-        # Ответка - моб бьёт в ответ ТОЛЬКО если пережил удар (убивающий удар,
-        # в т.ч. instant_kill, ответки не получает - см. CLAUDE.md-заметку про
-        # риск/reward боя). Броня (_armor_bonuses.damage_reduction) снижает
-        # входящий урон плоским вычитанием, до 0 включительно - сильная броня
-        # может полностью аннулировать слабого моба, зеркало instant_kill_max_hp
-        # у оружия.
-        armor = _armor_bonuses(state)
-        retaliation = max(0, mob.get("damage", 0) - armor["damage_reduction"])
-        max_hp = player_max_hp(state)
-        player_hp_before = current_player_hp(state)
-        player_hp_after = max(0, player_hp_before - retaliation)
+        retaliation = outcome["retaliation"]
+        player_hp_after = outcome["player_hp_after"]
         state.player_hp = player_hp_after
         combat_info = {
+            **base_info,
             "damage": damage, "killed": False, "instant_kill": False,
             "remaining_hp": encounter["remaining_hp"], "max_hp": mob["hp"],
-            "player_damage_taken": retaliation, "player_hp": player_hp_after,
-            "player_max_hp": max_hp, "defeated": False,
+            "player_damage_taken": retaliation, "armor_absorbed": outcome["armor_absorbed"],
+            "player_hp": player_hp_after, "player_max_hp": player_max_hp(state), "defeated": False,
         }
         if player_hp_after <= 0:
             state.active_encounter = None
             wounded_turns = COMBAT_SETTINGS.get("wounded_turns", 0)
             state.wounded_until_turn = state.turn + wounded_turns
             combat_info["defeated"] = True
+            combat_info["wounded_turns"] = wounded_turns
             return ActionResult(
                 True,
                 f"{mob['name']} чуть не прикончил тебя - пришлось отступить ни с чем. "
@@ -4487,7 +4500,9 @@ def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResu
             _add_resource(state.resources, soul_id, 1)
             got_soul = True
 
-    add_skill_xp(state, COMBAT_SKILL_ID, mob.get("xp_reward", 0))
+    level_before = skill_level(state, COMBAT_SKILL_ID)
+    xp_reward = mob.get("xp_reward", 0)
+    add_skill_xp(state, COMBAT_SKILL_ID, xp_reward)
     state.active_encounter = None
     message = f"Убит: {mob['name']}."
     if got_soul:
@@ -4495,11 +4510,82 @@ def attack_encounter(state: GameState, move_id: str | None = None) -> ActionResu
     return ActionResult(
         True, message,
         combat={
+            **base_info,
             "damage": damage, "killed": True, "instant_kill": instant, "remaining_hp": 0,
-            "max_hp": mob["hp"], "player_damage_taken": 0, "player_hp": current_player_hp(state),
-            "player_max_hp": player_max_hp(state), "defeated": False,
+            "max_hp": mob["hp"], "player_damage_taken": 0, "armor_absorbed": 0,
+            "player_hp": current_player_hp(state), "player_max_hp": player_max_hp(state), "defeated": False,
+            # Добыча одним пакетом - для экрана «Добыча» в UI (web_ui.html: huntShowResult),
+            # чтобы не выводить её обратно из разницы складов.
+            "loot": {r: a for r, a in loot.items() if a > 0},
+            "soul": soul_id if got_soul else None,
+            "xp": xp_reward,
+            "skill_level_before": level_before,
+            "skill_level_after": skill_level(state, COMBAT_SKILL_ID),
         },
     )
+
+
+def _strike(state: GameState, mob: dict, remaining: int, move: dict | None, qte_hit: bool = False) -> dict:
+    """Один удар по цели БЕЗ последствий для схватки - ЕДИНАЯ точка расчёта для
+    attack_encounter и прогноза attack_preview (иначе прогноз на кнопке приёма и
+    реальный удар могли бы тихо разойтись). Меняет в state ТОЛЬКО state.tool_durability
+    (износ оружия за удар и брони за ответку) - именно в этом порядке, что и раньше:
+    урон и бонусы оружия считаются ДО износа, ответка - ПОСЛЕ износа брони (сломавшаяся
+    на этом ударе броня его уже не смягчает). Ответка - только если моб пережил удар
+    (убивающий удар, в т.ч. instant_kill, её не получает). Броня
+    (_armor_bonuses.damage_reduction) снижает входящий урон плоским вычитанием, до 0
+    включительно - сильная броня может полностью аннулировать слабого моба, зеркало
+    instant_kill_max_hp у оружия."""
+    bonuses = _weapon_bonuses(state)
+    damage, forced_kill = _move_damage(state, mob, remaining, move, qte_hit)
+    instant = forced_kill or remaining <= bonuses["instant_kill_max_hp"]
+    killed = instant or damage >= remaining
+    _consume_weapon_durability(state)
+    outcome = {
+        "bonuses": bonuses, "damage": damage, "forced_kill": forced_kill, "instant_kill": instant,
+        "killed": killed, "retaliation": 0, "armor_absorbed": 0, "player_hp_after": current_player_hp(state),
+    }
+    if not killed:
+        _consume_armor_durability(state)
+        raw = mob.get("damage", 0)
+        retaliation = max(0, raw - _armor_bonuses(state)["damage_reduction"])
+        outcome["retaliation"] = retaliation
+        outcome["armor_absorbed"] = raw - retaliation
+        outcome["player_hp_after"] = max(0, current_player_hp(state) - retaliation)
+    return outcome
+
+
+def attack_preview(state: GameState, move_id: str | None = None, qte_hit: bool = False) -> dict | None:
+    """Точный прогноз удара по активной цели (для штриховки на полосах HP и числа на
+    кнопке приёма, см. tools/web_ui.py: hunting_view) - тот же _strike, что у
+    attack_encounter, на state с ВОЗВРАЩЁННОЙ после расчёта прочностью (урон детерминирован:
+    в _move_damage нет RNG). None - нет схватки или приём не изучен; перезарядку НЕ
+    проверяет (прогноз показывает, что приём сделает, когда восстановится). qte_hit -
+    прогноз для удара с попаданием в QTE-кольцо (qte_damage_bonus)."""
+    encounter = state.active_encounter
+    if encounter is None:
+        return None
+    move = None
+    if move_id is not None:
+        move = COMBAT_MOVES.get(move_id)
+        if move is None or move_id not in unlocked_attack_moves(state):
+            return None
+    mob = MOBS[encounter["mob_id"]]
+    remaining = encounter["remaining_hp"]
+    saved = dict(state.tool_durability)
+    try:
+        outcome = _strike(state, mob, remaining, move, qte_hit)
+    finally:
+        state.tool_durability.clear()
+        state.tool_durability.update(saved)
+    killed = outcome["killed"]
+    return {
+        "damage": remaining if killed else outcome["damage"],
+        "hp_after": 0 if killed else remaining - outcome["damage"],
+        "killed": killed, "instant_kill": outcome["instant_kill"], "forced_kill": outcome["forced_kill"],
+        "retaliation": outcome["retaliation"], "player_hp_after": outcome["player_hp_after"],
+        "defeated": not killed and outcome["player_hp_after"] <= 0,
+    }
 
 
 def soul_collector_capacity(state: GameState, building_id: str) -> int:

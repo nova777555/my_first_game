@@ -1610,6 +1610,26 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"MECH_FX_MOTIONS", body)
 
+    def test_hunt_attack_qte_flag_from_request_body(self):
+        # {"qte": true} в теле /api/action - бонус к урону combat.qte_damage_bonus.
+        from unittest import mock
+        from game import engine
+        with mock.patch.dict(engine.COMBAT_SETTINGS, {"qte_damage_bonus": 0.5}):
+            web_ui.STATE.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+            status, resp = self._post("/api/action", {"type": "hunt_attack", "id": None, "qte": True})
+            self.assertEqual(status, 200)
+            self.assertEqual(resp["log"]["combat"]["damage"], 5)
+            web_ui.STATE.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+            status, resp = self._post("/api/action", {"type": "hunt_attack", "id": None})
+            self.assertEqual(resp["log"]["combat"]["damage"], 3)
+            self.assertFalse(resp["log"]["combat"]["qte_hit"])
+
+    def test_hunt_fx_js_is_served(self):
+        # Сцена схватки - общий с превью в редакторе файл (tools/hunt_fx.js).
+        status, body = self._get_raw("/hunt_fx.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"class HuntStage", body)
+
     def test_craft_grid_rejects_unmatched_layout_without_spending_a_turn(self):
         status, resp = self._post("/api/craft_grid", {
             "location_id": "grid_loc", "placed": [None, None, None, None], "times": 1,

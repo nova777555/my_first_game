@@ -29,6 +29,19 @@ MECHANISM_MOTIONS = ("strike", "saw", "press", "spin", "flicker", "pulse")
 MECHANISM_PARTICLES = ("sparks", "sawdust", "shards", "drops", "steam", "smoke", "magic", "electric")
 MECHANISM_PROGRESS_FILLS = ("right", "left", "up", "down")
 _APPEARANCE_KEYS = {"texture", "texture_dim", "progress_icon", "progress_fill", "motion", "particles", "sound"}
+
+# Сцена схватки (mobs.*.combat_fx, combat_moves.*.fx, locations.*.hunt_scene). id
+# вариантов держать в паре с tools/hunt_fx.js (HUNT_ATTACK_STYLES/HUNT_MOVE_STYLES/
+# HUNT_BACKDROPS/HUNT_AMBIENTS) - совпадение проверяет tests/test_content_validation.py.
+HUNT_ATTACK_STYLES = ("claw", "bite", "slam", "spell")
+HUNT_MOVE_STYLES = ("slash", "thrust", "heavy", "shatter", "rend", "execute")
+HUNT_BACKDROPS = ("forest", "cave", "void")
+HUNT_AMBIENTS = ("fireflies", "embers", "snow", "dust", "none")
+HUNT_MOB_SOUND_KEYS = ("intro", "hit", "attack", "death")
+_COMBAT_FX_KEYS = {"size", "attack_style", "attack_color", "hit_colors", "glow_keys", "intro_text", "attack_lines", "sounds"}
+_MOVE_FX_KEYS = {"style", "color", "sound"}
+_HUNT_SCENE_KEYS = {"backdrop", "ambient", "day_night", "ground_color", "silhouette_color", "fog_color"}
+HUNT_SIZE_RANGE = (15, 90)  # % высоты сцены
 MAX_TEXTURE_DIM = 0.9
 
 # Должен совпадать с game.engine.MINE_LOCATION_ID и const MINE_LOCATION_ID в
@@ -252,6 +265,99 @@ def validate(data: dict) -> list[str]:
                 f"{where}: sound должен быть null или именем файла вида "
                 "'<буквы/цифры/_-> .wav|.mp3|.ogg'"
             )
+
+    def check_hex(value, where: str) -> None:
+        if not isinstance(value, str) or not _HEX_COLOR_RE.match(value):
+            errors.append(f"{where}: цвет должен быть строкой вида '#rrggbb'")
+
+    def check_unknown_keys(obj: dict, allowed: set, where: str) -> None:
+        for key in obj:
+            if key not in allowed:
+                errors.append(f"{where}: неизвестное поле '{key}' (допустимы {sorted(allowed)})")
+
+    def check_combat_fx(fx, icon, where: str) -> None:
+        """mobs.*.combat_fx - как моб выглядит в сцене схватки (tools/hunt_fx.js).
+        Всё необязательно: пропуски заполняет huntMobFx."""
+        if fx is None:
+            return
+        where = f"{where}.combat_fx"
+        if not isinstance(fx, dict):
+            errors.append(f"{where}: должен быть объектом")
+            return
+        check_unknown_keys(fx, _COMBAT_FX_KEYS, where)
+        size = fx.get("size")
+        lo, hi = HUNT_SIZE_RANGE
+        if size is not None and (not isinstance(size, int) or isinstance(size, bool) or not (lo <= size <= hi)):
+            errors.append(f"{where}.size: размер в сцене - целое число от {lo} до {hi} (% высоты сцены)")
+        style = fx.get("attack_style")
+        if style is not None and style not in HUNT_ATTACK_STYLES:
+            errors.append(f"{where}.attack_style: неизвестный стиль '{style}', допустимы {list(HUNT_ATTACK_STYLES)}")
+        if fx.get("attack_color") is not None:
+            check_hex(fx["attack_color"], f"{where}.attack_color")
+        hit_colors = fx.get("hit_colors")
+        if hit_colors is not None:
+            if not isinstance(hit_colors, list) or not hit_colors:
+                errors.append(f"{where}.hit_colors: непустой список цветов '#rrggbb' (или не указывать - цвета спрайта)")
+            else:
+                for i, c in enumerate(hit_colors):
+                    check_hex(c, f"{where}.hit_colors[{i}]")
+        glow_keys = fx.get("glow_keys")
+        if glow_keys is not None:
+            palette = (icon or {}).get("palette") if isinstance(icon, dict) else None
+            if not isinstance(glow_keys, list) or not all(isinstance(k, str) for k in glow_keys):
+                errors.append(f"{where}.glow_keys: список символов палитры иконки")
+            elif palette is not None:
+                for k in glow_keys:
+                    if k not in palette:
+                        errors.append(f"{where}.glow_keys: символа '{k}' нет в палитре иконки моба")
+        intro = fx.get("intro_text")
+        if intro is not None and not isinstance(intro, str):
+            errors.append(f"{where}.intro_text: должен быть строкой")
+        lines = fx.get("attack_lines")
+        if lines is not None and (not isinstance(lines, list) or not all(isinstance(s, str) and s.strip() for s in lines)):
+            errors.append(f"{where}.attack_lines: список непустых фраз")
+        sounds = fx.get("sounds")
+        if sounds is not None:
+            if not isinstance(sounds, dict):
+                errors.append(f"{where}.sounds: должен быть объектом {{{', '.join(HUNT_MOB_SOUND_KEYS)}}}")
+            else:
+                check_unknown_keys(sounds, set(HUNT_MOB_SOUND_KEYS), f"{where}.sounds")
+                for key, value in sounds.items():
+                    check_sound(value, f"{where}.sounds.{key}")
+
+    def check_move_fx(fx, where: str) -> None:
+        """combat_moves.*.fx - как выглядит удар приёма (tools/hunt_fx.js: huntMoveStyle)."""
+        if fx is None:
+            return
+        where = f"{where}.fx"
+        if not isinstance(fx, dict):
+            errors.append(f"{where}: должен быть объектом")
+            return
+        check_unknown_keys(fx, _MOVE_FX_KEYS, where)
+        if fx.get("style") is not None and fx["style"] not in HUNT_MOVE_STYLES:
+            errors.append(f"{where}.style: неизвестный стиль '{fx['style']}', допустимы {list(HUNT_MOVE_STYLES)}")
+        if fx.get("color") is not None:
+            check_hex(fx["color"], f"{where}.color")
+        check_sound(fx.get("sound"), where)
+
+    def check_hunt_scene(scene, where: str) -> None:
+        """locations.*.hunt_scene - фон сцены схватки для мобов этой локации."""
+        if scene is None:
+            return
+        where = f"{where}.hunt_scene"
+        if not isinstance(scene, dict):
+            errors.append(f"{where}: должен быть объектом")
+            return
+        check_unknown_keys(scene, _HUNT_SCENE_KEYS, where)
+        if scene.get("backdrop") is not None and scene["backdrop"] not in HUNT_BACKDROPS:
+            errors.append(f"{where}.backdrop: неизвестный фон '{scene['backdrop']}', допустимы {list(HUNT_BACKDROPS)}")
+        if scene.get("ambient") is not None and scene["ambient"] not in HUNT_AMBIENTS:
+            errors.append(f"{where}.ambient: неизвестные частицы '{scene['ambient']}', допустимы {list(HUNT_AMBIENTS)}")
+        if "day_night" in scene and not isinstance(scene["day_night"], bool):
+            errors.append(f"{where}.day_night: должен быть true или false")
+        for key in ("ground_color", "silhouette_color", "fog_color"):
+            if scene.get(key) is not None:
+                check_hex(scene[key], f"{where}.{key}")
 
     def check_id(kind: str, value: str) -> None:
         if not isinstance(value, str) or not _ID_RE.match(value):
@@ -740,6 +846,7 @@ def validate(data: dict) -> list[str]:
         if not loc.get("name"):
             errors.append(f"Локация '{lid}': не указано название")
         check_icon(loc.get("icon"), f"Локация '{lid}'")
+        check_hunt_scene(loc.get("hunt_scene"), f"Локация '{lid}'")
         crafting = loc.get("crafting")
         if crafting is not None:
             where = f"Локация '{lid}'.crafting"
@@ -1565,6 +1672,7 @@ def validate(data: dict) -> list[str]:
         if not mob.get("description"):
             errors.append(f"{where}: не указано описание")
         check_icon(mob.get("icon"), where)
+        check_combat_fx(mob.get("combat_fx"), mob.get("icon"), where)
         loc = mob.get("location")
         if loc not in locations:
             errors.append(f"{where}: location ссылается на неизвестную локацию '{loc}'")
@@ -1819,6 +1927,9 @@ def validate(data: dict) -> list[str]:
             not isinstance(wound_mult, (int, float)) or isinstance(wound_mult, bool) or not (0 < wound_mult <= 1)
         ):
             errors.append("combat.wounded_damage_multiplier: должен быть числом в диапазоне (0, 1], если указан")
+        qte_bonus = combat_settings.get("qte_damage_bonus")
+        if qte_bonus is not None and (not isinstance(qte_bonus, (int, float)) or isinstance(qte_bonus, bool) or qte_bonus < 0):
+            errors.append("combat.qte_damage_bonus: доля бонуса за попадание в QTE-кольцо - неотрицательное число (0.2 = +20%, 0 - без бонуса)")
 
     energy_recipes = data.get("energy_recipes", {})
     converter_has_grid = isinstance(locations.get(_CONVERTER_LOCATION_ID, {}).get("crafting"), dict)
@@ -1872,6 +1983,8 @@ def validate(data: dict) -> list[str]:
             errors.append(f"{cwhere}: не указано название")
         if not move.get("description"):
             errors.append(f"{cwhere}: не указано описание")
+        check_icon(move.get("icon"), cwhere)
+        check_move_fx(move.get("fx"), cwhere)
         mode = move.get("mode", "multiplier")
         if mode not in _COMBAT_MOVE_MODES:
             errors.append(f"{cwhere}.mode: должен быть одним из {list(_COMBAT_MOVE_MODES)}, если указан")
@@ -1925,6 +2038,11 @@ def validate(data: dict) -> list[str]:
             check_tech_ref(tier.get("requires_tech"), f"Инструмент '{tool_id}', тир №{i}")
             check_resource_dict(tier.get("cost") or {}, f"Инструмент '{tool_id}', тир №{i}.cost")
             twhere_tier = f"Инструмент '{tool_id}', тир №{i}"
+            if tier.get("slash_color") is not None:
+                if not tool.get("weapon"):
+                    errors.append(f"{twhere_tier}: slash_color (цвет разреза в сцене схватки) имеет смысл только у оружия (weapon=true)")
+                else:
+                    check_hex(tier["slash_color"], f"{twhere_tier}.slash_color")
             max_durability = tier.get("max_durability")
             if max_durability is not None:
                 if not isinstance(max_durability, int) or isinstance(max_durability, bool) or max_durability <= 0:

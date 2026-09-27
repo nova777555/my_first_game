@@ -272,7 +272,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Дерево технологий, тиры лабораторий | `engine.py`: `tech_unlocks`, `tech_levels`, `lab_tier_capacity`, `research()`; `web_ui.html: renderTechTree/openTechTreeModal` |
 | Исследование за ходы (research_turns, апгрейд лаборатории research_speed) | `engine.py`: `tech_research_turns`, `research()`, `_process_research`, `cancel_research`; `state.active_research`; контент `techs.*.research_turns` + `buildings.*.upgrades[].type == "research_speed"`; `web_ui.html: researchProgressRow/renderResearchPanel`, `.tech-node.researching` |
 | Улучшения построек (типизированные + repeatable) | `engine.py`: `_apply_building_upgrades`, `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `purchase_building_upgrade`, `building_upgrade_prerequisite`, `effective_building_stats`; `web_ui.html: openBuildingUpgradesModal`; `content_editor.html: openBuildingUpgradesEditorModal` |
-| Охота: мобы/боссы, схватка, боевой навык | `engine.py`: `MOBS`, `COMBAT_SKILL_ID`, `search_mob_any`, `summon_boss`, `attack_encounter`, `abandon_encounter`, `_weapon_bonuses`; `state.active_encounter`; `web_ui.py: hunting_view`; `web_ui.html: renderActiveEncounterBlock` |
+| Охота: мобы/боссы, схватка, боевой навык, сцена боя | `engine.py`: `MOBS`, `COMBAT_SKILL_ID`, `search_mob_any`, `summon_boss`, `attack_encounter`, `_strike`, `attack_preview`, `abandon_encounter`, `_weapon_bonuses`; `state.active_encounter`; `web_ui.py: hunting_view`, `_combat_gear_view`; `web_ui.html: openHuntingModal`, `huntPlayAttack`, `huntRefresh`; сцена - `tools/hunt_fx.js` (`HuntStage`, `huntMobFx`/`huntMoveStyle`/`huntSceneCfg`); редактор - `content_editor.html: openMobCombatFxModal`, `openHuntSceneModal`, `moveFxBlock`; тесты `tests/test_combat_and_souls.py` (`AttackPreviewTests`, `HuntingViewTests`) |
 | Разведение существ: фермы, скрещивание, генетика, синтез | `engine.py`: `GENOTYPE_TRAIT_IDS`, `MUTATIONS_BY_PAIR`, `trait_alleles`, `species_gene_pool`, `_cross_genotype`, `breed_creatures`, `spawn_creature`, `analyze_creature`, `synthesize_creature`, `_ensure_farm_instances`, `_process_habitat`; `state.creatures`/`state.farm_instances`/`state.known_alleles`; контент `species`/`genetic_traits`/`mutations`/`genetics`; `web_ui.html: renderFarmSection`, `renderCreatureBankSection`, `openSpeciesBookModal`, `openBreedingModal`, `openGeneticsLabModal` |
 | Навыки (generic-прокачка, любое число линеек) | `engine.py`: `skill_level`, `skill_level_effects`, `add_skill_xp`, `skills_view`; `state.skill_xp`; контент `skills`; `web_ui.html: openSkillsModal` |
 | Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_kind`, `soul_collector_accepts_kind`, `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `resources.*.soul_kind` + `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: openSoulSynthesizerModal` |
@@ -643,6 +643,24 @@ job механизма (`crafting_view: job`), по завершении (`log.m
   `native_copper` в шахте, формы `mold_*` на верстаке.
 
 ## Охота, навыки, синтезаторы душ
+
+- **Модалка схватки** (прямое пожелание, 2026-09-27): сцена из `tools/hunt_fx.js`
+  (общий с превью в редакторе, как `mechanism_fx.js`), каркас - «чертёж» игры. Весь
+  визуал - из контента, ни одного id моба в коде (прямое пожелание: «не хардкодь,
+  всё выбирать вручную»): `mobs.*.combat_fx` (размер в сцене, стиль/цвет ответки,
+  частицы, светящиеся пиксели палитры, фраза появления, фразы ответки, свои звуки),
+  `combat_moves.*.fx`/`icon`, `tools.*.tiers[].slash_color`, `locations.*.hunt_scene`
+  (фон, частицы, цвета, смена суток). Всё необязательно; умолчания - ТОЛЬКО в
+  `hunt_fx.js` (`huntMobFx`/`huntMoveStyle`/`huntSceneCfg`), валидатор проверяет
+  значения и неизвестные ключи, id вариантов в паре с `content_validation.py`
+  (`HUNT_*`, тест сверяет). Сцена не пересобирается на `renderAll()` - только HUD и
+  панель (`huntRefresh`); удар проигрывается по пакету `combat` ДО подмены `VIEW`
+  (`huntPlayAttack`). Прогноз на кнопках и штриховка на полосах - `attack_preview`,
+  тот же `_strike`, что у настоящей атаки (прочность после расчёта возвращается).
+  Попадание в QTE-кольцо уходит на сервер (`qte` в `/api/action`) и даёт бонус
+  `combat.qte_damage_bonus` (доля, в контенте 0.2; все режимы, кроме добивания ниже
+  порога; прямое пожелание, 2026-09-27) - прогноз с попаданием в `predictions.*.qte`.
+  Попадание решает клиент - тот же уровень доверия, что у `click_delay_ms`.
 
 - Мобы/боссы (`mobs`) ссылаются на локацию через `location` — ЛЮБАЯ локация
   может быть "Охотой" (не хардкод, в отличие от `MINE_LOCATION_ID`), просто

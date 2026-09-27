@@ -546,6 +546,15 @@
   .mfx-seed { display: inline-flex; align-items: center; gap: 5px; }
   .mfx-swatch { width: 54px; height: 54px; flex: none; border: 1px solid var(--border); border-radius: 3px; background-color: #14171b; }
   .mfx-swatch.mini { width: 22px; height: 22px; }
+  /* Окна «Бой» (моб), «Сцена охоты» (локация), превью удара (приём) - сцена из tools/hunt_fx.js. */
+  .modal.settings-modal.hunt-fx-modal { max-width: 780px; }
+  .hunt-fx-preview { height: 300px; margin: 4px 0 8px; border-radius: 4px; }
+  .hunt-chip-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .hunt-color-chip { display: inline-flex; align-items: center; gap: 3px; }
+  .hunt-color-chip i, .hunt-glow-chip i { display: inline-block; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 3px; }
+  .hunt-color-chip.auto { opacity: .55; }
+  .hunt-glow-chip { display: inline-flex; align-items: center; gap: 4px; opacity: .5; }
+  .hunt-glow-chip.on { opacity: 1; outline: 2px solid #f0c040; }
   .mfx-swatch.empty { background: repeating-linear-gradient(45deg, #eee9df 0 6px, #f8f5ef 6px 12px); }
 </style>
 </head>
@@ -600,6 +609,8 @@
 
 <!-- Общий с игрой код оформления механизма - превью окна «Оформление», см. tools/mechanism_fx.js. -->
 <script src="/mechanism_fx.js"></script>
+<!-- Сцена схватки - превью «Бой»/«Сцена охоты», тот же код, что в игре (tools/hunt_fx.js). -->
+<script src="/hunt_fx.js"></script>
 <script>
 let DATA = null;
 // Шаблоны повторяющихся "лестниц" карточек (тиры склада/инструмента, улучшения
@@ -4376,6 +4387,7 @@ function renderLocations() {
 
     card.appendChild(craftingGridRow(loc, lid));
     card.appendChild(mechanismAppearanceRow(loc, lid));
+    card.appendChild(huntSceneRow(loc, lid));
 
     const hubRow = el("div", { class: "field-row" });
     hubRow.appendChild(el("label", { text: "Кнопки построек-механизмов" }));
@@ -7618,6 +7630,18 @@ function renderTools() {
         soulChanceMultRow.appendChild(soulMultInput);
         tierCard.appendChild(soulChanceMultRow);
 
+        // Цвет дуги удара этим оружием в сцене схватки (tools/hunt_fx.js).
+        const slashBox = el("div");
+        const renderSlash = () => {
+          slashBox.innerHTML = "";
+          slashBox.appendChild(huntColorRow("Цвет разреза в бою", tier.slash_color, HUNT_DEFAULT_SLASH, (v) => {
+            if (v) tier.slash_color = v; else delete tier.slash_color;
+            renderSlash();
+          }, "дуга удара этим оружием в сцене схватки; у оружия с мгновенным убийством - ещё и цвет разреза ваншота"));
+        };
+        renderSlash();
+        tierCard.appendChild(slashBox);
+
         if (!DATA.combat_moves) DATA.combat_moves = {};
         const moveEntries = Object.entries(DATA.combat_moves);
         tierCard.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Открывает приёмы боя" })]));
@@ -7860,7 +7884,9 @@ function renderCombatMoves() {
       renderCombatMoves();
       renderTools(); // сняли из чекбоксов unlocks_moves - сама ссылка в tier.unlocks_moves[] тут не чистится
     }});
-    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: moveId }), nameInput, el("div", { class: "spacer" }), rm]));
+    // Иконка кнопки приёма в схватке; без своей - пиктограмма стиля удара (hunt_fx.js: HUNT_MOVE_GLYPHS).
+    const moveIconBtn = iconEditButton(move.name, move, HUNT_MOVE_GLYPHS[huntMoveStyle(move)], () => {});
+    card.appendChild(el("div", { class: "card-head" }, [el("code", { text: moveId }), moveIconBtn, nameInput, el("div", { class: "spacer" }), rm]));
 
     const descRow = el("div", { class: "field-row" });
     descRow.appendChild(el("label", { text: "Описание" }));
@@ -7939,11 +7965,364 @@ function renderCombatMoves() {
     cdRow.appendChild(cdInput);
     cdRow.appendChild(el("span", { class: "hint", text: "0 - без ограничения, можно применять хоть каждый ход" }));
     card.appendChild(cdRow);
+    card.appendChild(moveFxBlock(move, moveId));
 
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
   });
   filterBar._apply();
+}
+
+// ---------- Сцена схватки (mobs.*.combat_fx, combat_moves.*.fx, tools.*.tiers[].slash_color,
+// locations.*.hunt_scene) ----------
+// Всё рисует общий с игрой tools/hunt_fx.js (HuntStage), поэтому превью = то, что увидит
+// игрок. Все поля необязательны: пусто = «авто» (умолчания живут в hunt_fx.js:
+// huntMobFx/huntMoveStyle/huntSceneCfg) - редактор их только показывает.
+
+function huntFirstMobAt(lid) {
+  return Object.values(DATA.mobs || {}).find(m => m.location === lid) || null;
+}
+function huntSceneOf(lid) {
+  return (DATA.locations[lid] && DATA.locations[lid].hunt_scene) || null;
+}
+
+// Строка «цвет + сброс в авто».
+function huntColorRow(label, value, autoValue, onChange, hint) {
+  const row = el("div", { class: "field-row" });
+  row.appendChild(el("label", { text: label }));
+  const input = el("input", { type: "color", value: value || autoValue || "#ffffff" });
+  input.addEventListener("change", () => onChange(input.value));
+  row.appendChild(input);
+  row.appendChild(el("span", { class: "hint", text: value ? value : `авто (${autoValue || "по умолчанию"})` }));
+  if (value) row.appendChild(el("button", { class: "small", type: "button", text: "Авто", onclick: () => onChange(null) }));
+  if (hint) row.appendChild(el("span", { class: "hint", text: hint }));
+  return row;
+}
+function huntSelectRow(label, options, value, onChange, hint) {
+  const row = el("div", { class: "field-row" });
+  row.appendChild(el("label", { text: label }));
+  const sel = el("select");
+  options.forEach(o => { const opt = el("option", { value: o.value, text: o.label }); if (o.value === (value ?? "")) opt.selected = true; sel.appendChild(opt); });
+  sel.addEventListener("change", () => onChange(sel.value === "" ? null : sel.value));
+  row.appendChild(sel);
+  if (hint) row.appendChild(el("span", { class: "hint", text: hint }));
+  return row;
+}
+
+// Превью-сцена в окне настройки: создаётся после вставки окна в DOM (нужен размер),
+// гасится вместе с окном.
+function huntPreview(host, { scene, icon, fx, isBoss, hour = 21 }) {
+  const stage = new HuntStage(host, { volume: () => 0.7 });
+  stage.setScene(scene); stage.setMob(icon, fx, isBoss); stage.setHour(hour, false);
+  stage.showMob(); stage.setTarget("idle", isBoss ? "БОСС" : "ЦЕЛЬ"); stage.start();
+  host._huntStage = stage; // для отладки из консоли
+  return stage;
+}
+// Кнопки проигрывания: пока идёт одна анимация, другие не запускаются.
+function huntPreviewControls(getStage, actions, hour) {
+  const box = el("div", { class: "mfx-preview-controls" });
+  let playing = false;
+  actions.forEach(([label, fn]) => box.appendChild(el("button", { class: "small", type: "button", text: label, onclick: async () => {
+    const st = getStage(); if (!st || playing) return;
+    playing = true;
+    try { await fn(st); } finally { playing = false; }
+  }})));
+  const time = el("input", { type: "range", min: "0", max: "23", step: "1", value: String(hour) });
+  const timeLbl = el("span", { class: "hint", text: `время ${String(hour).padStart(2, "0")}:00` });
+  time.addEventListener("input", () => { const st = getStage(); if (st) st.setHour(Number(time.value), true); timeLbl.textContent = `время ${time.value.padStart(2, "0")}:00`; });
+  box.append(time, timeLbl);
+  return box;
+}
+
+function huntMobFxSummary(mob) {
+  const fx = mob.combat_fx || {};
+  const parts = [];
+  if (fx.attack_style) parts.push(HUNT_ATTACK_STYLES[fx.attack_style] ? HUNT_ATTACK_STYLES[fx.attack_style].name : fx.attack_style);
+  if (fx.size) parts.push(`${fx.size}% сцены`);
+  if (fx.attack_lines && fx.attack_lines.length) parts.push(`${fx.attack_lines.length} фраз`);
+  if (fx.intro_text) parts.push(`«${fx.intro_text}»`);
+  if (fx.sounds && Object.keys(fx.sounds).length) parts.push("свои звуки");
+  const auto = mob.is_boss ? HUNT_ATTACK_STYLES.slam.name : HUNT_ATTACK_STYLES.claw.name;
+  return parts.length ? parts.join(" · ") : `по умолчанию (${auto}, цвета спрайта)`;
+}
+
+function mobCombatFxRow(mob, mid) {
+  const row = el("div", { class: "field-row settings-summary-row" });
+  row.appendChild(el("label", { text: "Бой (сцена схватки)" }));
+  const summary = el("span", { class: "hint", text: huntMobFxSummary(mob) });
+  row.appendChild(summary);
+  row.appendChild(el("button", { class: "small", text: "Бой", onclick: () => {
+    openMobCombatFxModal(mob, mid, () => { summary.textContent = huntMobFxSummary(mob); });
+  }}));
+  return row;
+}
+
+function openMobCombatFxModal(mob, mid, onChange) {
+  let stage = null;
+  const overlay = el("div", { class: "modal-overlay" });
+  const close = () => { if (stage) stage.destroy(); overlay.remove(); onChange(); };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  const modal = el("div", { class: "modal settings-modal hunt-fx-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: `Бой: ${mob.name}` }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: close }));
+  modal.appendChild(head);
+  const content = el("div", { class: "appearance-body" });
+  modal.appendChild(content);
+  content.appendChild(el("p", { class: "hint", text:
+    "Как этот моб выглядит и дерётся в сцене схватки: размер, ответный удар, частицы, светящиеся в темноте пиксели, "
+    + "фразы для хроники и свои звуки. Пустое поле - «авто». Фон сцены настраивается у локации («Сцена охоты»). "
+    + "Кнопки под превью проигрывают то же, что в игре." }));
+
+  const fx = () => mob.combat_fx || {};
+  const icon = () => mob.icon || defaultMobIcon();
+  const sprite = () => huntSprite(icon());
+  const setFx = (key, value) => {
+    if (!mob.combat_fx) mob.combat_fx = {};
+    const empty = value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length && key !== "glow_keys");
+    if (empty) delete mob.combat_fx[key]; else mob.combat_fx[key] = value;
+    if (!Object.keys(mob.combat_fx).length) delete mob.combat_fx;
+    if (stage) stage.setMob(icon(), mob.combat_fx, mob.is_boss);
+    renderFields();
+  };
+
+  const previewHost = el("div", { class: "hunt-fx-preview" });
+  content.appendChild(previewHost);
+  content.appendChild(huntPreviewControls(() => stage, [
+    ["▶ Появление", (st) => {
+      const f = st.mobFx;
+      return mob.is_boss ? st.intro({ title: String(mob.name).toUpperCase(), subtitle: `босс · ${mob.hp} HP` })
+        : st.intro({ title: (f.intro_text || "Перед тобой").toUpperCase(), subtitle: `${mob.name} · ${mob.hp} HP` });
+    }],
+    ["▶ Удар по нему", async (st) => { const p = await st.strike({ style: "slash" }); st.damageNumber("−8", "", p.hx, p.hy - 20); await st.wait(400); st.setTarget("idle"); }],
+    ["▶ Его ответка", (st) => st.retaliate()],
+    ["▶ Смерть", async (st) => { await st.die({ soul: !!mob.soul_id }); await st.wait(700); st.showMob(); st.setTarget("idle"); }],
+  ], 21));
+
+  const body = el("div");
+  content.appendChild(body);
+  function renderFields() {
+    body.innerHTML = "";
+    const f = fx(), sp = sprite(), resolved = huntMobFx(f, mob.is_boss, sp);
+
+    const sizeRow = el("div", { class: "field-row" });
+    sizeRow.appendChild(el("label", { text: "Размер в сцене" }));
+    const size = el("input", { type: "range", min: "15", max: "90", step: "1", value: String(resolved.size) });
+    const sizeLbl = el("span", { class: "hint", text: f.size ? `${f.size}% высоты сцены` : `авто (${resolved.size}%)` });
+    size.addEventListener("input", () => { sizeLbl.textContent = `${size.value}% высоты сцены`; if (stage) stage.mobFx.size = Number(size.value); });
+    size.addEventListener("change", () => setFx("size", Number(size.value)));
+    sizeRow.append(size, sizeLbl);
+    if (f.size) sizeRow.appendChild(el("button", { class: "small", type: "button", text: "Авто", onclick: () => setFx("size", null) }));
+    body.appendChild(sizeRow);
+
+    const autoStyle = mob.is_boss ? "slam" : "claw";
+    body.appendChild(huntSelectRow("Ответный удар",
+      [{ value: "", label: `авто (${HUNT_ATTACK_STYLES[autoStyle].name})` },
+        ...Object.entries(HUNT_ATTACK_STYLES).map(([k, v]) => ({ value: k, label: `${v.name} — ${v.hint}` }))],
+      f.attack_style || "", (v) => setFx("attack_style", v)));
+    body.appendChild(huntColorRow("Цвет ответного удара", f.attack_color, HUNT_ATTACK_STYLES[resolved.attack_style].color, (v) => setFx("attack_color", v),
+      "когти/укус - цвет разрезов, удар оземь - волна, заклинание - сгусток"));
+
+    const hitRow = el("div", { class: "field-row" });
+    hitRow.appendChild(el("label", { text: "Частицы при попадании" }));
+    const chips = el("div", { class: "hunt-chip-row" });
+    const hitCols = f.hit_colors || [];
+    (hitCols.length ? hitCols : resolved.hit_colors).forEach((c, i) => {
+      const chip = el("span", { class: "hunt-color-chip" + (hitCols.length ? "" : " auto"), title: c });
+      chip.appendChild(el("i", { style: `background:${c}` }));
+      if (hitCols.length) chip.appendChild(el("button", { class: "small", type: "button", text: "✕", onclick: () => setFx("hit_colors", hitCols.filter((_, j) => j !== i)) }));
+      chips.appendChild(chip);
+    });
+    const add = el("input", { type: "color", value: "#cccccc", title: "Добавить цвет" });
+    add.addEventListener("change", () => setFx("hit_colors", [...hitCols, add.value]));
+    chips.appendChild(add);
+    hitRow.appendChild(chips);
+    hitRow.appendChild(el("span", { class: "hint", text: hitCols.length ? "свои цвета" : "авто - три самых частых цвета спрайта; добавь свой, чтобы задать вручную" }));
+    body.appendChild(hitRow);
+
+    const glowRow = el("div", { class: "field-row" });
+    glowRow.appendChild(el("label", { text: "Светятся в темноте" }));
+    const manual = Array.isArray(f.glow_keys);
+    const glowBox = el("div", { class: "hunt-chip-row" });
+    Object.entries(icon().palette || {}).forEach(([k, col]) => {
+      const on = resolved.glow_keys.includes(k);
+      const chip = el("button", { class: "small hunt-glow-chip" + (on ? " on" : ""), type: "button", title: `символ ${k}` });
+      chip.appendChild(el("i", { style: `background:${col}` }));
+      chip.appendChild(document.createTextNode(k));
+      chip.addEventListener("click", () => {
+        const cur = manual ? f.glow_keys.slice() : resolved.glow_keys.slice();
+        setFx("glow_keys", on ? cur.filter(x => x !== k) : [...cur, k]);
+      });
+      glowBox.appendChild(chip);
+    });
+    glowRow.appendChild(glowBox);
+    glowRow.appendChild(el("span", { class: "hint", text: manual ? "вручную (клик - вкл/выкл)" : "авто - яркие насыщенные цвета (глаза); клик задаёт вручную" }));
+    if (manual) glowRow.appendChild(el("button", { class: "small", type: "button", text: "Авто", onclick: () => setFx("glow_keys", null) }));
+    body.appendChild(glowRow);
+
+    const introRow = el("div", { class: "field-row" });
+    introRow.appendChild(el("label", { text: "Фраза появления" }));
+    const intro = el("input", { type: "text", value: f.intro_text || "", placeholder: "Перед тобой" });
+    intro.addEventListener("change", () => setFx("intro_text", intro.value.trim()));
+    introRow.appendChild(intro);
+    introRow.appendChild(el("span", { class: "hint", text: `надпись при появлении и строка хроники: «${f.intro_text || "Перед тобой"} ${mob.name}»` }));
+    body.appendChild(introRow);
+
+    const linesRow = el("div", { class: "field-row" });
+    linesRow.appendChild(el("label", { text: "Фразы ответки (по одной на строку)" }));
+    const lines = el("textarea", { placeholder: `${mob.name} бьёт в ответ` });
+    lines.value = (f.attack_lines || []).join("\n");
+    lines.addEventListener("change", () => setFx("attack_lines", lines.value.split("\n").map(s => s.trim()).filter(Boolean)));
+    linesRow.appendChild(lines);
+    linesRow.appendChild(el("span", { class: "hint", text: "в хронике боя берётся случайная; пусто - «<имя> бьёт в ответ»" }));
+    body.appendChild(linesRow);
+
+    const setSound = (kind, file) => {
+      const sounds = { ...(fx().sounds || {}) };
+      if (file) sounds[kind] = file; else delete sounds[kind];
+      setFx("sounds", Object.keys(sounds).length ? sounds : null);
+    };
+    [["intro", "Звук появления", "рык / гул"], ["hit", "Звук, когда его бьют", "нет"], ["attack", "Звук ответного удара", "по стилю удара"], ["death", "Звук смерти", "нет"]].forEach(([kind, label, dflt]) => {
+      body.appendChild(soundRow(`mob_${mid}_${kind}`, label, `синтез-заглушка: ${dflt}`, null,
+        () => (fx().sounds || {})[kind] || null, (file) => setSound(kind, file)));
+    });
+  }
+  renderFields();
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  stage = huntPreview(previewHost, { scene: huntSceneOf(mob.location), icon: icon(), fx: mob.combat_fx, isBoss: mob.is_boss });
+}
+
+function huntSceneSummary(loc) {
+  const sc = loc.hunt_scene || {};
+  const cfg = huntSceneCfg(sc);
+  const parts = [HUNT_BACKDROPS[cfg.backdrop].name, HUNT_AMBIENTS[cfg.ambient].name.toLowerCase(), cfg.day_night ? "день и ночь" : "без смены суток"];
+  return (Object.keys(sc).length ? "" : "по умолчанию: ") + parts.join(" · ");
+}
+
+function huntSceneRow(loc, lid) {
+  const row = el("div", { class: "field-row settings-summary-row" });
+  row.appendChild(el("label", { text: "Сцена охоты" }));
+  const used = !!huntFirstMobAt(lid);
+  const summary = el("span", { class: "hint", text: used ? huntSceneSummary(loc) : "не используется - на локацию не ссылается ни один моб" });
+  row.appendChild(summary);
+  row.appendChild(el("button", { class: "small", text: "Сцена охоты", onclick: () => {
+    openHuntSceneModal(loc, lid, () => { summary.textContent = huntFirstMobAt(lid) ? huntSceneSummary(loc) : summary.textContent; });
+  }}));
+  return row;
+}
+
+function openHuntSceneModal(loc, lid, onChange) {
+  let stage = null;
+  const overlay = el("div", { class: "modal-overlay" });
+  const close = () => { if (stage) stage.destroy(); overlay.remove(); onChange(); };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  const modal = el("div", { class: "modal settings-modal hunt-fx-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: `Сцена охоты: ${loc.name}` }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: close }));
+  modal.appendChild(head);
+  const content = el("div", { class: "appearance-body" });
+  modal.appendChild(content);
+  const mob = huntFirstMobAt(lid);
+  content.appendChild(el("p", { class: "hint", text:
+    "Фон сцены схватки для всех мобов этой локации: пейзаж, частицы, цвета, идёт ли небо по времени игры. "
+    + "Пустое поле - «авто» (значения выбранного фона). "
+    + (mob ? `В превью - «${mob.name}».` : "На локацию пока не ссылается ни один моб - в превью заглушка.") }));
+  if (!mob) content.appendChild(el("div", { class: "pattern-note warn", text: "Сцена появится в игре, когда хотя бы один моб/босс будет ссылаться на эту локацию." }));
+
+  const sc = () => loc.hunt_scene || {};
+  const set = (key, value) => {
+    if (!loc.hunt_scene) loc.hunt_scene = {};
+    if (value === null || value === undefined || value === "") delete loc.hunt_scene[key]; else loc.hunt_scene[key] = value;
+    if (!Object.keys(loc.hunt_scene).length) delete loc.hunt_scene;
+    if (stage) stage.setScene(loc.hunt_scene);
+    renderFields();
+  };
+  const previewHost = el("div", { class: "hunt-fx-preview" });
+  content.appendChild(previewHost);
+  content.appendChild(huntPreviewControls(() => stage, [
+    ["▶ Удар по мобу", async (st) => { const p = await st.strike({ style: "heavy" }); st.damageNumber("−24", "big", p.hx, p.hy - 20); await st.wait(400); st.setTarget("idle"); }],
+    ["▶ Ответка", (st) => st.retaliate()],
+  ], 21));
+  const body = el("div");
+  content.appendChild(body);
+  function renderFields() {
+    body.innerHTML = "";
+    const s = sc(), cfg = huntSceneCfg(s), bd = HUNT_BACKDROPS[cfg.backdrop];
+    body.appendChild(huntSelectRow("Фон", [{ value: "", label: `авто (${HUNT_BACKDROPS.forest.name})` },
+      ...Object.entries(HUNT_BACKDROPS).map(([k, v]) => ({ value: k, label: v.name }))], s.backdrop || "", (v) => set("backdrop", v)));
+    body.appendChild(huntSelectRow("Частицы", [{ value: "", label: `авто (${HUNT_AMBIENTS[bd.ambient].name})` },
+      ...Object.entries(HUNT_AMBIENTS).map(([k, v]) => ({ value: k, label: v.name }))], s.ambient || "", (v) => set("ambient", v)));
+    body.appendChild(huntSelectRow("Смена дня и ночи", [{ value: "", label: `авто (${bd.day_night ? "да" : "нет"})` }, { value: "on", label: "да - небо идёт по времени игры" }, { value: "off", label: "нет - постоянный полумрак" }],
+      s.day_night === true ? "on" : s.day_night === false ? "off" : "", (v) => set("day_night", v === null ? null : v === "on")));
+    body.appendChild(huntColorRow("Цвет земли", s.ground_color, bd.ground, (v) => set("ground_color", v)));
+    body.appendChild(huntColorRow("Цвет силуэтов", s.silhouette_color, bd.silhouette, (v) => set("silhouette_color", v), "деревья / сталактиты"));
+    body.appendChild(huntColorRow("Цвет тумана", s.fog_color, bd.fog, (v) => set("fog_color", v)));
+  }
+  renderFields();
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  stage = huntPreview(previewHost, { scene: loc.hunt_scene, icon: mob ? (mob.icon || defaultMobIcon()) : defaultMobIcon(), fx: mob ? mob.combat_fx : null, isBoss: mob ? mob.is_boss : false });
+}
+
+// Поля визуала приёма в карточке «Приёмы боя»: стиль, цвет, звук, превью. Блок
+// перерисовывает только себя - карточка не схлопывается и не прыгает.
+function moveFxBlock(move, moveId) {
+  const box = el("div");
+  const fx = () => move.fx || {};
+  const set = (key, value) => {
+    if (!move.fx) move.fx = {};
+    if (value === null || value === undefined || value === "") delete move.fx[key]; else move.fx[key] = value;
+    if (!Object.keys(move.fx).length) delete move.fx;
+    render();
+  };
+  function render() {
+    box.innerHTML = "";
+    const autoStyle = huntMoveStyle({ mode: move.mode || "multiplier" });
+    box.appendChild(huntSelectRow("Удар в сцене", [{ value: "", label: `авто по режиму (${HUNT_MOVE_STYLES[autoStyle].name})` },
+      ...Object.entries(HUNT_MOVE_STYLES).map(([k, v]) => ({ value: k, label: `${v.name} — ${v.hint}` }))], fx().style || "", (v) => set("style", v),
+      "добивание ниже порога и ваншот оружием всегда играются своими эффектами"));
+    const style = huntMoveStyle(move);
+    box.appendChild(huntColorRow("Цвет удара", fx().color, (HUNT_MOVE_STYLES[style] && HUNT_MOVE_STYLES[style].color) || "", (v) => set("color", v),
+      "пусто - цвет разреза оружия (вкладка «Инструменты»)"));
+    box.appendChild(soundRow(`move_${moveId}`, "Звук удара", "синтез-заглушка: взмах", null, () => fx().sound || null, (file) => set("sound", file)));
+    const prevRow = el("div", { class: "field-row" });
+    prevRow.appendChild(el("label", { text: "Превью" }));
+    prevRow.appendChild(el("button", { class: "small", type: "button", text: "▶ Посмотреть удар", onclick: () => openMovePreviewModal(move) }));
+    box.appendChild(prevRow);
+  }
+  render();
+  return box;
+}
+
+function openMovePreviewModal(move) {
+  let stage = null;
+  const overlay = el("div", { class: "modal-overlay" });
+  const close = () => { if (stage) stage.destroy(); overlay.remove(); };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  const modal = el("div", { class: "modal settings-modal hunt-fx-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: `Удар: ${move.name}` }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: close }));
+  modal.appendChild(head);
+  const content = el("div", { class: "appearance-body" });
+  modal.appendChild(content);
+  const mob = Object.values(DATA.mobs || {})[0] || null;
+  const previewHost = el("div", { class: "hunt-fx-preview" });
+  content.appendChild(previewHost);
+  const strike = async (st, qte) => {
+    const style = huntMoveStyle(move), color = (move.fx && move.fx.color) || null;
+    const p = await st.strike({ style, color, qte, sound: move.fx ? move.fx.sound : null });
+    st.damageNumber("−12", [style === "heavy" ? "big" : "", (move.mode || "").startsWith("percent") ? "true" : "", qte ? "qte" : ""].join(" "), p.hx, p.hy - 20);
+    if (qte) st.callout("✦ МЕТКО", "qte", 1000);
+    await st.wait(style === "execute" ? 380 : 300); st.endSlowMo(); st.setTarget("idle");
+  };
+  content.appendChild(huntPreviewControls(() => stage, [["▶ Удар", (st) => strike(st, false)], ["▶ Удар с QTE-попаданием", (st) => strike(st, true)]], 12));
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  stage = huntPreview(previewHost, { scene: mob ? huntSceneOf(mob.location) : null, icon: mob ? (mob.icon || defaultMobIcon()) : defaultMobIcon(), fx: mob ? mob.combat_fx : null, isBoss: mob ? mob.is_boss : false, hour: 12 });
 }
 
 function renderMobs() {
@@ -8114,6 +8493,8 @@ function renderMobs() {
         card.appendChild(soulChanceRow);
       }
     }
+
+    card.appendChild(mobCombatFxRow(mob, mid));
 
     makeCardCollapsible(card);
     cardsBox.appendChild(card);
@@ -10288,6 +10669,7 @@ function renderSettings() {
   combatField("hp_regen_per_turn", "Реген HP за ход", "тикает КАЖДЫЙ ход, но ТОЛЬКО вне активной схватки", { def: 3 });
   combatField("wounded_turns", "Длительность «Ранен» после поражения (ходов)", "выставляется при отступлении на 0 HP - см. attack_encounter", { def: 5 });
   combatField("wounded_damage_multiplier", "Множитель урона игрока, пока «Ранен»", "число от 0 до 1 - домножает ЛЮБОЙ урон игрока по мобу (обычная атака и приёмы)", { def: 0.5, step: "0.05" });
+  combatField("qte_damage_bonus", "Бонус урона за попадание в QTE-кольцо", "доля: 0.2 = +20% к урону удара, если игрок попал в кольцо на цели (любой приём, кроме добивания ниже порога); 0 - кольцо чисто для красоты", { def: 0, step: "0.05" });
 
   root.appendChild(combatCard);
 }

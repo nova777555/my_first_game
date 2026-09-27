@@ -15,6 +15,7 @@ a = Analysis(
         (os.path.join(ROOT, "tools", "web_ui.html"), "."),
         # Оформление модалки механизма (фон, прогресс, движения, частицы) - тот же приём.
         (os.path.join(ROOT, "tools", "mechanism_fx.js"), "."),
+        (os.path.join(ROOT, "tools", "hunt_fx.js"), "."),
         # game/content.py ищет content.json тем же паттерном - должен лежать
         # рядом с game/content.py внутри сборки, то есть в подпапке game/.
         (os.path.join(ROOT, "game", "content.json"), "game"),

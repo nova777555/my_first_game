@@ -179,6 +179,241 @@ class AttackEncounterTests(FixtureTestCase):
         self.assertEqual(s.resources["test_soul"], 1)
 
 
+class AttackPreviewTests(FixtureTestCase):
+    """engine.attack_preview - точный прогноз удара для UI (штриховка на полосах HP,
+    число на кнопке приёма). Тот же _strike, что у attack_encounter, поэтому здесь
+    проверяется главное: прогноз совпадает с реальным ударом и ничего не меняет в state.
+    Фикстура: test_mob hp=10, damage=4; навык ур.1 = урон 3; меч тир 3 = ×3; броня тир 2 =
+    −2 ответки, +10 HP."""
+
+    def _encounter(self, s, hp=10, mob="test_mob"):
+        s.active_encounter = {"mob_id": mob, "remaining_hp": hp}
+
+    def test_none_without_encounter(self):
+        self.assertIsNone(engine.attack_preview(GameState()))
+
+    def test_none_for_locked_move(self):
+        s = GameState(tool_tiers={"sword": 2})
+        self._encounter(s)
+        self.assertIsNone(engine.attack_preview(s, "power_strike"))
+
+    def test_matches_real_non_lethal_hit(self):
+        s = GameState(tool_tiers={"sword": 3, "armor": 2})
+        self._encounter(s)
+        preview = engine.attack_preview(s)
+        result = engine.attack_encounter(s)
+        self.assertFalse(preview["killed"])
+        self.assertEqual(preview["damage"], result.combat["damage"])
+        self.assertEqual(preview["hp_after"], s.active_encounter["remaining_hp"])
+        self.assertEqual(preview["retaliation"], result.combat["player_damage_taken"])
+        self.assertEqual(preview["player_hp_after"], result.combat["player_hp"])
+
+    def test_lethal_preview_reports_remaining_hp_and_no_retaliation(self):
+        s = GameState(tool_tiers={"sword": 3})
+        self._encounter(s)
+        preview = engine.attack_preview(s, "power_strike")  # 3 * 3 * 2 = 18 >= 10
+        self.assertTrue(preview["killed"])
+        self.assertEqual(preview["damage"], 10)
+        self.assertEqual(preview["hp_after"], 0)
+        self.assertEqual(preview["retaliation"], 0)
+
+    def test_execute_below_threshold_is_forced_kill(self):
+        s = GameState(tool_tiers={"sword": 3})
+        self._encounter(s, hp=2)  # порог 0.2 * 10 = 2
+        preview = engine.attack_preview(s, "execute_move")
+        self.assertTrue(preview["forced_kill"])
+        self.assertTrue(preview["instant_kill"])
+
+    def test_defeated_when_retaliation_drops_player_to_zero(self):
+        s = GameState(player_hp=3)
+        self._encounter(s)
+        preview = engine.attack_preview(s)
+        self.assertTrue(preview["defeated"])
+        self.assertTrue(engine.attack_encounter(s).combat["defeated"])
+
+    def test_preview_does_not_consume_durability(self):
+        with mock.patch.dict(engine.TOOLS["sword"]["tiers"][2], {"max_durability": 5}):
+            s = GameState(tool_tiers={"sword": 3})
+            self._encounter(s)
+            engine.attack_preview(s)
+            engine.attack_preview(s, "power_strike")
+            self.assertEqual(s.tool_durability, {})
+            engine.attack_encounter(s)
+            self.assertEqual(s.tool_durability, {"sword": 4})
+
+    def test_armor_breaking_on_this_hit_no_longer_softens_it(self):
+        # Броня с последней единицей прочности ломается на ЭТОЙ ответке и уже не
+        # снижает её (порядок attack_encounter) - прогноз обязан сказать то же самое.
+        with mock.patch.dict(engine.TOOLS["armor"]["tiers"][1], {"max_durability": 3}):
+            s = GameState(tool_tiers={"armor": 2}, tool_durability={"armor": 1})
+            self._encounter(s)
+            preview = engine.attack_preview(s)
+            self.assertEqual(s.tool_durability, {"armor": 1})
+            self.assertEqual(preview["retaliation"], 4)
+            result = engine.attack_encounter(s)
+            self.assertEqual(result.combat["player_damage_taken"], 4)
+            self.assertEqual(preview["player_hp_after"], result.combat["player_hp"])
+
+
+class QteDamageBonusTests(FixtureTestCase):
+    """Попадание в QTE-кольцо (qte_hit) - бонус к урону combat.qte_damage_bonus
+    (engine._move_damage). Фикстура: навык ур.1 = урон 3, test_mob hp=10."""
+
+    def _encounter(self, s, hp=10):
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": hp}
+
+    def test_without_bonus_qte_changes_nothing(self):
+        s = GameState()
+        self._encounter(s)
+        self.assertEqual(engine.qte_damage_bonus(), 0.0)
+        self.assertEqual(engine.attack_preview(s, qte_hit=True)["damage"], engine.attack_preview(s)["damage"])
+
+    def test_bonus_applies_to_basic_attack_and_rounds_up(self):
+        with mock.patch.dict(engine.COMBAT_SETTINGS, {"qte_damage_bonus": 0.5}):
+            s = GameState()
+            self._encounter(s)
+            combat = engine.attack_encounter(s, qte_hit=True).combat
+        self.assertEqual(combat["damage"], 5)  # 3 * 1.5 = 4.5 -> 5
+        self.assertTrue(combat["qte_hit"])
+
+    def test_bonus_applies_to_percent_modes(self):
+        with mock.patch.dict(engine.COMBAT_SETTINGS, {"qte_damage_bonus": 0.5}):
+            s = GameState(tool_tiers={"sword": 3})
+            self._encounter(s)
+            self.assertEqual(engine.attack_preview(s, "pct_max_move")["damage"], 2)  # 20% от 10
+            self.assertEqual(engine.attack_preview(s, "pct_max_move", qte_hit=True)["damage"], 3)
+
+    def test_execute_below_threshold_is_unaffected(self):
+        with mock.patch.dict(engine.COMBAT_SETTINGS, {"qte_damage_bonus": 0.5}):
+            s = GameState(tool_tiers={"sword": 3})
+            self._encounter(s, hp=2)
+            preview = engine.attack_preview(s, "execute_move", qte_hit=True)
+        self.assertTrue(preview["forced_kill"])
+        self.assertEqual(preview["damage"], 2)
+
+    def test_qte_can_turn_a_hit_into_a_kill_and_skip_retaliation(self):
+        with mock.patch.dict(engine.COMBAT_SETTINGS, {"qte_damage_bonus": 0.5}):
+            s = GameState()
+            self._encounter(s, hp=5)  # обычный удар 3 - не убивает, с QTE 5 - убивает
+            self.assertFalse(engine.attack_preview(s)["killed"])
+            preview = engine.attack_preview(s, qte_hit=True)
+            self.assertTrue(preview["killed"])
+            self.assertEqual(preview["retaliation"], 0)
+            self.assertTrue(engine.attack_encounter(s, qte_hit=True).combat["killed"])
+
+    def test_damage_ceil_ignores_float_noise(self):
+        self.assertEqual(engine._ceil_damage(10 * 1.1), 11)
+        self.assertEqual(engine._ceil_damage(4.5), 5)
+        self.assertEqual(engine._ceil_damage(0.2), 1)
+
+
+class CombatPacketTests(FixtureTestCase):
+    """ActionResult.combat - данные для анимации и экрана «Добыча» в UI."""
+
+    def test_kill_packet_carries_loot_soul_xp_and_level_up(self):
+        s = GameState(skill_xp={"combat": 5})  # ур. 1; +5 опыта -> ровно порог ур. 2
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 3}  # урон ур. 1 = 3
+        combat = engine.attack_encounter(s).combat
+        self.assertTrue(combat["killed"])
+        self.assertEqual(combat["mob_id"], "test_mob")
+        self.assertEqual(combat["loot"], {"raw_a": 2})
+        self.assertEqual(combat["soul"], "test_soul")
+        self.assertEqual(combat["xp"], 5)
+        self.assertEqual((combat["skill_level_before"], combat["skill_level_after"]), (1, 2))
+
+    def test_non_lethal_packet_reports_armor_absorbed_and_move(self):
+        s = GameState(tool_tiers={"sword": 3, "armor": 2})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 50}
+        combat = engine.attack_encounter(s, "pct_max_move").combat
+        self.assertEqual(combat["move_id"], "pct_max_move")
+        self.assertEqual(combat["armor_absorbed"], 2)
+        self.assertEqual(combat["player_damage_taken"], 2)
+
+    def test_defeat_packet_carries_wounded_turns(self):
+        s = GameState(player_hp=1)
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        combat = engine.attack_encounter(s).combat
+        self.assertTrue(combat["defeated"])
+        self.assertEqual(combat["wounded_turns"], 5)
+
+
+class HuntingViewTests(unittest.TestCase):
+    """tools/web_ui.py: hunting_view - прогнозы, снаряжение и визуал из контента."""
+
+    def setUp(self):
+        import web_ui
+        self.web_ui = web_ui
+        patch = fixtures.patched_content()
+        patch.__enter__()
+        self.addCleanup(patch.__exit__, None, None, None)
+
+    def test_no_predictions_without_encounter(self):
+        view = self.web_ui.hunting_view(GameState())
+        self.assertIsNone(view["attack_prediction"])
+        self.assertEqual(view["predictions"], {})
+
+    def test_predictions_for_unlocked_moves_only(self):
+        s = GameState(tool_tiers={"sword": 3})
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        view = self.web_ui.hunting_view(s)
+        prediction = dict(view["attack_prediction"])
+        self.assertIsNone(prediction.pop("qte"))  # бонуса за QTE в фикстуре нет
+        self.assertEqual(prediction, engine.attack_preview(s))
+        self.assertEqual(set(view["predictions"]), engine.unlocked_attack_moves(s))
+
+    def test_predictions_carry_qte_variant_when_bonus_is_set(self):
+        with mock.patch.dict(engine.COMBAT_SETTINGS, {"qte_damage_bonus": 0.5}):
+            s = GameState()
+            s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+            view = self.web_ui.hunting_view(s)
+        self.assertEqual(view["qte_damage_bonus"], 0.5)
+        self.assertEqual(view["attack_prediction"]["damage"], 3)
+        self.assertEqual(view["attack_prediction"]["qte"]["damage"], 5)
+
+    def test_run_turn_passes_qte_to_attack(self):
+        with mock.patch.dict(engine.COMBAT_SETTINGS, {"qte_damage_bonus": 0.5}):
+            s = GameState()
+            s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+            log = self.web_ui.run_turn(s, "hunt_attack", None, qte_hit=True)
+        self.assertTrue(log["combat"]["qte_hit"])
+        self.assertEqual(log["combat"]["damage"], 5)
+
+    def test_combat_fx_and_hunt_scene_passed_through_from_content(self):
+        fx = {"attack_style": "slam", "scale": 6, "attack_lines": ["Бьёт"]}
+        scene = {"backdrop": "cave", "ambient": "embers"}
+        with mock.patch.dict(engine.MOBS["test_mob"], {"combat_fx": fx}), \
+                mock.patch.dict(self.web_ui.LOCATIONS["hunting_loc"], {"hunt_scene": scene}):
+            s = GameState()
+            s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+            encounter = self.web_ui.hunting_view(s)["active_encounter"]
+        self.assertEqual(encounter["fx"], fx)
+        self.assertEqual(encounter["scene"], scene)
+
+    def test_encounter_without_fx_gets_empty_dicts(self):
+        s = GameState()
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        encounter = self.web_ui.hunting_view(s)["active_encounter"]
+        self.assertEqual((encounter["fx"], encounter["scene"]), ({}, {}))
+
+    def test_gear_lists_forged_weapons_and_armor_only(self):
+        with mock.patch.dict(engine.TOOLS["sword"]["tiers"][2], {"slash_color": "#aabbcc"}):
+            view = self.web_ui.hunting_view(GameState(tool_tiers={"sword": 3, "armor": 2}))
+            gear = view["gear"]
+            self.assertEqual([w["tool_id"] for w in gear["weapons"]], ["sword"])
+            self.assertEqual(gear["weapons"][0]["slash_color"], "#aabbcc")
+            self.assertEqual([a["tool_id"] for a in gear["armor"]], ["armor"])
+            self.assertEqual(gear["damage_reduction"], 2)
+            empty = self.web_ui.hunting_view(GameState())["gear"]
+            self.assertEqual((empty["weapons"], empty["armor"]), ([], []))
+
+    def test_moves_carry_fx_and_icon_fields(self):
+        with mock.patch.dict(engine.COMBAT_MOVES["power_strike"], {"fx": {"style": "heavy"}}):
+            moves = {m["id"]: m for m in self.web_ui.hunting_view(GameState())["combat_moves"]}
+        self.assertEqual(moves["power_strike"]["fx"], {"style": "heavy"})
+        self.assertEqual(moves["pct_max_move"]["fx"], {})
+        self.assertIsNone(moves["pct_max_move"]["icon"])
+
+
 class CombatMovesTests(FixtureTestCase):
     def test_no_moves_unlocked_without_weapon_tier3(self):
         s = GameState(tool_tiers={"sword": 2})

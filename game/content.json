@@ -1024,7 +1024,11 @@
       "name": "Охотничьи угодья",
       "requires_tech": "toolmaking",
       "icon_label": "ОХ",
-      "parent_location": "forest"
+      "parent_location": "forest",
+      "hunt_scene": {
+        "backdrop": "forest",
+        "ambient": "fireflies"
+      }
     },
     "shaft": {
       "name": "Шахта",
@@ -5019,6 +5023,15 @@
           "D": "#241a08",
           "E": "#f0c040"
         }
+      },
+      "combat_fx": {
+        "attack_style": "claw",
+        "intro_text": "Из чащи выходит",
+        "attack_lines": [
+          "Волк бросается и рвёт клыками",
+          "Волк полосует когтями",
+          "Волк вцепляется в руку"
+        ]
       }
     },
     "forest_guardian": {
@@ -5096,6 +5109,15 @@
           "D": "#6b4a32",
           "E": "#9dff6a"
         }
+      },
+      "combat_fx": {
+        "attack_style": "slam",
+        "intro_text": "Тотем догорает — из чащи поднимается",
+        "attack_lines": [
+          "Страж обрушивает лапу оземь",
+          "Из-под земли хлещут корни",
+          "Страж сминает тебя плечом"
+        ]
       }
     }
   },
@@ -5104,13 +5126,19 @@
       "name": "Точный удар",
       "description": "Замах прицельнее обычного - урон заметно выше базового, но оружию нужно время, чтобы снова ударить так же метко. Открывается деревянным мечом.",
       "damage_multiplier": 1.8,
-      "cooldown_turns": 2
+      "cooldown_turns": 2,
+      "fx": {
+        "style": "thrust"
+      }
     },
     "heavy_strike": {
       "name": "Сокрушающий удар",
       "description": "Замах на пределе сил - урон намного выше базового, но после него нужно долго восстанавливаться. Открывается металлическим мечом.",
       "damage_multiplier": 3,
-      "cooldown_turns": 5
+      "cooldown_turns": 5,
+      "fx": {
+        "style": "heavy"
+      }
     },
     "shatter_strike": {
       "name": "Раскалывающий удар",
@@ -5527,7 +5555,8 @@
           "max_durability": 15,
           "repair_cost": {
             "wood": 5
-          }
+          },
+          "slash_color": "#d9a864"
         },
         {
           "name": "Металлический меч",
@@ -5544,7 +5573,8 @@
           "max_durability": 25,
           "repair_cost": {
             "metal": 6
-          }
+          },
+          "slash_color": "#eef4f8"
         }
       ]
     },
@@ -5575,7 +5605,8 @@
           "max_durability": 40,
           "repair_cost": {
             "metal": 20
-          }
+          },
+          "slash_color": "#9dffc8"
         }
       ]
     },
@@ -6260,7 +6291,8 @@
     "player_base_hp": 20,
     "hp_regen_per_turn": 3,
     "wounded_turns": 5,
-    "wounded_damage_multiplier": 0.5
+    "wounded_damage_multiplier": 0.5,
+    "qte_damage_bonus": 0.2
   },
   "breakdown_types": {},
   "ritual_recipes": {

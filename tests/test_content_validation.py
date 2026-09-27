@@ -2261,5 +2261,83 @@ class MechanismAppearanceValidationTests(unittest.TestCase):
         self.assertEqual(js_keys("MECH_FX_FILLS"), set(cv.MECHANISM_PROGRESS_FILLS))
 
 
+
+class HuntFxValidationTests(unittest.TestCase):
+    """Сцена схватки: mobs.*.combat_fx, combat_moves.*.fx/icon, tools.*.tiers[].slash_color,
+    locations.*.hunt_scene (tools/hunt_fx.js). Всё необязательно - проверяются только
+    заданные значения, неизвестные ключи внутри объектов - ошибка (ловит опечатки)."""
+
+    ICON = {"grid": ["AB", "BA"], "palette": {"A": "#111111", "B": "#eeeeee"}}
+
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    def _errors(self, mutate, needle):
+        d = copy.deepcopy(self.data)
+        mutate(d)
+        return [e for e in cv.validate(d) if needle in e]
+
+    def test_full_combat_fx_is_valid(self):
+        def m(d):
+            d["mobs"]["test_mob"]["icon"] = self.ICON
+            d["mobs"]["test_mob"]["combat_fx"] = {
+                "size": 50, "attack_style": "bite", "attack_color": "#aa0000", "hit_colors": ["#111111"],
+                "glow_keys": ["B"], "intro_text": "Из норы вылезает", "attack_lines": ["Кусает"],
+                "sounds": {"attack": "mob_test_mob_attack.wav"},
+            }
+        self.assertEqual(self._errors(m, "combat_fx"), [])
+
+    def test_combat_fx_rejects_bad_values_and_unknown_keys(self):
+        def m(d):
+            d["mobs"]["test_mob"]["icon"] = self.ICON
+            d["mobs"]["test_mob"]["combat_fx"] = {
+                "size": 5, "attack_style": "laser", "attack_color": "red", "hit_colors": [],
+                "glow_keys": ["Z"], "attack_lines": [""], "sounds": {"roar": "x.wav"}, "scale": 4,
+            }
+        errors = self._errors(m, "combat_fx")
+        for needle in (".size", "laser", "attack_color", "hit_colors", "'Z'", "attack_lines", "'roar'", "'scale'"):
+            self.assertTrue(any(needle in e for e in errors), (needle, errors))
+
+    def test_move_fx_and_icon(self):
+        ok = self._errors(lambda d: d["combat_moves"]["power_strike"].update(
+            fx={"style": "heavy", "color": "#ffffff", "sound": "move_power_strike.wav"}, icon=self.ICON), "power_strike")
+        self.assertEqual(ok, [])
+        bad = self._errors(lambda d: d["combat_moves"]["power_strike"].update(fx={"style": "spin", "colour": "#fff"}), "power_strike")
+        self.assertTrue(any("spin" in e for e in bad))
+        self.assertTrue(any("'colour'" in e for e in bad))
+
+    def test_slash_color_only_on_weapons(self):
+        self.assertEqual(self._errors(lambda d: d["tools"]["sword"]["tiers"][1].update(slash_color="#ffcc00"), "slash_color"), [])
+        self.assertTrue(self._errors(lambda d: d["tools"]["sword"]["tiers"][1].update(slash_color="gold"), "slash_color"))
+        self.assertTrue(self._errors(lambda d: d["tools"]["armor"]["tiers"][1].update(slash_color="#ffcc00"), "slash_color"))
+
+    def test_hunt_scene(self):
+        good = {"backdrop": "cave", "ambient": "embers", "day_night": False, "ground_color": "#221100",
+                "silhouette_color": "#000000", "fog_color": "#445566"}
+        self.assertEqual(self._errors(lambda d: d["locations"]["hunting_loc"].update(hunt_scene=good), "hunt_scene"), [])
+        bad = self._errors(lambda d: d["locations"]["hunting_loc"].update(
+            hunt_scene={"backdrop": "sea", "ambient": "rain", "day_night": "yes", "fog_color": "#12"}), "hunt_scene")
+        for needle in ("sea", "rain", "day_night", "fog_color"):
+            self.assertTrue(any(needle in e for e in bad), (needle, bad))
+
+    def test_qte_damage_bonus(self):
+        self.assertEqual(self._errors(lambda d: d["combat"].update(qte_damage_bonus=0.2), "qte_damage_bonus"), [])
+        self.assertTrue(self._errors(lambda d: d["combat"].update(qte_damage_bonus=-0.1), "qte_damage_bonus"))
+        self.assertTrue(self._errors(lambda d: d["combat"].update(qte_damage_bonus="20%"), "qte_damage_bonus"))
+
+    def test_variant_ids_match_hunt_fx_js(self):
+        # id вариантов продублированы руками (JS не импортирует Python) - держать в паре.
+        import re
+        js = (ROOT / "tools" / "hunt_fx.js").read_text(encoding="utf-8")
+
+        def js_keys(const):
+            block = re.search(rf"const {const} = \{{(.*?)\n\}};", js, re.S).group(1)
+            return set(re.findall(r"^  ([a-z_]+):", block, re.M))
+        self.assertEqual(js_keys("HUNT_ATTACK_STYLES"), set(cv.HUNT_ATTACK_STYLES))
+        self.assertEqual(js_keys("HUNT_MOVE_STYLES"), set(cv.HUNT_MOVE_STYLES))
+        self.assertEqual(js_keys("HUNT_BACKDROPS"), set(cv.HUNT_BACKDROPS))
+        self.assertEqual(js_keys("HUNT_AMBIENTS"), set(cv.HUNT_AMBIENTS))
+
+
 if __name__ == "__main__":
     unittest.main()

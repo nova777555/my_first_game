@@ -630,12 +630,9 @@
   .modal.priorities-modal { width: 560px; height: 780px; max-width: none; max-height: none; overflow: hidden; }
   .modal.upgrades-modal { width: 560px; height: 780px; max-width: none; max-height: none; overflow: hidden; }
   .modal.tech-modal { width: 700px; height: 820px; max-width: none; max-height: none; overflow: hidden; }
-  /* Модалка "Охота" (см. openHuntingModal/renderEncounterModalBody) - по прямому
-     пожеланию, 2026-09-14: базовые 420px (.modal) ощущались тесными для портрета +
-     полосок HP + ряда кнопок приёмов с QTE-шкалой внутри. Просто max-width, не
-     фиксированный width/height как у canvas-модалок выше - высота тут и так
-     подстраивается под число открытых приёмов. */
-  .modal.hunting-modal { max-width: 600px; }
+  /* Модалка "Охота" (openHuntingModal): сцена во всю ширину + панель под ней,
+     ширина как у модалок механизмов; высота по содержимому (сцена - clamp в .hunt-stage). */
+  .modal.hunting-modal { width: min(1180px, 96vw); max-width: none; max-height: 96vh; }
   /* Дерево технологий и квесты - панорамируемые графы узлов, которым тесно в
      обычных 700px .tech-modal (и которые в будущем вырастут ещё сильнее) -
      отдельный класс ПОВЕРХ .tech-modal (не правка самого .tech-modal, который
@@ -2649,71 +2646,158 @@
     gap: 10px; padding: 10px 20px; border-top: 1px solid rgba(232,196,104,.18); }
   .rit-book-page-indicator { font-size: 10.5px; color: #a89a78; font-family: Consolas, monospace; letter-spacing: .3px; }
 
-  /* ---------- панель схватки (модалка "Охота" - renderEncounterModalBody) ---------- */
-  .encounter-box { display: flex; gap: 12px; align-items: flex-start; }
-  .encounter-portrait {
-    position: relative; flex-shrink: 0; width: 72px; height: 72px;
-    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
-    display: flex; align-items: center; justify-content: center; overflow: visible;
+  /* ---------- Охота: модалка схватки (openHuntingModal) ----------
+     Каркас - обычный «чертёж» игры. Живая сцена (лес/пещера, моб, удары, частицы) -
+     tools/hunt_fx.js (HuntStage) внутри .hunt-stage; здесь только HUD поверх сцены
+     и нижняя панель (снаряжение | приёмы | хроника) - одной строкой. */
+  /* У игры нет общего [hidden]{display:none} - элементы с display:flex иначе не скрываются. */
+  .hunting-modal [hidden] { display: none !important; }
+  .hunt-head-loc { font-size: 12px; color: var(--muted); margin-left: 12px; align-self: flex-start; margin-top: 2px; }
+  .hunt-head-stats { display: flex; gap: 6px; margin-left: 14px; flex-wrap: wrap; }
+  .hunt-stat { font-family: Consolas, monospace; font-size: 10.5px; letter-spacing: .04em; padding: 3px 8px; color: #c9cfd8; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); white-space: nowrap; }
+  .hunt-stat.night { color: #a9c3ff; box-shadow: inset 0 0 0 1px rgba(140,170,255,.35); background: rgba(120,150,255,.06); }
+  .hunt-stat.day { color: #ffd98a; box-shadow: inset 0 0 0 1px rgba(255,200,90,.35); background: rgba(255,200,90,.05); }
+  .hunt-body { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; min-height: 0; }
+  .hunt-stage { position: relative; flex-shrink: 0; height: clamp(300px, 46vh, 420px); box-shadow: inset 0 0 0 1px rgba(95,208,232,.22); }
+  .hunt-hud-top { position: absolute; z-index: 3; top: 12px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px));
+    display: flex; align-items: flex-end; gap: 10px; transition: opacity .4s; pointer-events: none; }
+  .hunt-mob-plate { flex: 1; min-width: 0; }
+  .hunt-mp-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; text-shadow: 0 1px 2px #000; }
+  .hunt-mp-tag { font-family: Consolas, monospace; font-size: 10px; letter-spacing: .14em; color: var(--blueprint); padding: 1px 6px; box-shadow: inset 0 0 0 1px rgba(95,208,232,.5); background: rgba(10,14,18,.6); }
+  .hunt-mp-tag.boss { color: #ffb070; box-shadow: inset 0 0 0 1px rgba(255,140,60,.6); }
+  .hunt-mp-name { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+  .hunt-mp-hp { margin-left: auto; font-family: Consolas, monospace; font-size: 12px; color: #dfe4ea; font-variant-numeric: tabular-nums; }
+  .hunt-bar { position: relative; height: 12px; background: rgba(8,10,14,.78); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14), 0 2px 6px rgba(0,0,0,.5); overflow: hidden; }
+  .hunt-bar i { position: absolute; top: 0; bottom: 0; left: 0; display: block; }
+  .hunt-bar .ghost { background: rgba(255,255,255,.7); transition: width .55s ease-out .28s; }
+  .hunt-bar .fill { transition: width .16s ease-out; }
+  .hunt-bar::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(0,0,0,.45) calc(10% - 1px) 10%); }
+  .hunt-mob-bar .fill { background: linear-gradient(180deg, #f6b34a, #c9771a); box-shadow: inset 0 1px 0 rgba(255,255,255,.35); }
+  .hunt-mob-bar.boss { height: 14px; }
+  .hunt-mob-bar.boss .fill { background: linear-gradient(180deg, #ff8a4a, #b8341a); }
+  .hunt-pl-bar .fill { background: linear-gradient(180deg, #62e0b6, #2a9a76); box-shadow: inset 0 1px 0 rgba(255,255,255,.3); }
+  .hunt-pl-bar.low .fill { background: linear-gradient(180deg, #ff8a6a, #b8341a); }
+  .hunt-bar .prev { background: repeating-linear-gradient(-45deg, rgba(255,255,255,.85) 0 3px, rgba(255,255,255,.25) 3px 6px); opacity: 0; transition: opacity .12s; }
+  .hunt-bar .prev.on { opacity: 1; animation: hunt-prev-blink .9s ease-in-out infinite; }
+  .hunt-bar .prev.lethal { background: repeating-linear-gradient(-45deg, #ffd76a 0 3px, rgba(255,215,106,.35) 3px 6px); }
+  .hunt-bar .prev.danger { background: repeating-linear-gradient(-45deg, #ff5a4a 0 3px, rgba(255,90,74,.3) 3px 6px); }
+  @keyframes hunt-prev-blink { 50% { opacity: .55; } }
+  .hunt-bar .exec-line { width: 2px; background: #ffd76a; box-shadow: 0 0 6px #ffd76a; opacity: 0; transition: opacity .3s; }
+  .hunt-bar .exec-line.on { opacity: .85; }
+  .hunt-prev-anchor { position: relative; height: 0; }
+  .hunt-prev-lbl { position: absolute; top: 4px; transform: translateX(-50%); font-family: Consolas, monospace; font-size: 11px; font-weight: 700; white-space: nowrap; text-shadow: 0 1px 2px #000; opacity: 0; transition: opacity .12s; }
+  .hunt-prev-lbl.on { opacity: 1; }
+  .hunt-boss-timer { display: flex; align-items: center; gap: 6px; padding: 5px 9px; background: rgba(10,14,18,.72); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); white-space: nowrap; }
+  .hunt-boss-timer b { font-family: Consolas, monospace; font-size: 16px; color: #ffd98a; font-variant-numeric: tabular-nums; }
+  .hunt-boss-timer span { font-size: 11px; color: var(--muted); }
+  .hunt-boss-timer.urgent { box-shadow: inset 0 0 0 1px rgba(224,82,74,.7); animation: hunt-urgent 1s ease-in-out infinite; }
+  .hunt-boss-timer.urgent b { color: #ff7a6a; }
+  @keyframes hunt-urgent { 50% { background: rgba(120,20,16,.55); } }
+  .hunt-hud-player { position: absolute; z-index: 3; left: 14px; bottom: 28px; width: min(300px, calc(100% - 28px)); transition: opacity .4s; pointer-events: none; }
+  .hunt-hud-player.shake { animation: hunt-hud-shake .35s ease-in-out; }
+  @keyframes hunt-hud-shake { 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
+  .hunt-hp-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; text-shadow: 0 1px 2px #000; flex-wrap: wrap; }
+  .hunt-hp-lbl { font-family: Consolas, monospace; font-size: 10px; letter-spacing: .14em; color: #bfe9d8; }
+  .hunt-hp-row b { font-family: Consolas, monospace; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .hunt-chip { font-family: Consolas, monospace; font-size: 10px; padding: 1px 6px; background: rgba(10,14,18,.7); white-space: nowrap; }
+  .hunt-chip.armor { color: #b9c6d2; box-shadow: inset 0 0 0 1px rgba(185,198,210,.35); }
+  .hunt-chip.wound { color: #ff8a7a; box-shadow: inset 0 0 0 1px rgba(224,82,74,.6); pointer-events: auto; cursor: help; }
+  .hunt-qte-hint { position: absolute; z-index: 3; left: 50%; bottom: 16px; transform: translateX(-50%); font-family: Consolas, monospace; font-size: 11px; letter-spacing: .06em; color: #ffe2a8; background: rgba(10,14,18,.75); padding: 4px 10px; box-shadow: inset 0 0 0 1px rgba(240,160,48,.45); white-space: nowrap; pointer-events: none; }
+  .hunt-result { position: absolute; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: radial-gradient(60% 70% at 50% 50%, rgba(8,11,15,.55), rgba(8,11,15,.88)); animation: hunt-fade-in .5s ease-out; }
+  @keyframes hunt-fade-in { from { opacity: 0; } }
+  .hunt-result-card { width: min(460px, 100%); padding: 18px 20px 16px; background: rgba(22,29,36,.94); box-shadow: inset 0 0 0 1px rgba(95,208,232,.3), 0 10px 40px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 12px; }
+  .hunt-result-title { font-family: Consolas, monospace; font-size: 17px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
+  .hunt-result-title.win { color: #ffd76a; }
+  .hunt-result-title.lose { color: #ff7a6a; }
+  .hunt-result-title.fled { color: #b9c6d2; }
+  .hunt-result-sub { color: var(--muted); font-size: 12.5px; margin-top: -6px; }
+  .hunt-result-note { font-size: 12.5px; color: #c9cfd8; }
+  .hunt-result-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .hunt-loot-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .hunt-loot { position: relative; width: 84px; padding: 8px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: var(--panel2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); text-align: center; opacity: 0; animation: hunt-loot-in .45s cubic-bezier(.2,1.6,.4,1) forwards; }
+  .hunt-loot-ico { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; }
+  .hunt-loot.soul { box-shadow: inset 0 0 0 1px rgba(95,208,232,.7), 0 0 18px rgba(95,208,232,.35); }
+  .hunt-loot b { position: absolute; right: 6px; top: 5px; font-family: Consolas, monospace; font-size: 12px; color: var(--accent); }
+  .hunt-loot span { font-size: 10.5px; color: #c9cfd8; line-height: 1.2; }
+  @keyframes hunt-loot-in { from { opacity: 0; transform: translateY(14px) scale(.7); } to { opacity: 1; transform: none; } }
+  .hunt-xp { display: flex; flex-direction: column; gap: 5px; }
+  .hunt-xp-row { display: flex; justify-content: space-between; font-size: 12px; color: #c9cfd8; }
+  .hunt-xp-row b { font-family: Consolas, monospace; color: var(--blueprint); font-weight: 400; }
+  .hunt-xp-bar { height: 7px; background: rgba(255,255,255,.07); overflow: hidden; }
+  .hunt-xp-bar i { display: block; height: 100%; background: linear-gradient(90deg, #2a8aa0, var(--blueprint)); box-shadow: 0 0 8px rgba(95,208,232,.6); transition: width .9s cubic-bezier(.3,.8,.3,1); }
+  .hunt-lvl-up { font-family: Consolas, monospace; font-size: 12px; color: #ffd76a; letter-spacing: .06em; opacity: 0; transition: opacity .4s; }
+  .hunt-lvl-up.on { opacity: 1; }
+
+  .hunt-deck { display: grid; grid-template-columns: 216px minmax(0, 1fr) 250px; gap: 12px; align-items: stretch; min-height: 0; }
+  .hunt-deck > section { background: var(--bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); padding: 10px 12px 12px; min-width: 0; }
+  .hunt-deck-h { font-family: Consolas, monospace; font-size: 10.5px; letter-spacing: .16em; color: var(--muted); margin-bottom: 9px; display: flex; justify-content: space-between; gap: 8px; }
+  .hunt-deck-h .sub { letter-spacing: .02em; color: #5f6a76; }
+  .hunt-gear { display: flex; flex-direction: column; gap: 9px; }
+  .hunt-g-item { display: grid; grid-template-columns: 26px 1fr; gap: 2px 8px; align-items: center; }
+  .hunt-g-item svg { grid-row: span 2; }
+  .hunt-g-name { font-size: 12px; display: flex; justify-content: space-between; gap: 2px 6px; flex-wrap: wrap; }
+  .hunt-g-name em { font-style: normal; font-family: Consolas, monospace; font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+  .hunt-g-dur { height: 4px; background: rgba(255,255,255,.07); position: relative; }
+  .hunt-g-dur.none { background: transparent; }
+  .hunt-g-dur i { position: absolute; inset: 0 auto 0 0; background: #8fa3b0; transition: width .3s; }
+  .hunt-g-dur.low i { background: var(--danger); }
+  .hunt-g-item.broken .hunt-g-name { color: #ff8a7a; }
+  .hunt-g-item.skill .hunt-g-dur i { background: var(--blueprint); }
+  .hunt-moves { display: flex; gap: 8px; }
+  .hunt-move { position: relative; flex: 1 1 0; min-width: 0; min-height: 118px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+    padding: 8px; text-align: left; background: var(--panel2); border: 1px solid rgba(255,255,255,.08); border-radius: 0; color: var(--text);
+    transition: transform .08s ease, border-color .12s, background .12s; }
+  .hunt-move:hover:not(:disabled), .hunt-move:focus-visible { border-color: rgba(240,160,48,.7); background: #2a2f38; }
+  .hunt-move:active:not(:disabled) { transform: translateY(1px) scale(.98); }
+  .hunt-move.basic { border-top: 2px solid var(--accent); }
+  .hunt-move:disabled { cursor: not-allowed; }
+  .hunt-move-top { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+  .hunt-move .key { font-family: Consolas, monospace; font-size: 10px; color: #7d8894; padding: 0 4px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+  .hunt-move-name { font-size: 11.5px; font-weight: 600; line-height: 1.2; hyphens: auto; overflow-wrap: break-word; }
+  .hunt-move-f { font-family: Consolas, monospace; font-size: 10.5px; color: var(--muted); }
+  .hunt-move-pred { margin-top: auto; font-family: Consolas, monospace; font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+  .hunt-move-qte { font-family: Consolas, monospace; font-size: 10.5px; color: #fff3c8; white-space: nowrap; opacity: .85; }
+  .hunt-move-qte.lethal { color: #ffd76a; opacity: 1; }
+  .hunt-move-pred small { display: block; font-size: 9.5px; letter-spacing: .08em; font-weight: 400; text-transform: uppercase; }
+  .hunt-move-pred.true { color: #c58cff; }
+  .hunt-move-pred.lethal { color: #ffd76a; }
+  .hunt-move-pred.oneshot { color: #9dffc8; }
+  .hunt-move.exec-ready { border-color: rgba(255,215,106,.8); animation: hunt-exec-glow 1.2s ease-in-out infinite; }
+  @keyframes hunt-exec-glow { 0%, 100% { box-shadow: 0 0 14px rgba(255,215,106,.25), inset 0 0 12px rgba(255,215,106,.08); } 50% { box-shadow: 0 0 22px rgba(255,215,106,.45), inset 0 0 16px rgba(255,215,106,.14); } }
+  .hunt-move.qte-live { border-color: var(--accent); background: rgba(240,160,48,.14); }
+  .hunt-move.cd > :not(.hunt-cd-veil) { opacity: .35; }
+  .hunt-cd-veil { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+  .hunt-cd-veil svg { width: 38px; height: 38px; }
+  .hunt-cd-veil span { font-family: Consolas, monospace; font-size: 10px; color: #c9cfd8; }
+  .hunt-move.retreat { flex: 0 0 76px; justify-content: center; align-items: center; text-align: center; border-color: rgba(224,82,74,.45); background: rgba(224,82,74,.07); color: #ff9a8a; }
+  .hunt-move.retreat:hover:not(:disabled) { border-color: var(--danger); background: rgba(224,82,74,.14); }
+  .hunt-move.retreat .hunt-move-f { color: #a4706a; }
+  .hunt-locked-hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .hunt-chron { display: flex; flex-direction: column; }
+  .hunt-chron-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; max-height: 128px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(95,208,232,.35) transparent; }
+  .hunt-chron-list li { font-size: 12px; line-height: 1.35; color: #c9cfd8; }
+  .hunt-chron-list li:first-child { animation: hunt-log-in .35s ease-out; }
+  .hunt-chron-list li:not(:first-child) { opacity: .62; }
+  .hunt-chron-list li.empty { color: var(--muted); font-style: italic; }
+  .hunt-chron-list time { font-family: Consolas, monospace; font-size: 10px; color: #6c7681; margin-right: 6px; }
+  .hunt-chron-list .t-hit { color: var(--accent); font-weight: 600; }
+  .hunt-chron-list .t-true { color: #c58cff; font-weight: 600; }
+  .hunt-chron-list .t-hurt { color: #ff7a6a; font-weight: 600; }
+  .hunt-chron-list .t-gold { color: #ffd76a; font-weight: 600; }
+  .hunt-chron-list .t-soul { color: var(--blueprint); font-weight: 600; }
+  .hunt-chron-list .t-muted { color: var(--muted); }
+  @keyframes hunt-log-in { from { opacity: 0; transform: translateY(-4px); } }
+  @media (max-width: 960px) {
+    .hunt-deck { grid-template-columns: 1fr; }
+    .hunt-moves { flex-wrap: wrap; }
+    .hunt-move { flex: 1 1 96px; min-height: 104px; }
   }
-  .encounter-portrait.is-boss { border-color: var(--accent); box-shadow: 0 0 10px rgba(240,160,48,.25); }
-  .encounter-portrait svg { width: 56px; height: 56px; image-rendering: pixelated; }
-  .encounter-body { flex: 1; min-width: 0; }
-  .encounter-title { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .encounter-timer { font-size: 11px; font-weight: 700; color: var(--muted); }
-  .encounter-timer.urgent { color: var(--danger); animation: pulse 1s infinite; }
-  .encounter-hp-bar {
-    position: relative; height: 10px; border-radius: 5px; background: var(--panel2);
-    border: 1px solid var(--border); overflow: hidden; margin: 6px 0 8px;
+  @media (prefers-reduced-motion: reduce) {
+    .hunt-move.exec-ready, .hunt-bar .prev.on, .hunt-boss-timer.urgent { animation: none; }
   }
-  /* "Теневой след" полоски HP - лежит ПОД .encounter-hp-fill и той же ширины,
-     но перезжает на новое значение медленнее (transition-delay + более долгая
-     длительность) - на время, пока .encounter-hp-fill уже прыгнул на новую
-     (меньшую) ширину, ghost ещё чуть-чуть виден правее её края и даёт
-     привычное по другим играм "полоска только что просела" ощущение. Ставится
-     на равную ширину при каждой перерисовке модалки (holo-эффекта без
-     предыдущего кадра не бывает), поэтому виден только в окне
-     HIT_EFFECT_DELAY_MS между самим ударом и перерисовкой (см. playCombatHitEffect). */
-  .encounter-hp-ghost, .player-hp-ghost {
-    position: absolute; top: 0; left: 0; height: 100%; background: rgba(255,255,255,.55);
-    transition: width .35s ease-out .05s;
-  }
-  .encounter-hp-fill {
-    position: absolute; top: 0; left: 0; height: 100%;
-    background: linear-gradient(90deg, var(--accent-dim, var(--accent)), var(--accent));
-    transition: width .15s ease-out;
-  }
-  .encounter-moves { display: flex; gap: 6px; flex-wrap: wrap; }
-  /* Подсказка про ещё не открытые приёмы (см. makeAttackButton/renderEncounterModalBody) -
-     сами кнопки таких приёмов теперь вообще не рисуются (по прямому пожеланию:
-     "заблокированные, а не перезаряжающиеся" не должны быть видны), но полностью
-     скрывать сам факт существования прокачки оружия не хочется - одна тихая строка
-     вместо ряда серых нерабочих кнопок. */
-  .encounter-locked-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  /* HP-полоска ИГРОКА внутри модалки "Охота" (см. openHuntingModal) - отдельные
-     классы от .encounter-hp-bar/.encounter-hp-fill (те красятся акцентным
-     цветом моба), чтобы "чьё" здоровье не путалось на глаз: игрок - зелёный
-     (--ok), моб - оранжевый акцент, как и раньше. */
-  .player-hp-bar {
-    position: relative; height: 10px; border-radius: 5px; background: var(--panel2);
-    border: 1px solid var(--border); overflow: hidden; margin: 6px 0 8px;
-  }
-  .player-hp-fill {
-    position: absolute; top: 0; left: 0; height: 100%; background: var(--ok);
-    transition: width .15s ease-out;
-  }
-  .wounded-badge {
-    font-size: 11px; font-weight: 700; color: var(--danger); cursor: help;
-    border: 1px solid var(--danger); border-radius: 6px; padding: 2px 8px;
-  }
-  /* Портрет игрока трясётся/подсвечивается той же анимацией, что портрет моба
-     (.encounter-portrait.hit-shake), см. playCombatHitEffect. */
-  .player-hp-wrap.hit-shake { animation: hit-shake .35s ease-in-out; }
-  /* Компактный баннер "В бою: <моб>" в панели локации (заменяет старую инлайн-
-     панель схватки - см. renderActions) - открывает модалку "Охота" по клику,
-     сама схватка глобальна на всю игру (не привязана к текущей локации), так
-     что баннер просто напоминает вернуться в бой, если модалку закрыли не
-     отступив. */
+  /* Компактный баннер "В бою: <моб>" в панели локации - открывает модалку "Охота"
+     (схватка глобальна и переживает переход между локациями). */
   .encounter-banner {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 10px 14px; margin-bottom: 12px; border-radius: 8px;
@@ -2721,118 +2805,6 @@
     cursor: pointer; font-size: 13px;
   }
   .encounter-banner:hover { background: rgba(224,82,74,.16); }
-  .move-btn {
-    position: relative; overflow: hidden; font-size: 13px; padding: 12px 16px;
-    min-width: 96px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel2);
-    color: var(--text); cursor: pointer; transition: transform .08s ease, filter .08s ease;
-  }
-  .move-btn:active:not(:disabled) { transform: scale(0.96); }
-  .move-btn.primary { background: var(--accent); color: #241a08; border-color: var(--accent); font-weight: 600; }
-  .move-btn:disabled { opacity: .5; cursor: not-allowed; }
-  /* Мини-"циферблат" кулдауна приёма (см. makeAttackButton) - конус-градиент
-     дозаполняется JS-ом инлайновым style под конкретную дробь остатка, тут
-     только форма/позиция кружка. Сидит В УГЛУ кнопки, а не поверх всей неё -
-     чтобы название приёма под ним оставалось читаемым, не как плоский серый
-     disabled-фон раньше. */
-  .move-btn .move-cd-pie {
-    position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 9px; font-weight: 700; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.7);
-    box-shadow: 0 0 0 1px rgba(0,0,0,.45) inset;
-  }
-  /* QTE тайминга удара (см. startQte/makeAttackButton в JS) - ЧИСТО клиентская
-     шкала поверх самой кнопки атаки, сервер про неё ничего не знает и урон
-     считает как всегда (см. game/engine.py:attack_encounter). Первый клик по
-     кнопке запускает бегущий маркер, второй - считывает его позицию: попадание
-     в зелёную зону не меняет реальный урон, только косметику самого удара
-     (см. .dmg-float-qte ниже) - честная механика без обмана в цифрах.
-     Занимает своё место снизу кнопки (.qte-active добавляет отступ), а не
-     перекрывает текст названия приёма. Отступ/высота шкалы увеличены по
-     прямому пожеланию, 2026-09-14: сама кнопка + курсор мыши почти полностью
-     закрывали крошечную 5px-полоску, из-за чего казалось, что клик "не туда"
-     попадает - у более рослой кнопки полоска остаётся видна НИЖЕ курсора,
-     который обычно стоит на тексте приёма ближе к верху кнопки. */
-  .move-btn.qte-active { padding-bottom: 28px; }
-  .qte-track {
-    position: absolute; left: 6px; right: 6px; bottom: 8px; height: 10px;
-    background: rgba(0,0,0,.4); border-radius: 5px; overflow: visible;
-  }
-  .qte-zone { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: rgba(120,224,120,.65); }
-  .qte-marker {
-    position: absolute; top: -3px; bottom: -3px; width: 6px; border-radius: 3px;
-    background: #fff; box-shadow: 0 0 6px rgba(255,255,255,.9); left: 0%;
-  }
-  /* Мгновенная (без ожидания сервера) покраска исхода - см. resolveQte() в JS. */
-  .qte-track.qte-result-hit .qte-marker { background: #7be07b; box-shadow: 0 0 8px rgba(123,224,123,.9); }
-  .qte-track.qte-result-hit .qte-zone { background: rgba(123,224,123,.9); }
-  .qte-track.qte-result-miss .qte-marker { background: #e0524a; box-shadow: 0 0 8px rgba(224,82,74,.9); }
-  /* Косметический бонус попадания в QTE-зону - звёздочка перед числом урона и
-     мягкое свечение, накладывается ПОВЕРХ обычной/kill/true-раскраски (см.
-     dmgClass в playCombatHitEffect), а не заменяет её. */
-  .dmg-float-qte { text-shadow: 0 0 7px rgba(255,255,255,.85), 0 1px 2px rgba(0,0,0,.6); }
-  .dmg-float-qte::before { content: "✦ "; }
-
-  @keyframes hit-shake {
-    0%, 100% { transform: translateX(0); }
-    20% { transform: translateX(-3px) rotate(-2deg); }
-    40% { transform: translateX(3px) rotate(2deg); }
-    60% { transform: translateX(-2px); }
-    80% { transform: translateX(2px); }
-  }
-  .encounter-portrait.hit-shake { animation: hit-shake .35s ease-in-out; }
-  .encounter-portrait.hit-shake::after {
-    content: ""; position: absolute; inset: 0; border-radius: 8px;
-    background: rgba(224,82,74,.35); animation: flash-highlight .35s ease-out;
-  }
-  /* "Замах" - диагональная светлая полоса, пролетающая через портрет моба в
-     момент удара (::before, независим от ::after выше - оба живут на одном
-     .hit-shake, просто разные псевдоэлементы). Чисто декоративный слой поверх
-     существующей тряски/вспышки, без новых иконок оружия. */
-  @keyframes weapon-slash {
-    0% { transform: translateX(-70%) rotate(-18deg); opacity: 0; }
-    35% { opacity: 1; }
-    100% { transform: translateX(70%) rotate(-18deg); opacity: 0; }
-  }
-  .encounter-portrait.hit-shake::before {
-    content: ""; position: absolute; inset: -6px; border-radius: 8px; pointer-events: none;
-    background: linear-gradient(100deg, transparent 42%, rgba(255,255,255,.9) 49%, rgba(255,255,255,.9) 53%, transparent 60%);
-    animation: weapon-slash .3s ease-out;
-  }
-
-  @keyframes dmg-float {
-    0% { transform: translate(-50%, 0); opacity: 1; }
-    100% { transform: translate(-50%, -32px); opacity: 0; }
-  }
-  .dmg-float {
-    position: absolute; left: 50%; top: -4px; transform: translate(-50%, 0);
-    font-weight: 700; font-size: 15px; color: var(--danger);
-    text-shadow: 0 1px 2px rgba(0,0,0,.6); animation: dmg-float .8s ease-out forwards;
-    pointer-events: none; white-space: nowrap;
-  }
-  /* Цвет цифры урона зависит от того, ЧЕМ был нанесён удар (см. pendingAttackMoveMode/
-     playCombatHitEffect) - золото на добивающем/ваншотном ударе (совпадает с
-     playKillFlash), фиолетовый на "истинном" уроне (percent_max_hp/percent_remaining_hp,
-     он не зависит от навыка/оружия) - обычный урон остаётся как раньше, красным. */
-  .dmg-float-kill { color: #ffd76a; font-size: 19px; }
-  .dmg-float-true { color: #c58cff; }
-
-  @keyframes kill-flash-fade {
-    0% { opacity: .85; }
-    100% { opacity: 0; }
-  }
-  .kill-flash-overlay {
-    position: fixed; inset: 0; z-index: 9999; pointer-events: none;
-    background: radial-gradient(circle, rgba(255,225,140,.9), rgba(255,225,140,0) 70%);
-    animation: kill-flash-fade .5s ease-out forwards;
-  }
-  /* Поражение игрока (0 HP - см. playDefeatFlash/combat.defeated) - тот же
-     приём, что kill-flash-overlay, но красным и чуть дольше, чтобы читалось
-     как "плохое", а не как ещё одна победная вспышка. */
-  .defeat-flash-overlay {
-    position: fixed; inset: 0; z-index: 9999; pointer-events: none;
-    background: radial-gradient(circle, rgba(224,82,74,.8), rgba(224,82,74,0) 70%);
-    animation: kill-flash-fade .7s ease-out forwards;
-  }
 
   /* Верстак (крафт на сетке, см. PLAN_grid_crafting.md) - фиксированный размер
      1:1 из design-канваса "Сеточный крафт" (артборд Main), тот же принцип, что
@@ -3485,6 +3457,8 @@
 <!-- Оформление модалки механизма (фон, пиксельный прогресс, движения, частицы) -
      общий с превью в редакторе, см. tools/mechanism_fx.js. -->
 <script src="/mechanism_fx.js"></script>
+<!-- Сцена схватки (модалка «Охота») - общий с превью в редакторе, см. tools/hunt_fx.js. -->
+<script src="/hunt_fx.js"></script>
 <script>
 // ---------- базовые хелперы ----------
 
@@ -4085,7 +4059,8 @@ async function fetchAutocraftPreview(type, id, scale) {
   }
 }
 
-async function doAction(type, id, scale) {
+// extra - дополнительные поля тела запроса (сейчас только {qte} удара на охоте, см. huntLaunch).
+async function doAction(type, id, scale, extra) {
   if (busy) return;
   busy = true;
   try {
@@ -4094,7 +4069,7 @@ async function doAction(type, id, scale) {
       const confirmed = await openAutocraftConfirmModal(preview);
       if (!confirmed) return;
     }
-    const body = { type, id };
+    const body = { type, id, ...(extra || {}) };
     // scale - "Ползунок масштаба ручного действия" (см. CLAUDE.md) - только для
     // type === "manual", когда игрок сдвинул ползунок; для всех остальных
     // вызовов doAction() параметр просто не передаётся (undefined), и это поле
@@ -4113,14 +4088,10 @@ async function doAction(type, id, scale) {
       if (isModalOpen()) showErrorToast(message);
       return;
     }
-    // Эффект удара (летящий урон/тряска портрета/вспышка на ваншот) играется на
-    // ЕЩЁ СТАРОМ DOM - панель схватки ниже покажет либо новый HP, либо вовсе
-    // исчезнет (цель убита), так что без задержки анимация обрывалась бы на
-    // середине или не успевала начаться вовсе (см. playCombatHitEffect).
-    if (type === "hunt_attack" && payload.log.combat) {
-      playCombatHitEffect(payload.log.combat);
-      await sleep(HIT_EFFECT_DELAY_MS);
-    }
+    // Хореография удара (замах, попадание, ответка, смерть) - на ЕЩЁ СТАРОМ VIEW,
+    // по машиночитаемому пакету combat; сцена модалки при этом не пересобирается,
+    // renderAll() ниже только обновит полосы и панель (см. openHuntingModal).
+    if (type === "hunt_attack" && payload.log.combat) await huntPlayAttack(payload);
     VIEW = payload.state;
     pushLog(payload.log);
     // Звук провала - только внутри showErrorToast (см. её определение), той же
@@ -8389,7 +8360,6 @@ async function demolishBuilding(buildingId, name) {
 async function abandonEncounter() {
   if (busy) return;
   busy = true;
-  clearActiveQte(); // не оставлять зависший авто-таймаут QTE на кнопке, которой больше не будет
   try {
     const res = await fetch("/api/hunt_abandon", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
     const payload = await res.json();
@@ -8405,272 +8375,322 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Сколько ждать после playCombatHitEffect() перед тем, как doAction() применит
-// новый VIEW/renderAll() - панель схватки строится ЗАНОВО на каждый renderAll(),
-// поэтому без этой паузы анимация на СТАРОМ DOM обрывалась бы, не успев доиграть
-// (при убийстве панель вовсе исчезает - см. doAction).
-const HIT_EFFECT_DELAY_MS = 450;
+// ---------- Охота: модалка схватки ----------
+// Сцена (tools/hunt_fx.js: HuntStage) живёт, пока модалка открыта, и НЕ пересобирается
+// на renderAll() - иначе анимации обрывались бы (тот же принцип, что fixed-canvas
+// плавильни). openHuntingModal() при уже открытой модалке только обновляет HUD и нижнюю
+// панель (huntRefresh). Удар: doAction("hunt_attack") -> ответ сервера -> huntPlayAttack()
+// проигрывает хореографию по пакету combat (game/engine.py: attack_encounter) на ЕЩЁ
+// СТАРОМ VIEW -> VIEW подменяется -> renderAll() -> huntRefresh(). Внешний вид конкретного
+// моба/приёма/оружия/локации целиком из контента (combat_fx, fx, slash_color, hunt_scene) -
+// здесь только чтение этих полей, ни одного id моба.
+const hunt = {
+  stage: null,        // HuntStage
+  els: null,          // постоянные элементы HUD/панели
+  result: null,       // {kind: "win"|"lose"|"fled", combat, name, location} - итог, пока модалку не закрыли
+  resultShown: false,
+  log: [],            // хроника текущей схватки
+  lastEncounter: null, // последний active_encounter - HUD итога после убийства
+  animating: false,   // идёт хореография/появление - новые удары не принимаются
+  qteMove: undefined, // приём, для которого крутится QTE (null - обычная атака)
+  preview: undefined, // приём под курсором (null - обычная атака)
+  timers: [],
+  keyHandler: null,
+};
 
-// Каким РЕЖИМОМ приёма (move.mode, см. combat_moves_view) был нанесён удар, который
-// сейчас летит на сервер - выставляется в makeAttackButton ПЕРЕД вызовом doAction()
-// (сам combat-пакет из ответа сервера режима не несёт, только числа) и читается ровно
-// один раз в playCombatHitEffect, чтобы покрасить цифру урона под конкретный режим
-// (см. .dmg-float-true в CSS). Сброс на дефолт сразу после прочтения - на случай,
-// если между кликами по приёму придёт какой-то другой combat-эффект без явного move.
-let pendingAttackMoveMode = "multiplier";
-// Попал ли игрок в зелёную зону QTE ПЕРЕД этим конкретным ударом (см. ниже) -
-// тот же приём передачи "как был нанесён удар" в playCombatHitEffect, что и
-// pendingAttackMoveMode, только для косметического бонуса, а не для цвета по режиму.
-let pendingQteHit = false;
+// Пиктограммы панели схватки; стили удара (кнопки приёмов без своей иконки) - из
+// tools/hunt_fx.js: HUNT_MOVE_GLYPHS, общие с редактором.
+const HUNT_GLYPHS = {
+  ...HUNT_MOVE_GLYPHS,
+  flee: { grid: ["...A.....", "..AA.....", ".AAAAAAAA", "AAAAAAAAA", ".AAAAAAAA", "..AA.....", "...A....."], palette: { A: "#ff9a8a" } },
+  shield: { grid: ["SSSSSSS", "SLLLLLS", "SLLLLLS", "SLLLLLS", ".SLLLS.", ".SLLLS.", "..SLS..", "...S..."], palette: { S: "#8b93a0", L: "#8a6a44" } },
+  skill: { grid: ["...C...", "..CCC..", ".CCCCC.", "CCCCCCC", "..CCC..", "..CCC..", "..CCC.."], palette: { C: "#5fd0e8" } },
+  heart: { grid: [".RR.RR.", "RRRRRRR", "RRRRRRR", ".RRRRR.", "..RRR..", "...R..."], palette: { R: "#e0524a" } },
+  hourglass: { grid: ["SSSSSSS", ".S...S.", "..SAS..", "...A...", "..S.S..", ".S.A.S.", ".SAAAS.", "SAAAAAS", "SSSSSSS"], palette: { S: "#8b93a0", A: "#ffd98a" } },
+};
 
-// ---------- QTE тайминга удара (см. .qte-track в CSS) ----------
-// ЧИСТО клиентский слой поверх кнопки атаки - сервер как источник правды по-прежнему
-// не знает о QTE вообще (game/engine.py:attack_encounter урон считает как всегда),
-// попадание в зону даёт только косметический бонус самому эффекту удара, а не
-// реальные дополнительные очки урона - тот же принцип "не обманывать цифры", что
-// у остальных чисто клиентских эффектов в игре (click_delay_ms и т.п., см. CLAUDE.md).
-// Маркер раньше гонялся CSS-анимацией (alternate), а qteMarkerPos() отдельно
-// пересчитывал ту же позицию по performance.now() для сверки с зоной - ДВА
-// независимых таймера (браузерный композитор для CSS-анимации и JS-часы для
-// клика) технически могут разойтись на десятки мс (первый кадр CSS-анимации
-// стартует не в момент присвоения style, а на следующей отрисовке, и это время
-// не константа) - именно это давало ощущение "клик засчитывается с задержкой"
-// при живой игре. Теперь маркер двигает САМ JS (rAF-цикл tick() внутри startQte)
-// через ТУ ЖЕ qteMarkerPos(), что и проверка попадания - визуальная позиция и позиция,
-// по которой судится клик, гарантированно одно и то же число, расхождению
-// неоткуда взяться.
-const QTE_SWEEP_MS = 650;    // время ОДНОГО прохода маркера от края до края
-// 0.22 (~143мс окно на реакцию при 650мс прохода) оказалось слишком туго даже
-// после починки визуальной рассинхронизации - среднее время реакции человека
-// само по себе около 200-250мс, так что окно ýже этого физически не пройти
-// стабильно. Расширено по прямому пожеланию, 2026-09-14.
-const QTE_ZONE_WIDTH = 0.3;  // доля ширины шкалы, случайно сдвигается на старте
-const QTE_TIMEOUT_MS = 2600; // не подвисать навсегда, если игрок отвлёкся - бьём "мимо" сами
-const QTE_MARKER_WIDTH_PX = 6; // держать в паре с шириной .qte-marker в CSS (см. tick() ниже)
-let activeQte = null; // { key, startedAt, zoneStart, timeoutId, rafId, track, btn, marker } | null
-
-function qteMarkerPos(startedAt) {
-  const cycle = QTE_SWEEP_MS * 2;
-  const t = (performance.now() - startedAt) % cycle;
-  return t <= QTE_SWEEP_MS ? t / QTE_SWEEP_MS : 2 - t / QTE_SWEEP_MS;
+const huntFmt = (n) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10));
+const huntEsc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function huntAbsHour(view = VIEW) { return (view.time.day - 1) * 24 + view.time.hour; }
+function huntMoveDef(moveId, view = VIEW) { return moveId ? (view.hunting.combat_moves || []).find(m => m.id === moveId) || null : null; }
+// Приёмы по порядку горячих клавиш: null - обычная атака, дальше открытые приёмы.
+function huntMoveKeys() { return [null, ...(VIEW.hunting.combat_moves || []).filter(m => m.unlocked).map(m => m.id)]; }
+function huntPrediction(moveId) { return moveId ? (VIEW.hunting.predictions || {})[moveId] : VIEW.hunting.attack_prediction; }
+function huntHasWeapon(view = VIEW) { return ((view.hunting.gear || {}).weapons || []).some(w => !w.is_broken); }
+// Цвет разреза: у приёма свой fx.color, иначе цвет оружия (у ваншота - оружия с
+// instant_kill_max_hp), иначе стандартный из hunt_fx.js.
+function huntSlashColor(moveDef, style, view = VIEW) {
+  if (moveDef && moveDef.fx && moveDef.fx.color) return moveDef.fx.color;
+  const weapons = ((view.hunting.gear || {}).weapons || []).filter(w => !w.is_broken);
+  if (style === "oneshot") { const w = weapons.find(x => x.instant_kill_max_hp > 0 && x.slash_color); return w ? w.slash_color : HUNT_ONESHOT_COLOR; }
+  if (HUNT_MOVE_STYLES[style] && HUNT_MOVE_STYLES[style].color) return HUNT_MOVE_STYLES[style].color;
+  const best = weapons.slice().sort((a, b) => b.damage_multiplier - a.damage_multiplier).find(w => w.slash_color);
+  return best ? best.slash_color : null;
 }
 
-function isQteHit(qte) {
-  const pos = qteMarkerPos(qte.startedAt);
-  return pos >= qte.zoneStart && pos <= qte.zoneStart + QTE_ZONE_WIDTH;
+function huntLog(html) {
+  hunt.log.unshift({ turn: VIEW.turn, hour: VIEW.time.hour, html });
+  if (hunt.log.length > 40) hunt.log.length = 40;
+  if (hunt.els) huntRenderChronicle();
 }
 
-// Полная расчистка (таймеры + DOM) - используется, когда шкалу нужно убрать
-// БЕЗ визуального подтверждения исхода (отступление из боя, старт следующей
-// шкалы). Разрешение клика идёт через resolveQte() ниже, не сюда.
-function clearActiveQte() {
-  if (!activeQte) return;
-  clearTimeout(activeQte.timeoutId);
-  cancelAnimationFrame(activeQte.rafId);
-  activeQte.track.remove();
-  activeQte.btn.classList.remove("qte-active");
-  activeQte = null;
+function openHuntingModal(opts = {}) {
+  const enc = VIEW.hunting.active_encounter;
+  if (document.getElementById("huntingOverlay")) {
+    if (!enc && !hunt.result) { closeHuntingModal(); return; }
+    huntRefresh();
+    if (opts.intro && enc) huntStartIntro();
+    return;
+  }
+  if (!enc) return;
+  hunt.result = null; hunt.resultShown = false;
+
+  const overlay = el("div", { class: "modal-overlay", id: "huntingOverlay" });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay && !hunt.animating) closeHuntingModal(); });
+  const modal = el("div", { class: "modal hunting-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: "Охота" }));
+  const loc = el("span", { class: "hunt-head-loc" });
+  const stats = el("div", { class: "hunt-head-stats" });
+  const turnChip = el("span", { class: "hunt-stat" }), timeChip = el("span", { class: "hunt-stat" });
+  stats.append(turnChip, timeChip);
+  head.append(loc, stats, el("button", { text: "Закрыть", onclick: () => { if (!hunt.animating) closeHuntingModal(); } }));
+  modal.appendChild(head);
+
+  const body = el("div", { class: "hunt-body" });
+  const stageHost = el("div", { class: "hunt-stage" });
+  // HUD поверх сцены: полоса цели сверху, твоя - внизу слева.
+  const mobTag = el("span", { class: "hunt-mp-tag" }), mobName = el("b", { class: "hunt-mp-name" }), mobHp = el("span", { class: "hunt-mp-hp" });
+  const mobBar = el("div", { class: "hunt-bar hunt-mob-bar" });
+  const mobGhost = el("i", { class: "ghost" }), mobFill = el("i", { class: "fill" }), mobPrev = el("i", { class: "prev" }), execLine = el("i", { class: "exec-line" });
+  mobBar.append(mobGhost, mobFill, mobPrev, execLine);
+  const mobPrevLbl = el("span", { class: "hunt-prev-lbl" });
+  const bossTimer = el("div", { class: "hunt-boss-timer", title: "Сбежит, если не свалить его за столько ходов" });
+  const btN = el("b"), btL = el("span");
+  bossTimer.append(pixelIcon(HUNT_GLYPHS.hourglass.grid, HUNT_GLYPHS.hourglass.palette, 16), btN, btL);
+  const plate = el("div", { class: "hunt-mob-plate" }, [
+    el("div", { class: "hunt-mp-row" }, [mobTag, mobName, mobHp]), mobBar, el("div", { class: "hunt-prev-anchor" }, [mobPrevLbl]),
+  ]);
+  const hudTop = el("div", { class: "hunt-hud-top" }, [plate, bossTimer]);
+  const plHp = el("b"), armorChip = el("span", { class: "hunt-chip armor" }), woundChip = el("span", { class: "hunt-chip wound" });
+  const plBar = el("div", { class: "hunt-bar hunt-pl-bar" });
+  const plGhost = el("i", { class: "ghost" }), plFill = el("i", { class: "fill" }), plPrev = el("i", { class: "prev" });
+  plBar.append(plGhost, plFill, plPrev);
+  const plPrevLbl = el("span", { class: "hunt-prev-lbl" });
+  const hudPlayer = el("div", { class: "hunt-hud-player" }, [
+    el("div", { class: "hunt-hp-row" }, [pixelIcon(HUNT_GLYPHS.heart.grid, HUNT_GLYPHS.heart.palette, 14), el("span", { class: "hunt-hp-lbl", text: "ТЫ" }), plHp, armorChip, woundChip]),
+    plBar, el("div", { class: "hunt-prev-anchor" }, [plPrevLbl]),
+  ]);
+  const qteHint = el("div", { class: "hunt-qte-hint", text: "ПРОБЕЛ или клик — когда кольцо ляжет на прицел" });
+  qteHint.hidden = true;
+  const resultBox = el("div", { class: "hunt-result" });
+  resultBox.hidden = true;
+  body.appendChild(stageHost);
+
+  const deck = el("div", { class: "hunt-deck" });
+  const gear = el("section", { class: "hunt-gear" });
+  const moves = el("div", { class: "hunt-moves" }), lockedHint = el("div", { class: "hunt-locked-hint" });
+  const movesSec = el("section", { class: "hunt-moves-sec" }, [
+    el("div", { class: "hunt-deck-h" }, [el("span", { text: "ПРИЁМЫ" }), el("span", { class: "sub", text: "1–9 · пробел — удар" })]), moves, lockedHint,
+  ]);
+  const chron = el("ol", { class: "hunt-chron-list" });
+  const chronSec = el("section", { class: "hunt-chron" }, [el("div", { class: "hunt-deck-h" }, [el("span", { text: "ХРОНИКА" })]), chron]);
+  deck.append(gear, movesSec, chronSec);
+  body.appendChild(deck);
+  modal.appendChild(body);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  hunt.stage = new HuntStage(stageHost, { volume: () => _sfxVolume });
+  stageHost.append(hudTop, hudPlayer, qteHint, resultBox);
+  hunt.els = { loc, turnChip, timeChip, stageHost, hudTop, hudPlayer, mobTag, mobName, mobHp, mobBar, mobGhost, mobFill, mobPrev, execLine, mobPrevLbl,
+    bossTimer, btN, btL, plHp, armorChip, woundChip, plBar, plGhost, plFill, plPrev, plPrevLbl, qteHint, resultBox, gear, moves, lockedHint, chron };
+
+  hunt.stage.setScene(enc.scene); hunt.stage.setMob(mobIcon(enc.mob_id), enc.fx, enc.is_boss);
+  hunt.stage.setHour(huntAbsHour(), false); hunt.stage.start();
+  hunt.keyHandler = huntOnKey; document.addEventListener("keydown", hunt.keyHandler);
+  hunt.timers.push(setInterval(() => { // угрожающая «стойка» между ударами
+    if (hunt.stage && !hunt.animating && !hunt.stage.qte && !hunt.result && VIEW.hunting.active_encounter && Math.random() < 0.5) hunt.stage.tell();
+  }, 3800));
+  hunt.timers.push(setInterval(() => { // сердцебиение при низком HP
+    const h = VIEW.hunting; if (hunt.stage && !hunt.result && h.active_encounter && h.player_max_hp > 0 && h.player_hp / h.player_max_hp <= 0.3) hunt.stage.pulse();
+  }, 1050));
+
+  if (opts.intro) { huntRefresh(); huntStartIntro(); }
+  else { hunt.stage.showMob(); huntRefresh(); }
 }
 
-// Мгновенная (без ожидания ответа сервера) обратная связь по исходу QTE -
-// красит шкалу в hit/miss ПРЯМО в момент клика/авто-таймаута и убирает её чуть
-// погодя, а не тут же: раньше шкала пропадала сразу, и до самого прилёта ответа
-// с сервера (autocraft-preview + /api/action + HIT_EFFECT_DELAY_MS, вместе
-// иногда больше секунды) игрок не видел вообще никакого подтверждения, что
-// клик засчитан - это и читалось как "залипание". Сама реальная атака (см.
-// launchAttack) по-прежнему уходит на сервер независимо от этой анимации.
-const QTE_RESULT_FLASH_MS = 220;
-function resolveQte(qte, hit) {
-  clearTimeout(qte.timeoutId);
-  cancelAnimationFrame(qte.rafId);
-  qte.track.classList.add(hit ? "qte-result-hit" : "qte-result-miss");
-  setTimeout(() => {
-    qte.track.remove();
-    qte.btn.classList.remove("qte-active");
-  }, QTE_RESULT_FLASH_MS);
+function closeHuntingModal() {
+  const overlay = document.getElementById("huntingOverlay");
+  if (overlay) overlay.remove();
+  if (hunt.stage) { hunt.stage.destroy(); hunt.stage = null; }
+  hunt.timers.forEach(clearInterval); hunt.timers = [];
+  if (hunt.keyHandler) document.removeEventListener("keydown", hunt.keyHandler);
+  hunt.keyHandler = null; hunt.els = null; hunt.result = null; hunt.resultShown = false; hunt.animating = false; hunt.qteMove = undefined;
 }
 
-// Запускает шкалу НА кнопке btn - зона случайной ширины QTE_ZONE_WIDTH в случайном
-// месте на каждый запуск. finish(hit) вызывается ЛИБО по авто-таймауту (hit=false),
-// ЛИБО вторым кликом по той же кнопке (см. makeAttackButton).
-function startQte(key, btn, finish) {
-  const zoneStart = Math.random() * (1 - QTE_ZONE_WIDTH);
-  const track = el("div", { class: "qte-track" });
-  track.appendChild(el("div", {
-    class: "qte-zone",
-    style: `left:${(zoneStart * 100).toFixed(1)}%; width:${(QTE_ZONE_WIDTH * 100).toFixed(1)}%`,
-  }));
-  const marker = el("div", { class: "qte-marker" });
-  track.appendChild(marker);
-  btn.appendChild(track);
-  btn.classList.add("qte-active");
-  const startedAt = performance.now();
-  const timeoutId = setTimeout(() => finish(false), QTE_TIMEOUT_MS);
-  let rafId;
-  const tick = () => {
-    const pos = qteMarkerPos(startedAt);
-    // "- pos*ширина" - маркер не должен вылезать за правый край шкалы на pos=1,
-    // та же поправка, что раньше была в конечном кадре CSS-keyframe
-    // (calc(100% - Npx)), но теперь применена по всей длине.
-    marker.style.left = `calc(${(pos * 100).toFixed(2)}% - ${(pos * QTE_MARKER_WIDTH_PX).toFixed(2)}px)`;
-    rafId = requestAnimationFrame(tick);
+async function huntStartIntro() {
+  const enc = VIEW.hunting.active_encounter, st = hunt.stage, e = hunt.els;
+  if (!enc || !st) return;
+  hunt.animating = true; hunt.result = null; hunt.resultShown = false; e.resultBox.hidden = true; e.resultBox.innerHTML = "";
+  hunt.log = []; st.reset(); st.setScene(enc.scene); st.setMob(mobIcon(enc.mob_id), enc.fx, enc.is_boss); st.setHour(huntAbsHour(), false);
+  e.hudTop.style.opacity = 0; e.hudPlayer.style.opacity = 0; huntRefresh();
+  const fx = st.mobFx, turns = enc.turn_limit, hpt = VIEW.hunting.hours_per_turn;
+  const title = enc.is_boss ? huntEsc(enc.name.toUpperCase()) : huntEsc((fx.intro_text || "Перед тобой").toUpperCase());
+  const subtitle = enc.is_boss
+    ? `босс · ${enc.max_hp} HP${turns ? ` · сбежит через ${turns} х. (${turns * hpt} ч)` : ""}`
+    : `${huntEsc(enc.name)} · ${enc.max_hp} HP`;
+  await st.intro({ title, subtitle });
+  if (!hunt.stage) return; // модалку закрыли посреди появления
+  huntLog(`${huntEsc(fx.intro_text || "Перед тобой")} <span class="${enc.is_boss ? "t-hurt" : "t-hit"}">${huntEsc(enc.name)}</span> (${enc.max_hp} HP).`);
+  e.hudTop.style.opacity = 1; e.hudPlayer.style.opacity = 1;
+  hunt.animating = false; huntRefresh();
+}
+
+// Полосы HP: заливка сразу, «теневой след» догоняет медленнее (CSS transition).
+function huntSetBars(mobHp, mobMax, plHp, plMax) {
+  const e = hunt.els; if (!e) return;
+  if (mobMax > 0) { const r = `${Math.max(0, Math.min(1, mobHp / mobMax)) * 100}%`; e.mobFill.style.width = r; e.mobGhost.style.width = r; e.mobHp.textContent = `${huntFmt(mobHp)} / ${huntFmt(mobMax)}`; }
+  if (plMax > 0) {
+    const ratio = Math.max(0, Math.min(1, plHp / plMax)); e.plFill.style.width = `${ratio * 100}%`; e.plGhost.style.width = `${ratio * 100}%`;
+    e.plHp.textContent = `${huntFmt(plHp)} / ${huntFmt(plMax)}`; e.plBar.classList.toggle("low", ratio <= 0.3);
+  }
+}
+
+function huntRefresh() {
+  const e = hunt.els; if (!e) return;
+  const h = VIEW.hunting, enc = h.active_encounter || null;
+  if (enc) hunt.lastEncounter = enc;
+  const shown = enc || hunt.lastEncounter;
+  e.turnChip.textContent = `ХОД ${VIEW.turn}`;
+  const day = VIEW.time.is_day;
+  e.timeChip.textContent = `ДЕНЬ ${VIEW.time.day} · ${String(VIEW.time.hour).padStart(2, "0")}:00 ${day ? "☀" : "☾"}`;
+  e.timeChip.className = "hunt-stat " + (day ? "day" : "night");
+  if (hunt.stage) hunt.stage.setHour(huntAbsHour(), true);
+  if (shown) {
+    e.loc.textContent = shown.location_name || "";
+    e.mobName.textContent = shown.name; e.mobTag.textContent = shown.is_boss ? "БОСС" : "ЦЕЛЬ";
+    e.mobTag.classList.toggle("boss", !!shown.is_boss); e.mobBar.classList.toggle("boss", !!shown.is_boss);
+    const bossLeft = enc && enc.turns_left !== null && enc.turns_left !== undefined;
+    e.bossTimer.hidden = !bossLeft;
+    if (bossLeft) {
+      e.btN.textContent = enc.turns_left; e.btL.textContent = `х. до бегства · ${enc.turns_left * h.hours_per_turn} ч`;
+      e.bossTimer.classList.toggle("urgent", enc.turns_left <= 3);
+    }
+  }
+  huntSetBars(enc ? enc.remaining_hp : (hunt.result && hunt.result.kind === "win" ? 0 : (shown ? shown.remaining_hp : 0)), shown ? shown.max_hp : 0, h.player_hp, h.player_max_hp);
+  const red = (h.gear || {}).damage_reduction || 0;
+  e.armorChip.hidden = red <= 0; e.armorChip.textContent = `броня −${huntFmt(red)}`;
+  e.woundChip.hidden = !h.wounded;
+  e.woundChip.textContent = `Ранен · ${h.wounded_turns_left} х. · урон ×${h.wounded_damage_multiplier}`;
+  e.woundChip.title = `Получено при поражении в прошлом бою: весь твой урон ×${h.wounded_damage_multiplier}. Само пройдёт через ${h.wounded_turns_left} х.`;
+  // Порог добивания на полосе цели и «ДОБИТЬ» у прицела - по приёмам mode=execute.
+  const execMoves = (h.combat_moves || []).filter(m => m.unlocked && m.mode === "execute");
+  const thr = Math.max(0, ...execMoves.map(m => m.execute_threshold_percent || 0));
+  e.execLine.style.left = `${thr * 100}%`; e.execLine.classList.toggle("on", thr > 0 && !!enc);
+  const execReady = enc && execMoves.some(m => !(m.cooldown_remaining > 0) && (h.predictions[m.id] || {}).forced_kill);
+  if (hunt.stage && !hunt.animating) {
+    hunt.stage.setTarget(!enc || hunt.result ? "hidden" : hunt.preview !== undefined ? "hover" : execReady ? "exec" : "idle", execReady ? "ДОБИТЬ" : (shown && shown.is_boss ? "БОСС" : "ЦЕЛЬ"));
+  }
+  huntRenderGear(); huntRenderMoves(); huntRenderChronicle();
+  if (hunt.result && !hunt.resultShown) huntShowResult();
+}
+
+function huntRenderGear() {
+  const e = hunt.els, g = VIEW.hunting.gear || { weapons: [], armor: [] }; e.gear.innerHTML = "";
+  e.gear.appendChild(el("div", { class: "hunt-deck-h" }, [el("span", { text: "СНАРЯЖЕНИЕ" })]));
+  const row = (icon, name, sub, frac, broken, cls) => {
+    const d = el("div", { class: "hunt-g-item" + (broken ? " broken" : "") + (cls ? " " + cls : "") });
+    d.appendChild(icon);
+    d.appendChild(el("div", { class: "hunt-g-name" }, [el("span", { text: name }), el("em", { text: sub })]));
+    const bar = el("div", { class: "hunt-g-dur" + (frac !== null && frac <= 0.25 ? " low" : "") });
+    if (frac !== null) bar.appendChild(el("i", { style: `width:${Math.max(0, Math.min(1, frac)) * 100}%` })); else bar.classList.add("none");
+    d.appendChild(bar); e.gear.appendChild(d);
   };
-  tick(); // сразу выставить стартовую позицию, не ждать первого кадра rAF
-  return { key, startedAt, zoneStart, timeoutId, rafId, track, btn, marker };
+  const toolIco = (w, fallback) => { const c = VIEW.icons.tools && VIEW.icons.tools[w.tool_id] && VIEW.icons.tools[w.tool_id][w.tier]; const d = c || fallback; return pixelIcon(d.grid, d.palette, 22); };
+  const durText = (w) => (w.max_durability ? ` · ${huntFmt(w.durability_remaining)}/${w.max_durability}` : "");
+  const durFrac = (w) => (w.max_durability ? w.durability_remaining / w.max_durability : null);
+  if (!g.weapons.length) row(pixelIcon(HUNT_GLYPHS.fists.grid, HUNT_GLYPHS.fists.palette, 22), "Без оружия", "урон ×1", null, false);
+  g.weapons.forEach(w => {
+    const parts = [];
+    if (w.damage_multiplier !== 1) parts.push(`×${huntFmt(w.damage_multiplier)}`);
+    if (w.instant_kill_max_hp > 0) parts.push(`ваншот ≤${w.instant_kill_max_hp}`);
+    row(toolIco(w, HUNT_GLYPHS.slash), w.name, w.is_broken ? "сломано" : (parts.join(" · ") || "оружие") + durText(w), durFrac(w), w.is_broken);
+  });
+  if (!g.armor.length) row(pixelIcon(HUNT_GLYPHS.shield.grid, { S: "#5a626c", L: "#2a3038" }, 22), "Без брони", "нет защиты", null, false);
+  g.armor.forEach(a => row(toolIco(a, HUNT_GLYPHS.shield), a.name, a.is_broken ? "сломана" : `−${huntFmt(a.damage_reduction)}` + durText(a), durFrac(a), a.is_broken));
+  const sk = VIEW.hunting.combat_skill;
+  if (sk) {
+    const cur = (sk.level_xp || [])[sk.level - 1] || 0, next = sk.next_xp_required;
+    const dmg = (sk.effects || {}).damage;
+    row(pixelIcon(HUNT_GLYPHS.skill.grid, HUNT_GLYPHS.skill.palette, 22), `${sk.name} · ур. ${sk.level}`,
+      (dmg !== undefined ? `урон ${huntFmt(dmg)}` : "") + (next ? ` · ${sk.xp}/${next}` : ""), next ? (sk.xp - cur) / Math.max(1, next - cur) : 1, false, "skill");
+  }
 }
 
-// Двигает и заливку (быстро), и "теневой след" (медленнее, см. .encounter-hp-ghost
-// в CSS) полоски HP на одну и ту же итоговую ширину - оба elements получают ОДНО
-// и то же значение синхронно, а разница в скорости появления - целиком заслуга
-// CSS transition/transition-delay, JS-у сверх этого дёргать ничего не нужно.
-function updateHpBar(fillId, ghostId, ratio) {
-  const pct = `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
-  const fill = document.getElementById(fillId);
-  if (fill) fill.style.width = pct;
-  const ghost = document.getElementById(ghostId);
-  if (ghost) ghost.style.width = pct;
+function huntMoveFormula(m) {
+  if (m.mode === "percent_max_hp") return `${Math.round(m.percent * 100)}% макс. HP`;
+  if (m.mode === "percent_remaining_hp") return `${Math.round(m.percent * 100)}% тек. HP`;
+  if (m.mode === "execute") return `добить ≤${Math.round(m.execute_threshold_percent * 100)}%`;
+  return `×${huntFmt(m.damage_multiplier ?? 1)} урона`;
 }
 
-function playKillFlash() {
-  const overlay = el("div", { class: "kill-flash-overlay" });
-  document.body.appendChild(overlay);
-  setTimeout(() => overlay.remove(), 500);
-}
-
-// Поражение игрока (0 HP - см. combat.defeated/attack_encounter) - тот же
-// приём, что playKillFlash, красным вместо жёлтого.
-function playDefeatFlash() {
-  const overlay = el("div", { class: "defeat-flash-overlay" });
-  document.body.appendChild(overlay);
-  setTimeout(() => overlay.remove(), 700);
-}
-
-// Летящий урон/тряска портрета/вспышка на ваншот - играется на DOM ЕЩЁ ДО того,
-// как doAction подменит VIEW (см. HIT_EFFECT_DELAY_MS выше). HP-полоска двигается
-// напрямую (inline width), а не через полную перерисовку - иначе CSS-transition
-// не от чего было бы интерполировать (свежий элемент сразу в конечной позиции).
-// combat.player_damage_taken/player_hp/player_max_hp/defeated - см.
-// game/engine.py:attack_encounter (ответка моба, есть на КАЖДОМ ответе, не
-// только при поражении - 0, если удар был убивающим и ответки не было).
-function playCombatHitEffect(combat) {
-  const moveMode = pendingAttackMoveMode;
-  pendingAttackMoveMode = "multiplier";
-  const qteHit = pendingQteHit;
-  pendingQteHit = false;
-  if (combat.max_hp > 0) {
-    updateHpBar("encounterHpFill", "encounterHpGhost", combat.remaining_hp / combat.max_hp);
-  }
-  const portrait = document.getElementById("encounterPortrait");
-  if (portrait) {
-    portrait.classList.remove("hit-shake");
-    void portrait.offsetWidth; // reflow - иначе повторное .add() того же класса не перезапустит анимацию (и замах, и тряска/вспышка сидят на одном классе)
-    portrait.classList.add("hit-shake");
-    let dmgClass = "dmg-float";
-    if (combat.instant_kill) dmgClass += " dmg-float-kill";
-    else if (moveMode === "percent_max_hp" || moveMode === "percent_remaining_hp") dmgClass += " dmg-float-true";
-    if (qteHit) dmgClass += " dmg-float-qte";
-    const dmg = el("div", { class: dmgClass, text: `-${combat.damage}` });
-    portrait.appendChild(dmg);
-    setTimeout(() => dmg.remove(), 900);
-  }
-  if (combat.instant_kill) playKillFlash();
-
-  if (combat.player_max_hp > 0) {
-    updateHpBar("encounterPlayerHpFill", "encounterPlayerHpGhost", combat.player_hp / combat.player_max_hp);
-  }
-  const playerWrap = document.getElementById("encounterPlayerHpWrap");
-  if (playerWrap && combat.player_damage_taken > 0) {
-    playerWrap.classList.remove("hit-shake");
-    void playerWrap.offsetWidth;
-    playerWrap.classList.add("hit-shake");
-    const dmg = el("div", { class: "dmg-float", text: `-${combat.player_damage_taken}` });
-    playerWrap.appendChild(dmg);
-    setTimeout(() => dmg.remove(), 900);
-  }
-  if (combat.defeated) playDefeatFlash();
-}
-
-// Кнопка одного варианта атаки - moveId=null - обычная атака (всегда доступна),
-// иначе move - запись из VIEW.hunting.combat_moves (см. engine.combat_moves_view).
-// Приёмы, у которых move.unlocked === false, сюда вообще не попадают - см.
-// renderEncounterModalBody (по прямому пожеланию: "заблокированные" приёмы не
-// должны быть видны вовсе, в отличие от "на кулдауне" - те видны, просто
-// временно недоступны, с круговым таймером до готовности, см. ниже).
-// Человекочитаемая формула урона приёма - см. game/engine.py:_move_damage (4
-// независимых режима). Только для подсказки (title) - сам расчёт всегда на сервере.
-function moveFormulaText(move) {
-  if (move.mode === "percent_max_hp") return `${Math.round(move.percent * 100)}% от максимального HP цели`;
-  if (move.mode === "percent_remaining_hp") return `${Math.round(move.percent * 100)}% от ТЕКУЩЕГО HP цели`;
-  if (move.mode === "execute") {
-    const fallback = move.damage_multiplier ? `×${move.damage_multiplier} обычного урона` : "как обычная атака";
-    return `добивает цель, если её HP ≤ ${Math.round(move.execute_threshold_percent * 100)}% от максимума, иначе - ${fallback}`;
-  }
-  return `×${move.damage_multiplier ?? 1} к обычному урону`;
-}
-
-function makeAttackButton(label, moveId, move) {
-  const { key, delay } = actionCooldownInfo("hunting", { kind: "attack", moveId });
-  const btn = el("button", { class: "move-btn" + (moveId ? "" : " primary") });
-  btn.appendChild(document.createTextNode(label));
-  const onCooldown = move && move.cooldown_remaining > 0;
-  if (move) {
-    const base = `${move.description} Урон: ${moveFormulaText(move)}.`;
-    btn.title = onCooldown ? `${base} (готов через ${move.cooldown_remaining} х.)` : base;
-  }
-  if (onCooldown) {
-    btn.disabled = true;
-    // Круговой "циферблат" вместо плоского числа в углу (см. .move-cd-pie в CSS) -
-    // конус-градиент дозаполняется тут же, под конкретную долю оставшегося кулдауна
-    // (cooldown_turns всегда > 0, раз есть move.cooldown_remaining > 0 вообще).
-    const frac = Math.max(0, Math.min(1, move.cooldown_remaining / move.cooldown_turns));
-    const deg = Math.round(frac * 360);
-    const pie = el("div", {
-      class: "move-cd-pie",
-      style: `background: conic-gradient(var(--danger) ${deg}deg, rgba(255,255,255,.15) ${deg}deg)`,
-      text: String(move.cooldown_remaining),
-    });
-    btn.appendChild(pie);
-  } else {
-    const remaining = cooldownRemainingMs(key);
-    if (remaining > 0) applyCooldownVisual(btn, remaining, delay);
-    // Отправляет реальный удар на сервер как раньше - hit решает только косметику
-    // (см. .dmg-float-qte/pendingQteHit), сам урон не меняется вообще.
-    const launchAttack = (hit) => {
-      pendingAttackMoveMode = move ? move.mode : "multiplier";
-      pendingQteHit = hit;
-      tryRunAction(key, delay, btn, () => doAction("hunt_attack", moveId));
-    };
-    // Первый клик по кнопке ЗАПУСКАЕТ QTE (см. startQte), второй клик по НЕЙ ЖЕ -
-    // считывает текущее положение маркера и наносит удар. Пока на этой кнопке QTE
-    // идёт, клик по ЛЮБОЙ другой кнопке атаки игнорируется (activeQte один на всю
-    // панель) - не даёт открыть вторую шкалу параллельно первой. Исход красится
-    // (см. resolveQte) СРАЗУ на клике, ДО фактического ответа сервера - реальный
-    // удар (launchAttack) всё равно уходит на сервер как обычно, это только визуал.
-    btn.addEventListener("click", () => {
-      if (activeQte && activeQte.key === key) {
-        const qte = activeQte;
-        const hit = isQteHit(qte);
-        activeQte = null;
-        resolveQte(qte, hit);
-        launchAttack(hit);
-        return;
+function huntRenderMoves() {
+  const e = hunt.els, h = VIEW.hunting; e.moves.innerHTML = "";
+  const enc = h.active_encounter, off = !enc || !!hunt.result || hunt.animating;
+  huntMoveKeys().forEach((moveId, i) => {
+    const m = huntMoveDef(moveId), pr = enc ? huntPrediction(moveId) : null;
+    const style = m ? huntMoveStyle(m) : (huntHasWeapon() ? "slash" : "fists");
+    const card = el("button", { class: "hunt-move" + (moveId ? "" : " basic") });
+    card.dataset.move = moveId || "";
+    const glyph = m && m.icon ? m.icon : HUNT_GLYPHS[style];
+    card.appendChild(el("div", { class: "hunt-move-top" }, [pixelIcon(glyph.grid, glyph.palette, 18), el("span", { class: "key", text: String(i + 1) })]));
+    card.appendChild(el("span", { class: "hunt-move-name", text: m ? m.name : "Атаковать" }));
+    card.appendChild(el("span", { class: "hunt-move-f", text: m ? huntMoveFormula(m) : "обычный удар" }));
+    if (pr) {
+      const pred = el("span", { class: "hunt-move-pred" });
+      if (pr.instant_kill && !pr.forced_kill) { pred.classList.add("oneshot"); pred.textContent = "ВАНШОТ"; }
+      else if (pr.forced_kill) { pred.classList.add("lethal"); pred.textContent = "ДОБИТЬ"; }
+      else {
+        pred.textContent = `−${huntFmt(pr.damage)}`;
+        if (pr.killed) { pred.classList.add("lethal"); pred.appendChild(el("small", { text: "насмерть" })); }
+        else if (m && (m.mode === "percent_max_hp" || m.mode === "percent_remaining_hp")) pred.classList.add("true");
       }
-      if (activeQte || cooldownRemainingMs(key) > 0) return;
-      activeQte = startQte(key, btn, (hit) => {
-        const qte = activeQte;
-        activeQte = null;
-        resolveQte(qte, hit);
-        launchAttack(hit);
-      });
+      card.appendChild(pred);
+      // Прогноз при попадании в QTE-кольцо - если он что-то меняет (урон или исход).
+      const q = pr.qte;
+      if (q && !pr.killed && !pr.instant_kill) {
+        card.appendChild(el("span", { class: "hunt-move-qte" + (q.killed ? " lethal" : ""), text: q.killed ? "✦ насмерть" : `✦ −${huntFmt(q.damage)}`,
+          title: "если попасть в QTE-кольцо" }));
+      }
+      if (m && m.mode === "execute" && pr.forced_kill && !(m.cooldown_remaining > 0)) card.classList.add("exec-ready");
+    }
+    const cd = m ? m.cooldown_remaining || 0 : 0;
+    if (cd > 0) {
+      card.classList.add("cd"); card.disabled = true;
+      const frac = Math.max(0, Math.min(1, cd / (m.cooldown_turns || cd))), R = 15, C = 2 * Math.PI * R;
+      const veil = el("div", { class: "hunt-cd-veil" });
+      veil.innerHTML = `<svg viewBox="0 0 38 38"><circle cx="19" cy="19" r="${R}" fill="rgba(0,0,0,.45)" stroke="rgba(255,255,255,.12)" stroke-width="3"/><circle cx="19" cy="19" r="${R}" fill="none" stroke="#e0524a" stroke-width="3" stroke-dasharray="${C * frac} ${C}" transform="rotate(-90 19 19)"/><text x="19" y="23.5" text-anchor="middle" font-family="Consolas,monospace" font-size="13" font-weight="700" fill="#fff">${cd}</text></svg><span>х. до готовности</span>`;
+      card.appendChild(veil);
+    }
+    if (hunt.qteMove !== undefined && hunt.qteMove === moveId) card.classList.add("qte-live");
+    if (off) card.disabled = true;
+    card.title = m ? `${m.description} Урон: ${huntMoveFormula(m)}. Перезарядка ${m.cooldown_turns || 0} х.` : "Обычная атака: урон навыка × лучшее оружие.";
+    card.addEventListener("click", () => {
+      if (hunt.stage && hunt.stage.qte) { if (hunt.qteMove === moveId) hunt.stage.resolveQte(); return; }
+      huntTryMove(moveId);
     });
-  }
-  return btn;
+    card.addEventListener("mouseenter", () => huntSetPreview(moveId)); card.addEventListener("mouseleave", () => huntSetPreview(undefined));
+    card.addEventListener("focus", () => huntSetPreview(moveId)); card.addEventListener("blur", () => huntSetPreview(undefined));
+    e.moves.appendChild(card);
+  });
+  const retreat = el("button", { class: "hunt-move retreat" }, [pixelIcon(HUNT_GLYPHS.flee.grid, HUNT_GLYPHS.flee.palette, 18), el("span", { class: "hunt-move-name", text: "Отступить" }), el("span", { class: "hunt-move-f", text: "без хода" })]);
+  retreat.disabled = off; retreat.addEventListener("click", huntRetreat);
+  e.moves.appendChild(retreat);
+  const locked = (h.combat_moves || []).filter(m => !m.unlocked).length;
+  e.lockedHint.textContent = locked ? `Ещё ${locked} ${pluralPriem(locked)} откроется с более сильным оружием.` : "";
 }
 
-// "N приём"/"N приёма"/"N приёмов" - для подсказки про ещё не открытые приёмы
-// (см. renderEncounterModalBody), бесповоротно завязана на конкретное слово,
-// как и pluralItems ("пункт") - отдельная функция на каждое такое слово, не
-// общий генератор, тот же приём, что уже есть в файле.
 function pluralPriem(n) {
   const mod10 = n % 10, mod100 = n % 100;
   if (mod10 === 1 && mod100 !== 11) return "приём";
@@ -8678,138 +8698,229 @@ function pluralPriem(n) {
   return "приёмов";
 }
 
-// Панель текущей схватки (ОДНА на всю игру, см. VIEW.hunting.active_encounter) -
-// показывается только в локации, к которой относится сама цель (encounter.location),
-// а не в любой локации с охотой сразу. Портрет (mobIcon) и HP-полоска несут
-// фиксированные id (#encounterPortrait/#encounterHpFill) - на них целится
-// playCombatHitEffect ДО перерисовки. "✕" (jobCancelButton) - abandonEncounter
-// (без хода, как house/release особей). Кнопки атаки: обычная (всегда) + по одной
-// на каждый УЖЕ ОТКРЫТЫЙ приём боя (VIEW.hunting.combat_moves отфильтрован по
-// move.unlocked - см. makeAttackButton) - неоткрытые не рисуются вовсе, вместо
-// них внизу тихая строка-подсказка с одним числом, сколько их ещё будет.
-// Содержимое модалки "Охота" (см. openHuntingModal) - портрет/HP моба, таймер
-// босса, HP-полоска ИГРОКА + бейдж "Ранен" (VIEW.hunting.player_hp/
-// player_max_hp/wounded/wounded_turns_left, см. tools/web_ui.py:hunting_view),
-// кнопки приёмов и "Отступить". Схватка ГЛОБАЛЬНА (не привязана к локации, см.
-// CLAUDE.md) - в отличие от старого renderActiveEncounterBlock (жил ВНУТРИ
-// панели конкретной локации), у этой версии нет параметра locationId вовсе.
-function renderEncounterModalBody() {
-  const encounter = VIEW.hunting.active_encounter;
-  if (!encounter) return null;
-  const box = el("div", { class: "creature-row encounter-box" });
-
-  const portrait = el("div", { id: "encounterPortrait", class: "encounter-portrait" + (encounter.is_boss ? " is-boss" : "") });
-  const iconDef = mobIcon(encounter.mob_id);
-  if (iconDef) portrait.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 56));
-  box.appendChild(portrait);
-
-  const body = el("div", { class: "encounter-body" });
-  const title = el("div", { class: "encounter-title" });
-  title.appendChild(el("span", {
-    text: `${encounter.is_boss ? "Босс" : "Цель"}: ${encounter.name} — ${encounter.remaining_hp}/${encounter.max_hp} HP`,
-  }));
-  if (encounter.turns_left !== null && encounter.turns_left !== undefined) {
-    title.appendChild(el("span", {
-      class: "encounter-timer" + (encounter.turns_left <= 3 ? " urgent" : ""),
-      text: `⏱ ${encounter.turns_left} х.`,
-      title: "Сбежит, если не убить за столько ходов",
-    }));
-  }
-  body.appendChild(title);
-
-  const ratio = Math.max(0, Math.min(1, encounter.remaining_hp / encounter.max_hp));
-  const ratioPct = `${Math.round(ratio * 100)}%`;
-  const bar = el("div", { class: "encounter-hp-bar" });
-  // ghost и fill стартуют на ОДНОЙ и той же ширине - "теневой след" виден только
-  // между самим ударом и следующей перерисовкой (см. .encounter-hp-ghost в CSS),
-  // на свежепостроенной модалке предыдущего кадра ещё нет, показывать нечего.
-  bar.appendChild(el("div", { id: "encounterHpGhost", class: "encounter-hp-ghost", style: `width:${ratioPct}` }));
-  bar.appendChild(el("div", { id: "encounterHpFill", class: "encounter-hp-fill", style: `width:${ratioPct}` }));
-  body.appendChild(bar);
-
-  // HP игрока - отдельная полоска/id от моба выше (см. playCombatHitEffect),
-  // зелёная (.player-hp-fill), чтобы "чьё" здоровье не путалось на глаз.
-  const playerTitle = el("div", { class: "encounter-title" });
-  playerTitle.appendChild(el("span", { text: `Твоё здоровье: ${VIEW.hunting.player_hp}/${VIEW.hunting.player_max_hp}` }));
-  if (VIEW.hunting.wounded) {
-    const dmgPercent = Math.round(VIEW.hunting.wounded_damage_multiplier * 100);
-    playerTitle.appendChild(el("span", {
-      class: "wounded-badge",
-      text: `Ранен: ещё ${VIEW.hunting.wounded_turns_left} х.`,
-      title: `Получено при поражении в предыдущем бою. Пока действует, весь урон, который наносите ВЫ, снижен до ${dmgPercent}% от обычного. Само пройдёт через ${VIEW.hunting.wounded_turns_left} х.; лечится реген HP (см. полоску выше) — но только вне боя, в бою HP не восстанавливается.`,
-    }));
-  }
-  body.appendChild(playerTitle);
-  const playerRatio = VIEW.hunting.player_max_hp > 0
-    ? Math.max(0, Math.min(1, VIEW.hunting.player_hp / VIEW.hunting.player_max_hp)) : 0;
-  const playerRatioPct = `${Math.round(playerRatio * 100)}%`;
-  const playerWrap = el("div", { id: "encounterPlayerHpWrap", class: "player-hp-bar player-hp-wrap" });
-  playerWrap.appendChild(el("div", { id: "encounterPlayerHpGhost", class: "player-hp-ghost", style: `width:${playerRatioPct}` }));
-  playerWrap.appendChild(el("div", { id: "encounterPlayerHpFill", class: "player-hp-fill", style: `width:${playerRatioPct}` }));
-  body.appendChild(playerWrap);
-
-  const allMoves = VIEW.hunting.combat_moves || [];
-  const unlockedMoves = allMoves.filter(m => m.unlocked);
-  const lockedCount = allMoves.length - unlockedMoves.length;
-  const moves = el("div", { class: "encounter-moves" });
-  moves.appendChild(makeAttackButton("Атаковать", null));
-  unlockedMoves.forEach(move => moves.appendChild(makeAttackButton(move.name, move.id, move)));
-  body.appendChild(moves);
-  if (lockedCount > 0) {
-    body.appendChild(el("div", {
-      class: "encounter-locked-hint",
-      text: `Ещё ${lockedCount} ${pluralPriem(lockedCount)} откроется с более сильным оружием.`,
-    }));
-  }
-  body.appendChild(el("button", { class: "danger", text: "Отступить", onclick: abandonEncounter }));
-
-  box.appendChild(body);
-  return box;
+function huntRenderChronicle() {
+  const e = hunt.els; if (!e) return; e.chron.innerHTML = "";
+  if (!hunt.log.length) e.chron.appendChild(el("li", { class: "empty", text: "Удары и ответы появятся здесь." }));
+  hunt.log.forEach(entry => {
+    const li = el("li"); li.innerHTML = `<time>${entry.turn} · ${String(entry.hour).padStart(2, "0")}:00</time>${entry.html}`; e.chron.appendChild(li);
+  });
 }
 
-// Компактный баннер вместо старой инлайн-панели схватки внутри панели
-// локации (renderActions) - схватка глобальна и переживает переход между
-// локациями, баннер просто напоминает вернуться в бой (открывает модалку),
-// если её закрыли, не отступив. Показывается ТОЛЬКО в самой локации-"Охоте",
-// где идёт бой (encounter.location), как и раньше.
+// Штриховка на полосах: сколько снимет удар и сколько прилетит в ответ (прогноз
+// сервера - тот же расчёт, что у настоящей атаки, engine.attack_preview).
+function huntSetPreview(moveId) {
+  const e = hunt.els; if (!e) return;
+  hunt.preview = moveId;
+  const h = VIEW.hunting, enc = h.active_encounter;
+  const pr = moveId !== undefined && enc && !hunt.animating && !hunt.result && !(hunt.stage && hunt.stage.qte) ? huntPrediction(moveId) : null;
+  const clear = () => { [e.mobPrev, e.plPrev].forEach(x => x.classList.remove("on", "lethal", "danger")); [e.mobPrevLbl, e.plPrevLbl].forEach(x => x.classList.remove("on")); };
+  if (!pr) { clear(); if (hunt.stage && !hunt.animating && moveId === undefined) huntRefreshTarget(); return; }
+  const max = enc.max_hp, hp = enc.remaining_hp, after = Math.max(0, pr.hp_after);
+  e.mobPrev.style.left = `${after / max * 100}%`; e.mobPrev.style.width = `${(hp - after) / max * 100}%`;
+  e.mobPrev.classList.add("on"); e.mobPrev.classList.toggle("lethal", pr.killed);
+  e.mobPrevLbl.style.left = `${(after + (hp - after) / 2) / max * 100}%`; e.mobPrevLbl.classList.add("on");
+  e.mobPrevLbl.style.color = pr.killed ? "#ffd76a" : "#ffe2a8";
+  const q = pr.qte, qText = q && !pr.killed && !pr.instant_kill ? (q.killed ? " · ✦ насмерть" : ` · ✦ −${huntFmt(q.damage)}`) : "";
+  e.mobPrevLbl.textContent = (pr.instant_kill && !pr.forced_kill ? "ВАНШОТ" : pr.forced_kill ? "ДОБИВАНИЕ" : pr.killed ? `−${huntFmt(pr.damage)} · насмерть` : `−${huntFmt(pr.damage)}`) + qText;
+  if (pr.retaliation > 0) {
+    const pm = h.player_max_hp, php = h.player_hp, pa = Math.max(0, pr.player_hp_after);
+    e.plPrev.style.left = `${pa / pm * 100}%`; e.plPrev.style.width = `${(php - pa) / pm * 100}%`;
+    e.plPrev.classList.add("on"); e.plPrev.classList.toggle("danger", pr.defeated);
+    e.plPrevLbl.style.left = `${(pa + (php - pa) / 2) / pm * 100}%`; e.plPrevLbl.classList.add("on");
+    e.plPrevLbl.style.color = pr.defeated ? "#ff7a6a" : "#e0b0a8";
+    e.plPrevLbl.textContent = pr.defeated ? `в ответ −${huntFmt(pr.retaliation)} · ты падёшь` : `в ответ −${huntFmt(pr.retaliation)}`;
+  } else { e.plPrev.classList.remove("on", "danger"); e.plPrevLbl.classList.remove("on"); }
+  if (hunt.stage) hunt.stage.setTarget("hover");
+}
+function huntRefreshTarget() {
+  const h = VIEW.hunting, enc = h.active_encounter;
+  const execReady = enc && (h.combat_moves || []).some(m => m.unlocked && m.mode === "execute" && !(m.cooldown_remaining > 0) && (h.predictions[m.id] || {}).forced_kill);
+  hunt.stage.setTarget(!enc || hunt.result ? "hidden" : execReady ? "exec" : "idle", execReady ? "ДОБИТЬ" : (enc && enc.is_boss ? "БОСС" : "ЦЕЛЬ"));
+}
+
+function huntOnKey(e) {
+  if (!document.getElementById("huntingOverlay")) return;
+  // другая модалка поверх схватки (подтверждение и т.п.) - клавиши её
+  if (Array.from(document.querySelectorAll(".modal-overlay")).some(o => o.id !== "huntingOverlay")) return;
+  if (e.target.closest && e.target.closest("input, textarea, select")) return;
+  if ((e.code === "Space" || e.key === "Enter") && hunt.stage && hunt.stage.qte) { e.preventDefault(); hunt.stage.resolveQte(); return; }
+  const n = parseInt(e.key, 10); if (!n) return;
+  const keys = huntMoveKeys(); if (n > keys.length) return;
+  e.preventDefault(); if (hunt.stage && hunt.stage.qte) return; huntTryMove(keys[n - 1]);
+}
+
+// Первый клик по приёму запускает QTE-кольцо на цели, второй (или пробел/клик по сцене)
+// бьёт. Попадание в кольцо уходит на сервер (qte) и даёт бонус к урону
+// combat.qte_damage_bonus (game/engine.py: _move_damage); мимо/таймаут - обычный урон.
+function huntTryMove(moveId) {
+  const h = VIEW.hunting, st = hunt.stage;
+  if (!st || busy || hunt.animating || hunt.result || !h.active_encounter || st.qte) return;
+  const m = huntMoveDef(moveId); if (m && m.cooldown_remaining > 0) return;
+  const { key } = actionCooldownInfo("hunting", { kind: "attack", moveId });
+  if (cooldownRemainingMs(key) > 0) return;
+  huntSetPreview(undefined);
+  const bonus = Math.round((h.qte_damage_bonus || 0) * 100);
+  hunt.els.qteHint.textContent = `ПРОБЕЛ или клик — когда кольцо ляжет на прицел${bonus ? ` · +${bonus}% урона` : ""}`;
+  hunt.qteMove = moveId; hunt.els.qteHint.hidden = false;
+  st.startQte((hit) => { hunt.els && (hunt.els.qteHint.hidden = true); huntLaunch(moveId, hit); });
+  huntRenderMoves();
+}
+function huntLaunch(moveId, qteHit) {
+  hunt.qteMove = undefined; hunt.pendingQte = qteHit;
+  const { key, delay } = actionCooldownInfo("hunting", { kind: "attack", moveId });
+  const btn = hunt.els && hunt.els.moves.querySelector(`[data-move="${moveId || ""}"]`);
+  tryRunAction(key, delay, btn || el("button"), () => doAction("hunt_attack", moveId, undefined, { qte: !!qteHit }));
+}
+
+// Хореография удара по пакету combat - вызывается из doAction ДО подмены VIEW.
+async function huntPlayAttack(payload) {
+  const combat = payload.log.combat, st = hunt.stage, e = hunt.els;
+  if (!combat || !st || !e) return;
+  hunt.animating = true; huntRenderMoves();
+  const qte = !!combat.qte_hit; hunt.pendingQte = false;
+  const qteBonus = Math.round((VIEW.hunting.qte_damage_bonus || 0) * 100);
+  const enc = VIEW.hunting.active_encounter || hunt.lastEncounter, next = payload.state.hunting;
+  const m = huntMoveDef(combat.move_id);
+  let style = m ? huntMoveStyle(m) : (huntHasWeapon() ? "slash" : "fists");
+  if (combat.forced_kill) style = "execute"; else if (combat.instant_kill) style = "oneshot";
+  const { hx, hy } = await st.strike({ style, color: huntSlashColor(m, style), qte, sound: m && m.fx ? m.fx.sound : null });
+  const before = enc ? enc.remaining_hp : combat.damage, shown = combat.killed ? before : combat.damage;
+  const trueDmg = m && (m.mode === "percent_max_hp" || m.mode === "percent_remaining_hp");
+  st.damageNumber(`−${huntFmt(shown)}`, [combat.killed ? "kill" : trueDmg ? "true" : "", style === "heavy" ? "big" : "", qte ? "qte" : ""].join(" "), hx, hy - 20);
+  if (qte) st.callout(`✦ МЕТКО${qteBonus ? ` +${qteBonus}%` : ""}`, "qte", 1000);
+  huntSetBars(combat.remaining_hp, combat.max_hp, VIEW.hunting.player_hp, VIEW.hunting.player_max_hp);
+  const name = m ? m.name : "Удар";
+  if (style === "oneshot") { st.callout("ВАНШОТ", "oneshot", 1500); huntLog(`<span class="t-gold">${huntEsc(name)}</span> — цель рассечена одним движением.`); }
+  else if (style === "execute") { st.callout("ДОБИВАНИЕ", "exec", 1500); huntLog(`<span class="t-gold">${huntEsc(name)}</span> — добит на месте.`); }
+  else huntLog(`${huntEsc(name)}: <span class="${combat.killed ? "t-gold" : trueDmg ? "t-true" : "t-hit"}">−${huntFmt(shown)}</span>${qte ? ` ✦${qteBonus ? ` <span class="t-muted">(+${qteBonus}% за точность)</span>` : ""}` : ""}.`);
+  const gearBefore = VIEW.hunting.gear || { weapons: [], armor: [] }, gearAfter = next.gear || { weapons: [], armor: [] };
+  [...gearAfter.weapons, ...gearAfter.armor].forEach(t => {
+    const was = [...gearBefore.weapons, ...gearBefore.armor].find(x => x.tool_id === t.tool_id);
+    if (t.is_broken && was && !was.is_broken) huntLog(`<span class="t-hurt">«${huntEsc(t.name)}» сломалось</span> — дальше без его бонусов.`);
+  });
+  const mobName = enc ? enc.name : "Цель";
+  if (combat.killed) {
+    await st.wait(style === "execute" ? 380 : 200); st.endSlowMo();
+    await st.die({ soul: !!combat.soul });
+    hunt.result = { kind: "win", combat, name: mobName, location: enc ? enc.location : null, boss: !!(enc && enc.is_boss) };
+    const soulName = combat.soul ? (VIEW.resource_names[combat.soul] || combat.soul) : null;
+    huntLog(`<span class="t-gold">${huntEsc(mobName)} повержен.</span> +${huntFmt(combat.xp || 0)} опыта${soulName ? ` · <span class="t-soul">${huntEsc(soulName)}!</span>` : ""}.`);
+  } else {
+    st.endSlowMo(); await st.wait(300);
+    await st.retaliate();
+    const r = e.plBar.getBoundingClientRect(), s = e.stageHost.getBoundingClientRect();
+    const px = r.left - s.left + r.width * Math.max(0.05, Math.min(1, combat.player_hp / combat.player_max_hp)), py = r.top - s.top - 14;
+    if (combat.player_damage_taken > 0) st.damageNumber(`−${huntFmt(combat.player_damage_taken)}`, "player", px, py);
+    else st.damageNumber("блок", "absorb", px, py);
+    if (combat.armor_absorbed > 0) setTimeout(() => st.damageNumber(`броня −${huntFmt(combat.armor_absorbed)}`, "absorb", px + 50, py + 2), 120);
+    e.hudPlayer.classList.remove("shake"); void e.hudPlayer.offsetWidth; e.hudPlayer.classList.add("shake");
+    huntSetBars(combat.remaining_hp, combat.max_hp, combat.player_hp, combat.player_max_hp);
+    const lines = st.mobFx.attack_lines, line = lines.length ? lines[Math.floor(Math.random() * lines.length)] : `${mobName} бьёт в ответ`;
+    huntLog(`${huntEsc(line)}: <span class="t-hurt">−${huntFmt(combat.player_damage_taken)}</span>${combat.armor_absorbed > 0 ? ` <span class="t-muted">(броня −${huntFmt(combat.armor_absorbed)})</span>` : ""}.`);
+    if (combat.defeated) {
+      await st.defeat();
+      hunt.result = { kind: "lose", combat, name: mobName, location: enc ? enc.location : null };
+      huntLog(`<span class="t-hurt">Пришлось отступить ни с чем.</span> Ранен на ${combat.wounded_turns || 0} х.`);
+    } else if (payload.log.boss_fled) {
+      await st.fadeAway();
+      hunt.result = { kind: "fled", combat, name: mobName, location: enc ? enc.location : null };
+      huntLog(`<span class="t-hurt">${huntEsc(mobName)} скрылся — время вышло.</span>`);
+    }
+  }
+  hunt.animating = false;
+}
+
+function huntShowResult() {
+  const e = hunt.els, res = hunt.result; if (!e || !res) return;
+  hunt.resultShown = true; e.resultBox.innerHTML = ""; e.resultBox.hidden = false;
+  if (hunt.stage) hunt.stage.setTarget("hidden");
+  const card = el("div", { class: "hunt-result-card" });
+  const actions = el("div", { class: "hunt-result-actions" });
+  const canSearch = res.location && (VIEW.hunting.mobs || []).some(mb => mb.location === res.location && !mb.is_boss) && VIEW.hunting.player_hp > 0;
+  actions.appendChild(el("button", { text: "Закрыть", onclick: closeHuntingModal }));
+  if (canSearch && res.kind !== "lose") actions.appendChild(el("button", { class: "primary", text: "Искать ещё", onclick: () => huntSearchAgain(res.location) }));
+  if (res.kind === "win") {
+    const c = res.combat;
+    card.appendChild(el("div", { class: "hunt-result-title win", text: `${res.name} повержен` }));
+    card.appendChild(el("div", { class: "hunt-result-sub", text: "Добыча, опыт и душа — одним пакетом" }));
+    const row = el("div", { class: "hunt-loot-row" }); let i = 0;
+    const tile = (rid, n, soul) => {
+      const t = el("div", { class: "hunt-loot" + (soul ? " soul" : ""), style: `animation-delay:${0.15 + i++ * 0.12}s` });
+      // слот иконки фиксированный, даже без картинки (как у плиток склада, resourceTileBase)
+      const box = el("div", { class: "hunt-loot-ico" }), ico = resourceIcon(rid);
+      if (ico) box.appendChild(pixelIcon(ico.grid, ico.palette, 30));
+      t.appendChild(box);
+      t.appendChild(el("b", { text: huntFmt(n) })); t.appendChild(el("span", { text: (VIEW.resource_names[rid] || rid) + (soul ? "!" : "") }));
+      row.appendChild(t);
+    };
+    Object.entries(c.loot || {}).forEach(([rid, n]) => tile(rid, n, false));
+    if (c.soul) tile(c.soul, 1, true);
+    if (row.children.length) card.appendChild(row);
+    const sk = VIEW.hunting.combat_skill;
+    if (sk && c.xp) {
+      const lx = sk.level_xp || [], lvB = c.skill_level_before, lvA = c.skill_level_after;
+      const xpNow = sk.xp, xpWas = xpNow - c.xp;
+      const frac = (xp, lv) => { const cur = lx[lv - 1] || 0, nx = lx[lv]; return nx === undefined ? 1 : Math.max(0, Math.min(1, (xp - cur) / Math.max(1, nx - cur))); };
+      const xpBox = el("div", { class: "hunt-xp" });
+      const lbl = el("span", { text: `${sk.name} · ур. ${lvB}` });
+      const bar = el("i", { style: `width:${frac(xpWas, lvB) * 100}%` });
+      const up = el("div", { class: "hunt-lvl-up" });
+      xpBox.append(el("div", { class: "hunt-xp-row" }, [lbl, el("b", { text: `+${huntFmt(c.xp)} опыта` })]), el("div", { class: "hunt-xp-bar" }, [bar]), up);
+      card.appendChild(xpBox);
+      setTimeout(() => {
+        if (lvA > lvB) {
+          bar.style.width = "100%";
+          setTimeout(() => {
+            if (!hunt.els) return;
+            huntSynth("level", _sfxVolume);
+            const a = (sk.level_effects || [])[lvB - 1] || {}, b = (sk.level_effects || [])[lvA - 1] || {};
+            const names = { damage: "урон", max_hp: "бонус HP" };
+            const diffs = Object.keys({ ...a, ...b }).filter(k => a[k] !== b[k]).map(k => `${names[k] || k} ${huntFmt(a[k] || 0)} → ${huntFmt(b[k] || 0)}`);
+            up.textContent = `▲ УРОВЕНЬ ${lvA}${diffs.length ? ": " + diffs.join(", ") : ""}`; up.classList.add("on");
+            lbl.textContent = `${sk.name} · ур. ${lvA}`;
+            bar.style.transition = "none"; bar.style.width = "0%"; void bar.offsetWidth; bar.style.transition = ""; bar.style.width = `${frac(xpNow, lvA) * 100}%`;
+          }, 950);
+        } else bar.style.width = `${frac(xpNow, lvA) * 100}%`;
+      }, 500);
+    }
+  } else if (res.kind === "lose") {
+    const h = VIEW.hunting;
+    card.appendChild(el("div", { class: "hunt-result-title lose", text: "Пришлось отступить" }));
+    card.appendChild(el("div", { class: "hunt-result-note", text: `${res.name} чуть не прикончил тебя. Ранен на ${res.combat.wounded_turns || 0} х.: твой урон ×${h.wounded_damage_multiplier}. Здоровье восстанавливается вне боя.` }));
+  } else {
+    card.appendChild(el("div", { class: "hunt-result-title fled", text: `${res.name} скрылся в чаще` }));
+    card.appendChild(el("div", { class: "hunt-result-note", text: "Не успел свалить за отведённые ходы. Потраченное на призыв не возвращается." }));
+  }
+  card.appendChild(actions);
+  e.resultBox.appendChild(card);
+  huntRenderMoves();
+}
+
+async function huntSearchAgain(locationId) {
+  await doAction("hunt_search", locationId);
+  if (VIEW.hunting.active_encounter && hunt.els) huntStartIntro();
+}
+
+async function huntRetreat() {
+  if (busy || hunt.animating || hunt.result || !hunt.stage) return;
+  hunt.animating = true; hunt.stage.cancelQte(); hunt.els.qteHint.hidden = true; huntRenderMoves();
+  await hunt.stage.fadeAway(700);
+  hunt.animating = false;
+  await abandonEncounter();
+  closeHuntingModal();
+}
+
+// Компактный баннер «В бою» в панели локации-«Охоты», где идёт бой (encounter.location) -
+// схватка глобальна и переживает переход между локациями, баннер открывает модалку.
 function renderEncounterBanner(locationId) {
   const encounter = VIEW.hunting.active_encounter;
   if (!encounter || encounter.location !== locationId) return null;
-  const banner = el("div", { class: "encounter-banner", onclick: openHuntingModal });
+  const banner = el("div", { class: "encounter-banner", onclick: () => openHuntingModal() });
   banner.appendChild(el("span", {
     text: `⚔ В бою: ${encounter.name} — ${encounter.remaining_hp}/${encounter.max_hp} HP`,
   }));
   banner.appendChild(el("span", { text: "Открыть →" }));
   return banner;
-}
-
-// Модалка "Охота" - см. renderEncounterModalBody. Ничего не строит и просто
-// закрывается, если активной схватки уже нет (добита/отступили/сбежал босс) -
-// тот же приём, что у остальных renderAll()-переоткрываемых модалок.
-function openHuntingModal() {
-  if (!VIEW.hunting.active_encounter) {
-    closeHuntingModal();
-    return;
-  }
-  closeHuntingModal();
-  const overlay = el("div", { class: "modal-overlay" });
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeHuntingModal(); });
-
-  const modal = el("div", { class: "modal hunting-modal" });
-  const head = el("div", { class: "modal-head" });
-  head.appendChild(el("strong", { text: "Охота" }));
-  head.appendChild(el("button", { text: "Закрыть", onclick: closeHuntingModal }));
-  modal.appendChild(head);
-  modal.appendChild(renderEncounterModalBody());
-
-  overlay.appendChild(modal);
-  overlay.id = "huntingOverlay";
-  document.body.appendChild(overlay);
-}
-
-function closeHuntingModal() {
-  const overlay = document.getElementById("huntingOverlay");
-  if (overlay) overlay.remove();
 }
 
 async function cancelJob(kind, extra) {
@@ -13848,12 +13959,12 @@ function runAction(kind, item, scale) {
     // этот .then(), так что openHuntingModal() тут видит свежие данные.
     if (item.kind === "search") {
       return doAction("hunt_search", item.location).then(() => {
-        if (VIEW.hunting.active_encounter) openHuntingModal();
+        if (VIEW.hunting.active_encounter) openHuntingModal({ intro: true });
       });
     }
     if (item.kind === "summon") {
       return doAction("summon_boss", item.id).then(() => {
-        if (VIEW.hunting.active_encounter) openHuntingModal();
+        if (VIEW.hunting.active_encounter) openHuntingModal({ intro: true });
       });
     }
   }
