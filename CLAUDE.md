@@ -267,6 +267,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Тема | Где искать |
 |---|---|
 | Энергия и хранилища (обрезка в конце хода) | `engine.py`: `ENERGY_RESOURCE_ID`, `energy_capacity`, `is_building_active_now` |
+| Приток/расход за ход (панель энергии, «+N/ход»): постройки, особи, души, реакторы (прогноз хода), доп. расход ритуалов; преобразователи/репликаторы не входят - берут излишки | `engine.py`: `passive_flows` → `theoretical_rates`/`energy_breakdown`, `_reactor_zone_forecast` |
 | Шахта: fog-of-war сетка, добыча клеток, щуп-детектор (радиус/типы/счёт/полная подсветка) | `engine.py`: `MINE_LOCATION_ID`, `_generate_mine_field`, `hit_mine_field`, `mine_field_view`, `scanner_tier`, `_scanner_sense_radius`; контент `mine_field` (+`scanner_radius_tiers` - список {tier, radius}, действует самый большой разблокированный, не сумма) + `mining_info`; только в web_ui, у `main.py` нет (см. `tools/web_ui.py`: вызовы `engine.hit_mine_field`/`engine.mine_field_view`) |
 | Инструменты и тиры (произвольное число линеек) | `engine.py`: `tool_tier`, `upgrade_tool`, `next_tool_tier_info`, `upgradable_tools`; `web_ui.html: openToolsModal` |
 | Дерево технологий, тиры лабораторий | `engine.py`: `tech_unlocks`, `tech_levels`, `lab_tier_capacity`, `research()`; `web_ui.html: renderTechTree/openTechTreeModal` |

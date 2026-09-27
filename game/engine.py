@@ -6416,16 +6416,36 @@ def repair_blocked_types(state: GameState, building_id: str) -> list[tuple[str |
 
 
 def energy_breakdown(state: GameState, include_surplus_only: bool = True) -> tuple[int, int, int]:
-    """(запас, генерация/ход, потребление/ход) энергии по текущему парку РАБОТАЮЩИХ построек
-    В ЭТОТ ХОД - постройки, которых сейчас не время суток (например, солнечные панели
-    ночью) или которых игрок выключил ползунком "Механизмы" (building_active_count),
-    в генерацию/потребление не считаются, иначе показанные цифры обещали бы
-    больше, чем реально будет произведено следующим advance_turn.
+    """(запас, генерация/ход, потребление/ход) энергии в ЭТОТ ХОД - всё, что работает
+    само (passive_flows): постройки, реакторы, особи, души, ритуалы. Постройки не в
+    своё время суток (солнечные панели ночью) или выключенные ползунком "Механизмы"
+    не считаются, иначе цифры обещали бы больше, чем даст следующий advance_turn.
     include_surplus_only=False - без потребления построек «только на излишках»
-    (energy_surplus_only): ожиданию энергии они уступают, мешать ему не должны."""
+    (energy_surplus_only): ожиданию энергии они уступают, мешать ему не должны.
+    Преобразователи и репликаторы берут только излишки - в потребление не входят."""
+    produced, consumed = passive_flows(state, include_surplus_only)
+    return (
+        state.resources.get(ENERGY_RESOURCE_ID, 0),
+        produced.get(ENERGY_RESOURCE_ID, 0),
+        consumed.get(ENERGY_RESOURCE_ID, 0),
+    )
+
+
+def passive_flows(state: GameState, include_surplus_only: bool = True) -> tuple[dict[str, float], dict[str, float]]:
+    """Сколько ресурса за ход ПРОИЗВОДИТ и ПОТРЕБЛЯЕТ всё, что работает само, если
+    всем хватает сырья: постройки, заселённые особи (с бонусом среды), вставленные
+    души, реакторы (энергия и жидкость контура по прогнозу хода, тем же расчётом,
+    что _process_reactors) и доп. расход идущих ритуалов. Шанс и диапазон - средним
+    ожидаемым, округление - как при настоящем начислении. Для отображения
+    (theoretical_rates/energy_breakdown), не обещание."""
     daytime = is_daytime(state)
-    generation = 0
-    consumption = 0
+    produced: dict[str, float] = {}
+    consumed: dict[str, float] = {}
+
+    def add(target: dict, resource_id: str, amount: float) -> None:
+        if amount:
+            target[resource_id] = target.get(resource_id, 0) + amount
+
     for building_id in state.buildings:
         working = working_count(state, building_id)
         if working <= 0 or not is_building_active_now(building_id, daytime):
@@ -6436,12 +6456,73 @@ def energy_breakdown(state: GameState, include_surplus_only: bool = True) -> tup
         if active <= 0:
             continue
         produces, consumes = effective_building_stats(building_id, state.techs, state.building_upgrades)
-        # _amount_estimate - это прогноз "на следующий ход", а не сам момент
-        # начисления, поэтому диапазон (см. _is_range_amount) показывается своей
-        # серединой, а не бросается заново (см. _roll_range_amounts).
-        generation += _amount_estimate(produces.get(ENERGY_RESOURCE_ID, 0)) * active
-        consumption += consumes.get(ENERGY_RESOURCE_ID, 0) * active
-    return state.resources.get(ENERGY_RESOURCE_ID, 0), generation, consumption
+        # Диапазон (см. _is_range_amount) - серединой, прогноз не бросает заново.
+        for r, amount in produces.items():
+            add(produced, r, _amount_estimate(amount) * active)
+        for r, amount in consumes.items():
+            add(consumed, r, amount * active)
+
+    # Особи - как _process_habitat.
+    for creature in state.creatures.values():
+        farm_id = creature["farm_instance_id"]
+        instance = state.farm_instances.get(farm_id) if farm_id is not None else None
+        if instance is None or instance["broken"]:
+            continue
+        phenotype = creature_phenotype(creature)
+        if not _is_active_period_now(phenotype["active_period"], daytime):
+            continue
+        species = SPECIES.get(phenotype["species_id"], {})
+        for r, amount in species.get("consumes", {}).items():
+            add(consumed, r, amount)
+        output_mult = phenotype["output_multiplier"] * _farm_instance_upgrade_multiplier(state, farm_id, "breeding_output")
+        for r, amount in species.get("produces", {}).items():
+            scaled = _amount_estimate(amount) * output_mult
+            add(produced, r, scaled if RESOURCE_FRACTIONAL.get(r, False) else math.ceil(scaled))
+        active_env = _instance_environment_id(state, farm_id)
+        bonus = species.get("bonus_resource")
+        if bonus and active_env is not None and phenotype["environment_id"] == active_env:
+            amount = species.get("bonus_amount", 0)
+            if not RESOURCE_FRACTIONAL.get(bonus, False):
+                amount = math.ceil(amount)
+            add(produced, bonus, amount * species.get("bonus_chance", 0))
+
+    # Души - как _process_soul_collectors.
+    for instance_id, instance in state.soul_collector_instances.items():
+        if not instance.get("installed") or not is_building_active_now(instance["building_id"], daytime):
+            continue
+        capacity = soul_collector_instance_capacity(state, instance_id)
+        efficiency = _soul_instance_upgrade_multiplier(state, instance_id, "soul_generation_efficiency", default=1.0)
+        for soul_id in instance["installed"][:capacity]:
+            recipe = SOUL_RECIPES.get(soul_id)
+            if not recipe:
+                continue
+            produces = dict(recipe.get("produces", {}))
+            if efficiency != 1.0:
+                produces = _round_amounts({r: _scale_amount(v, efficiency) for r, v in produces.items()})
+            chances = recipe.get("produces_chance") or {}
+            for r, amount in produces.items():
+                add(produced, r, _amount_estimate(amount) * chances.get(r, 1.0))
+
+    # Реакторы - прогноз хода; жидкость контура общая на все реакторы по порядку.
+    fluid_left: dict[str, float] = {}
+    for instance_id, instance in state.reactor_instances.items():
+        if instance["broken"] or not is_building_active_now(instance["building_id"], daytime):
+            continue
+        fluid_id = instance.get("coolant_fluid")
+        stock = fluid_left.get(fluid_id, state.resources.get(fluid_id, 0)) if fluid_id else 0
+        zones = _reactor_zone_forecast(state, instance_id, fluid_stock=stock) or []
+        add(produced, ENERGY_RESOURCE_ID, sum(z["next_output"] for z in zones))
+        used = sum(z["fluid_used"] for z in zones)
+        if fluid_id:
+            fluid_left[fluid_id] = stock - used
+            add(consumed, fluid_id, used)
+
+    # Доп. расход идущих ритуалов - как _process_ritual_jobs.
+    for job in state.ritual_jobs.values():
+        chances = job.get("extra_consumes_chance") or {}
+        for r, amount in (job.get("extra_consumes_per_turn") or {}).items():
+            add(consumed, r, amount * chances.get(r, 1.0))
+    return produced, consumed
 
 
 def energy_capacity(state: GameState) -> int:
@@ -8869,6 +8950,13 @@ def reactor_zone_projection(state: GameState, instance_id: str) -> list[dict] | 
     бросок остаются на _process_reactors) - чистое чтение."""
     if not reactor_telemetry_available(state, instance_id):
         return None
+    return _reactor_zone_forecast(state, instance_id)
+
+
+def _reactor_zone_forecast(state: GameState, instance_id: str, fluid_stock: float | None = None) -> list[dict] | None:
+    """Прогноз следующего хода по зонам (см. reactor_zone_projection) без проверки
+    телеметрии - для подсчёта притока энергии и расхода жидкости (passive_flows).
+    fluid_stock - сколько жидкости достанется этому реактору (по умолчанию весь склад)."""
     instance = state.reactor_instances.get(instance_id)
     if instance is None:
         return None
@@ -8888,7 +8976,7 @@ def reactor_zone_projection(state: GameState, instance_id: str) -> list[dict] | 
     soft_pct = min(config.get("soft_threshold_pct", 1.0), 1.0)
 
     fluid_id = instance.get("coolant_fluid")
-    stock = state.resources.get(fluid_id, 0) if fluid_id else 0
+    stock = fluid_stock if fluid_stock is not None else (state.resources.get(fluid_id, 0) if fluid_id else 0)
     result = []
     for zone_idx, zone in enumerate(zones):
         # Тот же расчёт жидкости, что и в реальном ходу (включая порядок зон по
@@ -9830,26 +9918,16 @@ def advance_turn(state: GameState) -> ProductionReport:
     return report
 
 
-def theoretical_rates(state: GameState) -> dict[str, int]:
-    """Сколько ресурса в ход даёт текущий парк построек, если всем хватает сырья (для
-    отображения) - с учётом того, что постройки не в своё время суток (active_period)
-    или выключенные ползунком "Механизмы" (building_active_count) в этот ход
-    гарантированно простаивают, а не только "может не хватить сырья"."""
-    daytime = is_daytime(state)
-    rates: dict[str, int] = {}
-    for building_id in state.buildings:
-        working = working_count(state, building_id)
-        if working <= 0 or not is_building_active_now(building_id, daytime):
-            continue
-        working = building_active_count(state, building_id)
-        if working <= 0:
-            continue
-        produces, consumes = effective_building_stats(building_id, state.techs, state.building_upgrades)
-        for r, amount in produces.items():
-            rates[r] = rates.get(r, 0) + _amount_estimate(amount) * working
-        for r, amount in consumes.items():
-            rates[r] = rates.get(r, 0) - amount * working
-    return rates
+def theoretical_rates(state: GameState) -> dict[str, float]:
+    """Сколько ресурса в ход прибывает (плюс) или убывает (минус) от всего, что
+    работает само, если всем хватает сырья (для отображения) - см. passive_flows.
+    Постройки не в своё время суток (active_period) или выключенные ползунком
+    "Механизмы" (building_active_count) гарантированно простаивают и не считаются."""
+    produced, consumed = passive_flows(state)
+    rates = dict(produced)
+    for r, amount in consumed.items():
+        rates[r] = rates.get(r, 0) - amount
+    return {r: round(v, 9) for r, v in rates.items()}
 
 
 def all_techs_researched(state: GameState) -> bool:

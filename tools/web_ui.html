@@ -8981,14 +8981,14 @@ async function fetchCancelBurn(kind, extra) {
 function renderEnergy() {
   const e = VIEW.energy;
   const free = e.generation - e.consumption;
-  document.getElementById("hudEnergy").textContent = e.capacity > 0 ? `${e.stock}/${e.capacity}` : e.stock;
-  document.getElementById("energyStock").textContent = e.capacity > 0 ? `${e.stock}/${e.capacity}` : e.stock;
+  document.getElementById("hudEnergy").textContent = e.capacity > 0 ? `${fmtNum(e.stock)}/${e.capacity}` : fmtNum(e.stock);
+  document.getElementById("energyStock").textContent = e.capacity > 0 ? `${fmtNum(e.stock)}/${e.capacity}` : fmtNum(e.stock);
   const stockLbl = document.getElementById("energyStockLbl");
   stockLbl.textContent = e.capacity > 0 ? "Запас" : "Запас (без хранилищ)";
   stockLbl.title = e.capacity > 0 ? "" : "Без построек-хранилищ энергия не переносится на следующий ход";
-  document.getElementById("energyGen").textContent = "+" + e.generation;
-  document.getElementById("energyCons").textContent = "-" + e.consumption;
-  document.getElementById("energyFree").textContent = (free >= 0 ? "+" : "") + free;
+  document.getElementById("energyGen").textContent = "+" + fmtNum(e.generation);
+  document.getElementById("energyCons").textContent = "-" + fmtNum(e.consumption);
+  document.getElementById("energyFree").textContent = (free >= 0 ? "+" : "") + fmtNum(free);
   const freeStat = document.getElementById("energyFreeStat");
   freeStat.classList.toggle("ok", free >= 0);
   freeStat.classList.toggle("bad", free < 0);
