@@ -1572,6 +1572,16 @@ def validate(data: dict) -> list[str]:
             if mob.get("turn_limit") is not None:
                 errors.append(f"{where}: turn_limit имеет смысл только у боссов (is_boss=true)")
 
+    # 4 жёстко зашитых признака генотипа (species - отдельно, через species[].
+    # dominant/weight ниже) - держать в паре с GENOTYPE_TRAIT_IDS в
+    # game/engine.py, тот же принцип ручного дублирования, что и у _MINE_LOCATION_ID.
+    _GENETIC_TRAIT_IDS = ("lifespan", "output_multiplier", "active_period", "environment")
+    genetic_traits = data.get("genetic_traits", {})
+    trait_allele_ids = {
+        tid: {a.get("id") for a in (t.get("alleles") or []) if isinstance(a, dict)}
+        for tid, t in genetic_traits.items() if isinstance(t, dict)
+    } if isinstance(genetic_traits, dict) else {}
+
     for sid, sp in species.items():
         # Ключ - id уже существующего ресурса (тот же принцип, что у mining_info) -
         # НЕ регистрируется через record_id: он ЗАКОНОМЕРНО совпадает с id ресурса,
@@ -1592,6 +1602,27 @@ def validate(data: dict) -> list[str]:
         family = sp.get("family")
         if family is not None and (not isinstance(family, str) or not family):
             errors.append(f"Вид '{sid}': family должен быть null или непустой строкой (например 'пчела'/'цветок') - см. buildings.*.breeding_accepts_family")
+        # Пул генов вида (game/engine.py: species_gene_pool) - какие аллели особь
+        # носит от природы. Обязателен по каждому признаку: без него движок молча
+        # подставил бы одни доминантные аллели, и вид выглядел бы "настроенным".
+        gene_pool = sp.get("gene_pool")
+        if not isinstance(gene_pool, dict):
+            errors.append(f"Вид '{sid}': не задан пул генов (gene_pool) - какие аллели каждого признака носит особь от природы")
+        else:
+            for trait_id in gene_pool:
+                if trait_id not in _GENETIC_TRAIT_IDS:
+                    errors.append(f"Вид '{sid}'.gene_pool: неизвестный признак '{trait_id}' (допустимы {list(_GENETIC_TRAIT_IDS)})")
+            for trait_id in _GENETIC_TRAIT_IDS:
+                pool = gene_pool.get(trait_id)
+                pwhere = f"Вид '{sid}'.gene_pool.{trait_id}"
+                if not isinstance(pool, dict) or not pool:
+                    errors.append(f"{pwhere}: нужна хотя бы одна аллель")
+                    continue
+                for allele_id, weight in pool.items():
+                    if trait_id in trait_allele_ids and allele_id not in trait_allele_ids[trait_id]:
+                        errors.append(f"{pwhere}: неизвестная аллель '{allele_id}'")
+                    if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
+                        errors.append(f"{pwhere}.{allele_id}: вес должен быть положительным числом")
         # bonus_* - бонусная продукция промышленной пасеки (см. game/engine.py:
         # _process_habitat): КАКОЙ ресурс зависит от ВИДА (тут), а СРАБОТАЕТ ли
         # бонус в этот ход - от генотипа "environment" (см. genetic_traits ниже) -
@@ -1611,12 +1642,9 @@ def validate(data: dict) -> list[str]:
             if not isinstance(bonus_chance, (int, float)) or isinstance(bonus_chance, bool) or not (0 < bonus_chance <= 1):
                 errors.append(f"Вид '{sid}'.bonus_chance: должен быть числом от 0 (не включая) до 1, если указан bonus_resource")
 
-    # 4 жёстко зашитых ГЛОБАЛЬНЫХ признака генотипа (species - отдельно, через
-    # species[].dominant/weight выше) - держать в паре с GENOTYPE_TRAIT_IDS в
-    # game/engine.py, тот же принцип ручного дублирования, что и у _MINE_LOCATION_ID.
-    _GENETIC_TRAIT_IDS = ("lifespan", "output_multiplier", "active_period", "environment")
+    # Каталог аллелей 4 признаков (_GENETIC_TRAIT_IDS выше). Веса у аллели нет:
+    # как часто она встречается, решает пул каждого вида (species.*.gene_pool).
     _ACTIVE_PERIOD_ALLELE_IDS = {"day", "night", "always"}
-    genetic_traits = data.get("genetic_traits", {})
     for trait_id in _GENETIC_TRAIT_IDS:
         trait = genetic_traits.get(trait_id)
         if trait is None:
@@ -1650,9 +1678,6 @@ def validate(data: dict) -> list[str]:
                 errors.append(f"{awhere}: dominant должен быть true или false")
             elif dominant:
                 has_dominant = True
-            weight = a.get("weight")
-            if not isinstance(weight, (int, float)) or isinstance(weight, bool) or weight <= 0:
-                errors.append(f"{awhere}.weight: должен быть положительным числом")
             if trait_id == "active_period":
                 if aid not in _ACTIVE_PERIOD_ALLELE_IDS:
                     errors.append(f"{awhere}: у признака active_period id аллели должен быть одним из {sorted(_ACTIVE_PERIOD_ALLELE_IDS)} (сейчас: '{aid}')")

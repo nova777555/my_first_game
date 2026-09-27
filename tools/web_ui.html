@@ -1418,6 +1418,12 @@
   .book-parent-btn.clickable:hover { border-color: var(--accent); color: var(--accent); }
   .book-recipe-chance { font-weight: 600; font-size: 12px; margin-left: auto; }
   .book-recipe-lock { font-size: 10px; color: var(--muted); flex-basis: 100%; }
+  .book-genes { display: flex; flex-direction: column; gap: 4px; margin: 0 0 14px; }
+  .book-genes-title { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+  .book-gene-row { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
+  .book-gene-trait { flex: 0 0 120px; color: var(--muted); }
+  .book-gene-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .book-gene-chip { padding: 1px 6px; border: 1px solid rgba(255,255,255,.15); font-size: 11px; color: var(--text); }
   .upgrade-open-btn {
     display: inline-flex; align-items: center; flex-shrink: 0; align-self: center;
     cursor: pointer; white-space: nowrap; font-size: 12px; font-weight: 600;
@@ -5192,6 +5198,29 @@ function renderSpeciesBookRecipe(recipe) {
   return row;
 }
 
+// Какие гены вид носит от природы (species.*.gene_pool): дикий улов целиком,
+// у потомка-мутации - половина генома. Остальные гены - только скрещиванием
+// или синтезом из уже изученного.
+function renderSpeciesBookGenes(species) {
+  const box = el("div", { class: "book-genes" });
+  box.appendChild(el("div", {
+    class: "book-genes-title", text: "Гены вида",
+    title: "С какими генами особь этого вида встречается в природе. Мутация в этот вид приносит потомку половину генома отсюда.",
+  }));
+  species.gene_pool.forEach(trait => {
+    const row = el("div", { class: "book-gene-row" });
+    row.appendChild(el("span", { class: "book-gene-trait", text: trait.trait_name }));
+    const chips = el("div", { class: "book-gene-chips" });
+    trait.alleles.forEach(a => {
+      const text = trait.alleles.length > 1 ? `${a.name} ${Math.round(a.chance * 100)}%` : a.name;
+      chips.appendChild(el("span", { class: "book-gene-chip", text }));
+    });
+    row.appendChild(chips);
+    box.appendChild(row);
+  });
+  return box;
+}
+
 function renderSpeciesBookDetail(speciesId) {
   const pane = el("div", { class: "book-detail-pane" });
   const species = speciesCatalogEntry(speciesId);
@@ -5204,6 +5233,7 @@ function renderSpeciesBookDetail(speciesId) {
   head.appendChild(el("strong", { text: species.name }));
   pane.appendChild(head);
   if (species.description) pane.appendChild(el("div", { class: "book-species-desc", text: species.description }));
+  if (species.gene_pool && species.gene_pool.length) pane.appendChild(renderSpeciesBookGenes(species));
   if (!species.breedable) {
     pane.appendChild(el("div", {
       class: "empty-note",

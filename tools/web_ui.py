@@ -713,6 +713,19 @@ def species_catalog_view(state: GameState) -> list[dict]:
             "requires_building_name": BUILDINGS[r["requires_building"]]["name"] if r["requires_building"] else None,
             "locked": r["locked"],
         } for r in entry["recipes"]]
+        # Гены вида - в порядке аллелей каталога genetic_traits (он и есть шкала
+        # «хуже -> лучше»), а не по доле.
+        gene_pool = []
+        for trait_id, pool in entry["gene_pool"].items():
+            alleles = engine.trait_alleles(trait_id)
+            gene_pool.append({
+                "trait_id": trait_id,
+                "trait_name": GENETIC_TRAITS.get(trait_id, {}).get("name", trait_id),
+                "alleles": [
+                    {"id": aid, "name": allele.get("name", aid), "chance": pool[aid]}
+                    for aid, allele in alleles.items() if aid in pool
+                ],
+            })
         catalog.append({
             "id": species_id,
             "name": RESOURCE_NAMES.get(species_id, species_id),
@@ -722,6 +735,7 @@ def species_catalog_view(state: GameState) -> list[dict]:
             "consumes": cost_list(entry["consumes"]),
             "breedable": entry["breedable"],
             "recipes": recipes,
+            "gene_pool": gene_pool,
         })
     return catalog
 

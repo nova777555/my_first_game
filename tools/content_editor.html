@@ -141,6 +141,14 @@
   .stage-card .stage-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
   .stage-card .stage-head strong { font-size: 12px; }
   .stage-card .stage-head .spacer { flex: 1; }
+  .gene-pool-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; flex-wrap: wrap; }
+  .gene-pool-trait { font-size: 12px; color: var(--muted); min-width: 120px; }
+  .gene-pool-alleles { display: flex; flex-wrap: wrap; gap: 6px; }
+  .gene-pool-allele { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; }
+  .gene-pool-allele.on { border-color: var(--accent); color: var(--text); }
+  .gene-pool-allele input[type=number] { width: 52px; }
+  .gene-pool-share { color: var(--muted); min-width: 30px; }
+  .gene-pool-warn { font-size: 12px; color: var(--danger); }
 
   .req-list { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0; }
   .req-list label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
@@ -6004,7 +6012,8 @@ function renderSpecies() {
     "Виды для разведения (фермы) - метаданные ДОБАВЛЯЮТСЯ к уже существующему ресурсу (тот же принцип, что "
     + "у добычи руды), а не заводят отдельное пространство id: это одна из АЛЛЕЛЕЙ признака «Вид» генотипа "
     + "особи (см. вкладку «Генетика» про остальные 4 признака - срок жизни/продуктивность/активность/среду "
-    + "обитания, они ГЛОБАЛЬНЫЕ и не зависят от вида). produces/consumes - что ОДНА особь этого вида даёт/тратит КАЖДЫЙ ход, "
+    + "обитания; каталог их аллелей общий, а КАКИЕ из них носит вид от природы, решает его «Пул генов» ниже). "
+    + "produces/consumes - что ОДНА особь этого вида даёт/тратит КАЖДЫЙ ход, "
     + "пока живёт в ферме (не в банке - там особи просто лежат кучкой, ничего не делая). dominant - выражается "
     + "ли этот вид в фенотипе потомка при скрещивании с ДРУГИМ видом (нужен хотя бы один dominant=true вид, "
     + "иначе гетерозигота по виду ничего не определит). weight - как часто этот вид достаётся ДИКОЙ особи "
@@ -6025,7 +6034,7 @@ function renderSpecies() {
     const entries = freeResources.map(r => ({ value: r.id, label: r.name }));
     const select = genericPickerSelect(entries, addRid, (v) => { addRid = v; }, { title: "Выбрать ресурс", placeholder: "— выбрать ресурс —" });
     const addBtn = el("button", { class: "primary", text: "Добавить", onclick: () => {
-      DATA.species[addRid] = { description: "", produces: {}, consumes: {}, dominant: false, weight: 1 };
+      DATA.species[addRid] = { description: "", produces: {}, consumes: {}, dominant: false, weight: 1, gene_pool: defaultGenePool() };
       jumpTo(`card-species-${addRid}`, "species");
     }});
     addForm = el("div", { class: "add-form" }, [el("span", { text: "Сделать видом для разведения:" }), select, addBtn]);
@@ -6081,6 +6090,15 @@ function renderSpecies() {
     weightRow.appendChild(el("span", { class: "hint", text: "0 = не ловится в диком виде, только через мутацию" }));
     card.appendChild(weightRow);
 
+    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Пул генов (gene_pool)" })]));
+    const genePoolBox = el("div", { class: "dict-editor" });
+    renderGenePoolEditor(genePoolBox, sp);
+    card.appendChild(genePoolBox);
+    card.appendChild(el("p", { class: "hint", text:
+      "С какими генами особь вида встречается в природе: дикий улов разыгрывает каждый признак по этим весам, "
+      + "а мутация В этот вид даёт потомку половину генома отсюда. Гена нет в пуле - вид его не носит, "
+      + "получить можно только скрещиванием или синтезом из уже изученного." }));
+
     // Бонусная продукция промышленной пасеки - см. подсказку вкладки выше:
     // СРАБОТАЕТ ли бонус в этот ход, решает генотип особи (признак "Среда
     // обитания", вкладка «Генетика») + апгрейд фермы environment_emulation,
@@ -6135,16 +6153,93 @@ const ACTIVE_PERIOD_ALLELE_NAMES = { day: "Днём", night: "Ночью", alway
 const ENVIRONMENT_ALLELE_IDS = ["forest", "fields", "caves", "desert", "water", "space"];
 const ENVIRONMENT_ALLELE_NAMES = { forest: "Лес", fields: "Поля", caves: "Пещеры", desert: "Пустыня", water: "Вода", space: "Космос" };
 
+// Пул генов вида (species.*.gene_pool, game/engine.py: species_gene_pool) -
+// {признак: {аллель: вес}}. Новому виду - «обычная особь»: доминантные аллели.
+function defaultGenePool() {
+  const pool = {};
+  GENETIC_TRAIT_IDS.forEach(traitId => {
+    const alleles = DATA.genetic_traits?.[traitId]?.alleles || [];
+    const dominant = alleles.filter(a => a.dominant);
+    pool[traitId] = {};
+    (dominant.length ? dominant : alleles.slice(0, 1)).forEach(a => { pool[traitId][a.id] = 1; });
+  });
+  return pool;
+}
+
+// Строка на признак: все аллели каталога («Генетика») чипами, галочка - вид
+// носит ген, число - вес, рядом доля в процентах. Правка веса пересчитывает
+// доли на месте (без пересборки - не сбивать фокус при Tab между полями).
+function renderGenePoolEditor(box, sp) {
+  box.innerHTML = "";
+  if (!sp.gene_pool) sp.gene_pool = {};
+  GENETIC_TRAIT_IDS.forEach(traitId => {
+    const trait = DATA.genetic_traits?.[traitId];
+    const alleles = trait?.alleles || [];
+    if (!sp.gene_pool[traitId]) sp.gene_pool[traitId] = {};
+    const pool = sp.gene_pool[traitId];
+    const row = el("div", { class: "gene-pool-row" });
+    row.appendChild(el("span", { class: "gene-pool-trait", text: trait?.name || GENETIC_TRAIT_DEFAULT_NAMES[traitId] }));
+    const chips = el("div", { class: "gene-pool-alleles" });
+    const shares = [];
+    const updateShares = () => {
+      const total = Object.values(pool).reduce((sum, w) => sum + (Number(w) || 0), 0);
+      shares.forEach(({ id, span }) => { span.textContent = total ? `${Math.round(pool[id] / total * 100)}%` : ""; });
+    };
+    alleles.forEach(a => {
+      const on = a.id in pool;
+      const chip = el("label", { class: "gene-pool-allele" + (on ? " on" : "") });
+      const checkbox = el("input", { type: "checkbox" });
+      checkbox.checked = on;
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) pool[a.id] = 1; else delete pool[a.id];
+        renderGenePoolEditor(box, sp);
+      });
+      chip.appendChild(checkbox);
+      chip.appendChild(el("span", { text: a.name || a.id }));
+      if (on) {
+        const weightInput = el("input", { type: "number", min: "0.01", step: "0.1", value: pool[a.id], title: "Вес: чем больше, тем чаще ген у дикой особи" });
+        weightInput.addEventListener("change", () => {
+          const v = Number(weightInput.value);
+          pool[a.id] = v > 0 ? v : 1;
+          weightInput.value = pool[a.id];
+          updateShares();
+        });
+        chip.appendChild(weightInput);
+        const share = el("span", { class: "gene-pool-share" });
+        shares.push({ id: a.id, span: share });
+        chip.appendChild(share);
+      }
+      chips.appendChild(chip);
+    });
+    row.appendChild(chips);
+    if (!Object.keys(pool).length) row.appendChild(el("span", { class: "gene-pool-warn", text: "нужна хотя бы одна аллель" }));
+    box.appendChild(row);
+    updateShares();
+  });
+}
+
+// Переименование/удаление аллели в каталоге - то же самое во всех пулах видов,
+// иначе пулы молча ссылались бы на несуществующий ген (валидатор отказал бы).
+function renameAlleleInGenePools(traitId, oldId, newId) {
+  Object.values(DATA.species || {}).forEach(sp => {
+    const pool = sp.gene_pool?.[traitId];
+    if (!pool || !(oldId in pool)) return;
+    if (newId !== null && !(newId in pool)) pool[newId] = pool[oldId];
+    delete pool[oldId];
+  });
+}
+
 function renderGeneticTraits() {
   const root = document.getElementById("tab-genetic-traits");
   root.innerHTML = "";
   root.appendChild(el("p", { class: "hint", text:
-    "4 жёстко зашитых ГЛОБАЛЬНЫХ признака генотипа особи - id признаков и, для «Активности»/«Среды обитания», "
+    "4 жёстко зашитых признака генотипа особи - id признаков и, для «Активности»/«Среды обитания», "
     + "id аллелей фиксированы в движке (добавить/удалить сам признак или сменить состав аллелей нельзя). "
-    + "Пятый признак генотипа - «Вид» - это вкладка «Виды» (dominant/weight ЛЮБОГО вида играют ТУ ЖЕ роль, что "
+    + "Пятый признак генотипа - «Вид» - это вкладка «Виды» (dominant ЛЮБОГО вида играет ТУ ЖЕ роль, что "
     + "здесь у аллелей). dominant решает, какая из двух аллелей пары выражается в фенотипе при скрещивании "
-    + "(нужна хотя бы одна dominant=true аллель на признак - иначе гетерозигота ничего не определит); weight - "
-    + "как часто эта аллель достаётся ДИКОЙ особи (не связано с dominant). «Среда обитания» решает только, КАКАЯ "
+    + "(нужна хотя бы одна dominant=true аллель на признак - иначе гетерозигота ничего не определит). Это общий "
+    + "КАТАЛОГ генов: какие из них и как часто носит особь конкретного вида, настраивается «Пулом генов» на "
+    + "вкладке «Виды». «Среда обитания» решает только, КАКАЯ "
     + "среда благоприятна для генотипа особи - бонусный ресурс за эту благоприятность настраивается на вкладке "
     + "«Виды» (у каждого вида свой, не у самой среды - см. подсказку там)." }));
 
@@ -6162,14 +6257,14 @@ function renderGeneticTraits() {
     if (isActivePeriod) {
       ACTIVE_PERIOD_ALLELE_IDS.forEach(aid => {
         if (!trait.alleles.some(a => a.id === aid)) {
-          trait.alleles.push({ id: aid, name: ACTIVE_PERIOD_ALLELE_NAMES[aid], dominant: aid === "day", weight: 1 });
+          trait.alleles.push({ id: aid, name: ACTIVE_PERIOD_ALLELE_NAMES[aid], dominant: aid === "day" });
         }
       });
     }
     if (isEnvironment) {
       ENVIRONMENT_ALLELE_IDS.forEach(aid => {
         if (!trait.alleles.some(a => a.id === aid)) {
-          trait.alleles.push({ id: aid, name: ENVIRONMENT_ALLELE_NAMES[aid], dominant: aid === "forest", weight: 1 });
+          trait.alleles.push({ id: aid, name: ENVIRONMENT_ALLELE_NAMES[aid], dominant: aid === "forest" });
         }
       });
     }
@@ -6189,7 +6284,7 @@ function renderGeneticTraits() {
         head.appendChild(el("div", { class: "spacer" }));
         if (!isLocked) {
           const rm = el("button", { class: "small danger", text: "Удалить", disabled: trait.alleles.length <= 1 ? "true" : null });
-          rm.addEventListener("click", () => { trait.alleles.splice(i, 1); renderAllelesBox(); });
+          rm.addEventListener("click", () => { trait.alleles.splice(i, 1); renameAlleleInGenePools(traitId, a.id, null); renderAllelesBox(); });
           head.appendChild(rm);
         }
         aCard.appendChild(head);
@@ -6201,6 +6296,7 @@ function renderGeneticTraits() {
           idInput.addEventListener("change", () => {
             const v = idInput.value.trim();
             if (!/^[a-z][a-z0-9_]*$/.test(v)) { alert("id должен быть латиницей в snake_case"); idInput.value = a.id || ""; return; }
+            renameAlleleInGenePools(traitId, a.id, v);
             a.id = v;
           });
           idRow.appendChild(idInput);
@@ -6232,18 +6328,11 @@ function renderGeneticTraits() {
         domRow.appendChild(el("label", { text: "Доминантная" }));
         aCard.appendChild(domRow);
 
-        const weightRow = el("div", { class: "field-row" });
-        weightRow.appendChild(el("label", { text: "Вес (частота у дикой особи)" }));
-        const weightInput = el("input", { type: "number", min: "0.01", step: "0.1", value: a.weight ?? 1 });
-        weightInput.addEventListener("change", () => { a.weight = Number(weightInput.value) || 1; });
-        weightRow.appendChild(weightInput);
-        aCard.appendChild(weightRow);
-
         allelesBox.appendChild(aCard);
       });
       if (!isLocked) {
         const addBtn = el("button", { class: "small", text: "+ добавить аллель", onclick: () => {
-          trait.alleles.push({ id: "new_allele", name: "Новая аллель", dominant: false, weight: 1, value: 1 });
+          trait.alleles.push({ id: "new_allele", name: "Новая аллель", dominant: false, value: 1 });
           renderAllelesBox();
         }});
         allelesBox.appendChild(addBtn);

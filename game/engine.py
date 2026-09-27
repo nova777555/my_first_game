@@ -435,8 +435,9 @@ for _mutation in MUTATIONS:
 # 5 жёстко зашитых признаков генотипа особи (закрытый список, как 3 типа улучшений
 # построек scale/energy_efficiency/generation_efficiency) - "species" ссылается на
 # content.json["species"] (каждый вид - одна аллель этого признака), остальные четыре -
-# на content.json["genetic_traits"] (общий набор аллелей на всю игру, НЕ зависящий
-# от вида - ровно как в Forestry срок жизни пчелы отделён от её вида).
+# на content.json["genetic_traits"] (общий каталог аллелей на всю игру - ровно как в
+# Forestry срок жизни пчелы отделён от её вида). КАКИЕ из них может нести особь
+# вида от природы, решает пул вида (species.*.gene_pool, см. species_gene_pool).
 GENOTYPE_TRAIT_IDS = ("species", "lifespan", "output_multiplier", "active_period", "environment")
 
 
@@ -6490,19 +6491,41 @@ def creature_phenotype(creature: dict) -> dict:
     }
 
 
+def species_gene_pool(species_id: str, trait_id: str) -> dict[str, float]:
+    """allele_id -> вес: какие аллели признака trait_id несёт от природы особь
+    вида species_id (species.*.gene_pool) - у каждого вида свой набор генов
+    (прямое пожелание, 2026-09-27: раньше любая дикая особь могла нести ЛЮБУЮ
+    аллель, и лучшие гены собирались с самых обычных пчёл; теперь ради гена
+    нужно добыть вид, который его носит). Пул читают дикий улов и мутация
+    (_roll_wild_genotype/_cross_genotype); синтез - нет, он берёт уже изученное.
+    Аллели, которых нет в genetic_traits, и веса <= 0 отбрасываются. Пула нет
+    (валидатор его требует, так что только старый/недописанный контент) -
+    доминантные аллели признака, «обычная особь»."""
+    alleles = trait_alleles(trait_id)
+    pool = (SPECIES.get(species_id, {}).get("gene_pool") or {}).get(trait_id) or {}
+    result = {aid: weight for aid, weight in pool.items() if aid in alleles and weight > 0}
+    if result:
+        return result
+    return {aid: 1 for aid, a in alleles.items() if a.get("dominant")} or {aid: 1 for aid in alleles}
+
+
+def _roll_pool_allele(species_id: str, trait_id: str) -> str:
+    pool = species_gene_pool(species_id, trait_id)
+    ids = list(pool)
+    return random.choices(ids, weights=[pool[a] for a in ids], k=1)[0]
+
+
 def _roll_wild_genotype(species_id: str) -> dict:
     """Дикая особь ГОМОЗИГОТНА по построению на каждый признак (обе аллели пары
-    одинаковы, взвешенно розыгранные по weight) - без иллюзии скрытых генов у
-    только что пойманной особи; разнообразие появляется через скрещивание/мутацию."""
+    одинаковы, взвешенно розыгранные по пулу генов её вида - species_gene_pool) -
+    без иллюзии скрытых генов у только что пойманной особи; разнообразие
+    появляется через скрещивание/мутацию."""
     genotype: dict[str, list[str]] = {}
     for trait_id in GENOTYPE_TRAIT_IDS:
         if trait_id == "species":
             genotype[trait_id] = [species_id, species_id]
             continue
-        alleles = trait_alleles(trait_id)
-        ids = list(alleles.keys())
-        weights = [alleles[a].get("weight", 1) for a in ids]
-        chosen = random.choices(ids, weights=weights, k=1)[0]
+        chosen = _roll_pool_allele(species_id, trait_id)
         genotype[trait_id] = [chosen, chosen]
     return genotype
 
@@ -6735,26 +6758,16 @@ def _cross_genotype(state: GameState, pair_a: dict, pair_b: dict) -> tuple[dict,
     математически недостижима - это ожидаемо (мутация в такой конфигурации
     гарантирована), а не ошибка.
 
+    Мутация приносит гены НОВОГО вида (как в Forestry): одна аллель каждой пары -
+    из его пула (species_gene_pool), вторая - от ОДНОГО из родителей (монетка
+    одна на весь геном). Иначе вид, который добывается только мутацией, никогда
+    не дал бы своих генов. Аллель нового вида стоит в паре первой - при равной
+    доминантности выражается она (_phenotype_allele).
+
     После основной генотипной части - отдельный шанс (genetics.environment_mutation_chance)
-    ПОЛНОСТЬЮ переиграть пару признака "environment" заново (взвешенно по weight,
-    как у дикой особи - _roll_wild_genotype), поверх уже отыгранного обычного
-    менделевского наследования от родителей выше - редкая "мутация среды обитания",
-    не связанная с мутацией вида."""
-    child: dict[str, list[str]] = {}
-    for trait_id in GENOTYPE_TRAIT_IDS:
-        if trait_id == "species":
-            continue
-        child[trait_id] = [
-            random.choice(_genotype_pair(pair_a, trait_id)), random.choice(_genotype_pair(pair_b, trait_id)),
-        ]
-
-    if random.random() < GENETICS_SETTINGS.get("environment_mutation_chance", 0.0):
-        alleles = trait_alleles("environment")
-        ids = list(alleles.keys())
-        weights = [alleles[a].get("weight", 1) for a in ids]
-        chosen = random.choices(ids, weights=weights, k=1)[0]
-        child["environment"] = [chosen, chosen]
-
+    ПОЛНОСТЬЮ переиграть пару признака "environment" заново (по пулу вида потомка,
+    как у дикой особи - _roll_wild_genotype), поверх уже отыгранного наследования
+    выше - редкая "мутация среды обитания", не связанная с мутацией вида."""
     species_a = _phenotype_allele("species", pair_a["species"])
     species_b = _phenotype_allele("species", pair_b["species"])
     mult = _breeding_mutation_multiplier(state)
@@ -6768,18 +6781,37 @@ def _cross_genotype(state: GameState, pair_a: dict, pair_b: dict) -> tuple[dict,
 
     roll = random.random()
     cursor = 0.0
+    mutated_species = None
     for mutation in candidates:
         cursor += mutation["chance"] * mult
         if roll < cursor:
             outcomes = mutation["outcomes"]
             weights = [o["weight"] for o in outcomes]
             mutated_species = random.choices(outcomes, weights=weights, k=1)[0]["species_id"]
-            child["species"] = [mutated_species, mutated_species]
-            return child, True
+            break
+    if mutated_species is not None:
+        child_species = mutated_species
+    else:
+        child_species = species_a if roll < cursor + (1 - cursor) / 2 else species_b
 
-    child_species = species_a if roll < cursor + (1 - cursor) / 2 else species_b
-    child["species"] = [child_species, child_species]
-    return child, False
+    child: dict[str, list[str]] = {"species": [child_species, child_species]}
+    kept_parent = random.choice((pair_a, pair_b)) if mutated_species is not None else None
+    for trait_id in GENOTYPE_TRAIT_IDS:
+        if trait_id == "species":
+            continue
+        if kept_parent is not None:
+            child[trait_id] = [
+                _roll_pool_allele(mutated_species, trait_id), random.choice(_genotype_pair(kept_parent, trait_id)),
+            ]
+        else:
+            child[trait_id] = [
+                random.choice(_genotype_pair(pair_a, trait_id)), random.choice(_genotype_pair(pair_b, trait_id)),
+            ]
+
+    if random.random() < GENETICS_SETTINGS.get("environment_mutation_chance", 0.0):
+        chosen = _roll_pool_allele(child_species, "environment")
+        child["environment"] = [chosen, chosen]
+    return child, mutated_species is not None
 
 
 def breed_creatures(state: GameState, parent_a_id: str, parent_b_id: str) -> ActionResult:
@@ -7094,7 +7126,10 @@ def species_catalog_view(state: GameState) -> list[dict]:
     встречается как исход хотя бы одной мутации) - на фронте только такие виды
     кликабельны как родитель (переход к его собственному рецепту), "базовые"
     виды (ловятся в дикой природе - см. manual_actions.*.spawn_species) кликать
-    некуда, для них рецептов не существует."""
+    некуда, для них рецептов не существует.
+
+    "gene_pool" - {признак: {аллель: доля 0..1}} по species_gene_pool: какие гены
+    носит вид от природы и как часто (дикий улов, аллель нового вида при мутации)."""
     bred_species_ids = {outcome["species_id"] for mutation in MUTATIONS for outcome in mutation["outcomes"]}
     mult = _breeding_mutation_multiplier(state)
     catalog = []
@@ -7121,6 +7156,13 @@ def species_catalog_view(state: GameState) -> list[dict]:
                     "requires_building": req_building,
                     "locked": locked,
                 })
+        gene_pool = {}
+        for trait_id in GENOTYPE_TRAIT_IDS:
+            if trait_id == "species":
+                continue
+            pool = species_gene_pool(species_id, trait_id)
+            total = sum(pool.values())
+            gene_pool[trait_id] = {aid: weight / total for aid, weight in pool.items()}
         catalog.append({
             "id": species_id,
             "description": SPECIES[species_id].get("description", ""),
@@ -7129,6 +7171,7 @@ def species_catalog_view(state: GameState) -> list[dict]:
             "consumes": dict(SPECIES[species_id].get("consumes", {})),
             "breedable": species_id in bred_species_ids,
             "recipes": recipes,
+            "gene_pool": gene_pool,
         })
     return catalog
 

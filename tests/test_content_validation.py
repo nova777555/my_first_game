@@ -1508,11 +1508,42 @@ class SpeciesAndBreedingValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("dominant" in e for e in errors))
 
-    def test_rejects_genetic_trait_allele_with_non_positive_weight(self):
+    # ---- species.*.gene_pool (game/engine.py: species_gene_pool) ----
+
+    def test_rejects_species_without_gene_pool(self):
         d = copy.deepcopy(self.data)
-        d["genetic_traits"]["lifespan"]["alleles"][0]["weight"] = 0
+        del d["species"]["critter_a"]["gene_pool"]
         errors = cv.validate(d)
-        self.assertTrue(any("weight" in e for e in errors))
+        self.assertTrue(any("critter_a" in e and "gene_pool" in e for e in errors))
+
+    def test_rejects_gene_pool_missing_a_trait_or_with_empty_trait(self):
+        d = copy.deepcopy(self.data)
+        del d["species"]["critter_a"]["gene_pool"]["lifespan"]
+        d["species"]["critter_b"]["gene_pool"]["environment"] = {}
+        errors = cv.validate(d)
+        self.assertTrue(any("critter_a" in e and "gene_pool.lifespan" in e for e in errors))
+        self.assertTrue(any("critter_b" in e and "gene_pool.environment" in e for e in errors))
+
+    def test_rejects_gene_pool_with_unknown_allele_or_trait(self):
+        d = copy.deepcopy(self.data)
+        d["species"]["critter_a"]["gene_pool"]["lifespan"]["ancient"] = 1
+        d["species"]["critter_a"]["gene_pool"]["color"] = {"red": 1}
+        errors = cv.validate(d)
+        self.assertTrue(any("ancient" in e for e in errors))
+        self.assertTrue(any("'color'" in e for e in errors))
+
+    def test_rejects_gene_pool_with_non_positive_weight(self):
+        d = copy.deepcopy(self.data)
+        d["species"]["critter_a"]["gene_pool"]["lifespan"]["normal"] = 0
+        errors = cv.validate(d)
+        self.assertTrue(any("gene_pool.lifespan.normal" in e for e in errors))
+
+    def test_genetic_trait_alleles_need_no_weight(self):
+        d = copy.deepcopy(self.data)
+        for trait in d["genetic_traits"].values():
+            for a in trait["alleles"]:
+                a.pop("weight", None)
+        self.assertEqual(cv.validate(d), [])
 
     def test_rejects_non_positive_allele_value_for_numeric_trait(self):
         d = copy.deepcopy(self.data)

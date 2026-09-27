@@ -113,12 +113,13 @@ ENERGY_RECIPES: dict = _DATA.get("energy_recipes", {})
 # принцип, что у mining_info: словарь ДОБАВЛЯЕТ метаданные существующему ресурсу,
 # а не заводит отдельное пространство id). Признак "вид" - один из 5 генетических
 # признаков особи (см. GENETIC_TRAITS ниже и game/engine.py:GENOTYPE_TRAIT_IDS) -
-# "dominant"/"weight" тут играют ту же роль, что у аллелей остальных признаков.
+# "dominant" тут играет ту же роль, что у аллелей остальных признаков; "gene_pool" -
+# {признак: {аллель: вес}}, какие гены вид носит от природы (engine.species_gene_pool).
 SPECIES: dict = _DATA.get("species", {})
-# Глобальные признаки генотипа, НЕ привязанные к виду (lifespan/output_multiplier/
+# Каталог аллелей признаков генотипа (lifespan/output_multiplier/
 # active_period/environment - ровно 4 ключа, id и число жёстко зашиты в
 # game/engine.py:GENOTYPE_TRAIT_IDS) - {trait_id: {"name", "alleles": [{"id","name",
-# "dominant", "weight", "value"?}, ...]}}. См. game/engine.py:trait_alleles/_phenotype_allele.
+# "dominant", "value"?}, ...]}}; частоты у вида - SPECIES[*]["gene_pool"]. См. game/engine.py:trait_alleles/_phenotype_allele.
 GENETIC_TRAITS: dict = _DATA.get("genetic_traits", {})
 # Мутации - список (не словарь: пара родителей не обязана быть уникальным id)
 # {"parent_a","parent_b","chance","requires_tech","requires_building","outcomes"} -

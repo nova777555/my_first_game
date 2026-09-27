@@ -1008,8 +1008,8 @@ ENERGY_RECIPES = {
     },
 }
 
-# 3 ГЛОБАЛЬНЫХ признака генотипа (species - отдельно, ниже, через SPECIES[].
-# dominant/weight) - "normal"/"day" везде намеренно ДОЛГОЖИВУЩИЕ/доминантные
+# 4 признака генотипа (species - отдельно, ниже, через SPECIES[]; какие аллели
+# носит вид от природы - SPECIES[].gene_pool) - "normal"/"day" везде намеренно ДОЛГОЖИВУЩИЕ/доминантные
 # (lifespan.normal=100 - практически бессмертна на длину обычного теста), чтобы
 # тесты, которым старость не важна, не спотыкались об неё случайно; "short"/
 # "fast"/"night"/"always" - для тестов, которым нужны конкретные другие значения.
@@ -1017,23 +1017,23 @@ GENETIC_TRAITS = {
     "lifespan": {
         "name": "Тестовый срок жизни",
         "alleles": [
-            {"id": "short", "name": "Короткая", "value": 3, "dominant": False, "weight": 1},
-            {"id": "normal", "name": "Обычная", "value": 100, "dominant": True, "weight": 5},
+            {"id": "short", "name": "Короткая", "value": 3, "dominant": False},
+            {"id": "normal", "name": "Обычная", "value": 100, "dominant": True},
         ],
     },
     "output_multiplier": {
         "name": "Тестовая продуктивность",
         "alleles": [
-            {"id": "normal", "name": "Обычная", "value": 1, "dominant": True, "weight": 5},
-            {"id": "fast", "name": "Быстрая", "value": 2, "dominant": False, "weight": 1},
+            {"id": "normal", "name": "Обычная", "value": 1, "dominant": True},
+            {"id": "fast", "name": "Быстрая", "value": 2, "dominant": False},
         ],
     },
     "active_period": {
         "name": "Тестовая активность",
         "alleles": [
-            {"id": "day", "name": "Днём", "dominant": True, "weight": 5},
-            {"id": "night", "name": "Ночью", "dominant": False, "weight": 1},
-            {"id": "always", "name": "Всегда", "dominant": False, "weight": 1},
+            {"id": "day", "name": "Днём", "dominant": True},
+            {"id": "night", "name": "Ночью", "dominant": False},
+            {"id": "always", "name": "Всегда", "dominant": False},
         ],
     },
     # 6 id ЗАКРЫТЫ (tools/content_validation.py:_ENVIRONMENT_ALLELE_IDS) - как у
@@ -1043,12 +1043,12 @@ GENETIC_TRAITS = {
     "environment": {
         "name": "Тестовая среда обитания",
         "alleles": [
-            {"id": "forest", "name": "Лес", "dominant": True, "weight": 5},
-            {"id": "fields", "name": "Поля", "dominant": False, "weight": 5},
-            {"id": "caves", "name": "Пещеры", "dominant": False, "weight": 3},
-            {"id": "desert", "name": "Пустыня", "dominant": False, "weight": 3},
-            {"id": "water", "name": "Вода", "dominant": False, "weight": 2},
-            {"id": "space", "name": "Космос", "dominant": False, "weight": 1},
+            {"id": "forest", "name": "Лес", "dominant": True},
+            {"id": "fields", "name": "Поля", "dominant": False},
+            {"id": "caves", "name": "Пещеры", "dominant": False},
+            {"id": "desert", "name": "Пустыня", "dominant": False},
+            {"id": "water", "name": "Вода", "dominant": False},
+            {"id": "space", "name": "Космос", "dominant": False},
         ],
     },
 }
@@ -1062,16 +1062,32 @@ GENETIC_TRAITS = {
 # ресурс (для теста "бонус зависит от вида, не от среды" - два вида в ОДНОЙ и
 # той же благоприятной среде дают разные ресурсы), bonus_chance - произвольные
 # числа (тесты бонуса мокают random, а не полагаются на эти значения).
+# gene_pool (game/engine.py:species_gene_pool) - у critter_a только "обычные"
+# гены (дикий улов не спотыкается о старость), у critter_b - ЦЕЛИКОМ те, которых
+# нет у critter_a (short/fast/night/water): тесты мутации видят, что половина
+# генома потомка пришла из пула нового вида.
 SPECIES = {
     "critter_a": {
         "description": "Тестовый вид А - доминантный, ловится в диком виде, без потребления.",
         "produces": {"species_output": 2}, "consumes": {}, "dominant": True, "weight": 5,
         "bonus_resource": "species_output", "bonus_amount": 1, "bonus_chance": 0.3,
+        "gene_pool": {
+            "lifespan": {"normal": 1},
+            "output_multiplier": {"normal": 1},
+            "active_period": {"day": 1},
+            "environment": {"forest": 3, "fields": 1},
+        },
     },
     "critter_b": {
         "description": "Тестовый вид Б - рецессивный, требует корм, доступен только через мутацию.",
         "produces": {"species_output": 5}, "consumes": {"critter_food": 1}, "dominant": False, "weight": 0,
         "bonus_resource": "raw_a", "bonus_amount": 1, "bonus_chance": 0.25,
+        "gene_pool": {
+            "lifespan": {"short": 1},
+            "output_multiplier": {"fast": 1},
+            "active_period": {"night": 1},
+            "environment": {"water": 1},
+        },
     },
 }
 

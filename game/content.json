@@ -5608,7 +5608,24 @@
       },
       "consumes": {},
       "dominant": true,
-      "weight": 5
+      "weight": 5,
+      "gene_pool": {
+        "lifespan": {
+          "short": 2,
+          "normal": 5
+        },
+        "output_multiplier": {
+          "slow": 2,
+          "normal": 5
+        },
+        "active_period": {
+          "day": 1
+        },
+        "environment": {
+          "forest": 3,
+          "fields": 1
+        }
+      }
     },
     "royal_bee": {
       "description": "Редкая порода пчёл, появляющаяся при скрещивании - производит заметно больше мёда и маточное молочко.",
@@ -5619,7 +5636,24 @@
       },
       "consumes": {},
       "dominant": false,
-      "weight": 0
+      "weight": 0,
+      "gene_pool": {
+        "lifespan": {
+          "normal": 2,
+          "long": 1
+        },
+        "output_multiplier": {
+          "normal": 3,
+          "fast": 1
+        },
+        "active_period": {
+          "day": 1
+        },
+        "environment": {
+          "forest": 1,
+          "fields": 1
+        }
+      }
     },
     "mana_flower_sunlight": {
       "description": "Обычный дикий манацвет - питается светом, ничего не тратит, даёт немного маны, пока живёт в оранжерее.",
@@ -5629,7 +5663,24 @@
       },
       "consumes": {},
       "dominant": true,
-      "weight": 5
+      "weight": 5,
+      "gene_pool": {
+        "lifespan": {
+          "short": 1,
+          "normal": 3
+        },
+        "output_multiplier": {
+          "slow": 1,
+          "normal": 3
+        },
+        "active_period": {
+          "day": 1
+        },
+        "environment": {
+          "fields": 3,
+          "water": 1
+        }
+      }
     },
     "mana_flower_ember": {
       "description": "Манацвет, появляющийся при скрещивании - разгорается, поедая уголь, и даёт заметно больше маны, чем солнечный.",
@@ -5641,7 +5692,24 @@
         "charcoal": 1
       },
       "dominant": false,
-      "weight": 0
+      "weight": 0,
+      "gene_pool": {
+        "lifespan": {
+          "short": 2,
+          "normal": 1
+        },
+        "output_multiplier": {
+          "normal": 1,
+          "fast": 1
+        },
+        "active_period": {
+          "day": 1,
+          "night": 2
+        },
+        "environment": {
+          "desert": 1
+        }
+      }
     },
     "mana_flower_geode": {
       "description": "Редкий манацвет, появляющийся при скрещивании тлеющих цветов - прорастает камнем и рудой, даёт больше всего маны.",
@@ -5654,7 +5722,24 @@
         "ore": 1
       },
       "dominant": false,
-      "weight": 0
+      "weight": 0,
+      "gene_pool": {
+        "lifespan": {
+          "normal": 1,
+          "long": 1
+        },
+        "output_multiplier": {
+          "normal": 2,
+          "fast": 2,
+          "fastest": 1
+        },
+        "active_period": {
+          "always": 1
+        },
+        "environment": {
+          "caves": 1
+        }
+      }
     }
   },
   "genetic_traits": {
@@ -5665,22 +5750,19 @@
           "id": "short",
           "name": "Короткая",
           "value": 6,
-          "dominant": false,
-          "weight": 2
+          "dominant": false
         },
         {
           "id": "normal",
           "name": "Обычная",
           "value": 12,
-          "dominant": true,
-          "weight": 5
+          "dominant": true
         },
         {
           "id": "long",
           "name": "Долгая",
           "value": 24,
-          "dominant": false,
-          "weight": 1
+          "dominant": false
         }
       ]
     },
@@ -5691,29 +5773,25 @@
           "id": "slow",
           "name": "Медленная",
           "value": 0.5,
-          "dominant": false,
-          "weight": 2
+          "dominant": false
         },
         {
           "id": "normal",
           "name": "Обычная",
           "value": 1,
-          "dominant": true,
-          "weight": 5
+          "dominant": true
         },
         {
           "id": "fast",
           "name": "Быстрая",
           "value": 2,
-          "dominant": false,
-          "weight": 1.5
+          "dominant": false
         },
         {
           "id": "fastest",
           "name": "Стахановская",
           "value": 3,
-          "dominant": false,
-          "weight": 0.3
+          "dominant": false
         }
       ]
     },
@@ -5723,20 +5801,17 @@
         {
           "id": "day",
           "name": "Днём",
-          "dominant": true,
-          "weight": 5
+          "dominant": true
         },
         {
           "id": "night",
           "name": "Ночью",
-          "dominant": false,
-          "weight": 2
+          "dominant": false
         },
         {
           "id": "always",
           "name": "Всегда",
-          "dominant": false,
-          "weight": 1
+          "dominant": false
         }
       ]
     },
@@ -5746,38 +5821,32 @@
         {
           "id": "forest",
           "name": "Лес",
-          "dominant": true,
-          "weight": 5
+          "dominant": true
         },
         {
           "id": "fields",
           "name": "Поля",
-          "dominant": false,
-          "weight": 5
+          "dominant": false
         },
         {
           "id": "caves",
           "name": "Пещеры",
-          "dominant": false,
-          "weight": 3
+          "dominant": false
         },
         {
           "id": "desert",
           "name": "Пустыня",
-          "dominant": false,
-          "weight": 3
+          "dominant": false
         },
         {
           "id": "water",
           "name": "Вода",
-          "dominant": false,
-          "weight": 2
+          "dominant": false
         },
         {
           "id": "space",
           "name": "Космос",
-          "dominant": false,
-          "weight": 1
+          "dominant": false
         }
       ]
     }

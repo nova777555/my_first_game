@@ -2872,6 +2872,12 @@ class HistoryAndStatsTests(FixtureTestCase):
         self.assertEqual(s.history[-1]["turn"], bloated[-1]["turn"])
 
 
+def _first_choice(population, weights=None, k=1):
+    """Подмена random.choices: всегда первый элемент (единственный исход
+    фикстурной мутации, первая аллель пула вида)."""
+    return [population[0]]
+
+
 class GeneticsTests(FixtureTestCase):
     """Фикстура: ТРИ фермы (apiary - обычная, breeding_slots=2, без апгрейдов;
     electric_apiary - на энергии, breeding_slots=1, с апгрейдами breeding_output/
@@ -2949,6 +2955,34 @@ class GeneticsTests(FixtureTestCase):
         self.assertEqual(genotype["species"], ["critter_a", "critter_a"])
         for trait_id in ("lifespan", "output_multiplier", "active_period", "environment"):
             self.assertEqual(genotype[trait_id][0], genotype[trait_id][1])
+
+    def test_wild_genotype_is_rolled_only_from_the_species_gene_pool(self):
+        # critter_b носит от природы только short/fast/night/water (fixtures.py) -
+        # ни одной аллели вне пула, сколько ни лови.
+        for _ in range(30):
+            genotype = engine._roll_wild_genotype("critter_b")
+            self.assertEqual(genotype["lifespan"], ["short", "short"])
+            self.assertEqual(genotype["output_multiplier"], ["fast", "fast"])
+            self.assertEqual(genotype["active_period"], ["night", "night"])
+            self.assertEqual(genotype["environment"], ["water", "water"])
+
+    def test_wild_genotype_follows_pool_weights(self):
+        captured = []
+
+        def spy(population, weights=None, k=1):
+            captured.append(dict(zip(population, weights)))
+            return [population[0]]
+
+        with mock.patch.object(engine.random, "choices", side_effect=spy):
+            engine._roll_wild_genotype("critter_a")
+        self.assertIn({"forest": 3, "fields": 1}, captured)
+
+    def test_species_gene_pool_drops_unknown_alleles_and_falls_back_to_dominant(self):
+        self.addCleanup(engine.SPECIES["critter_a"].__setitem__, "gene_pool", engine.SPECIES["critter_a"]["gene_pool"])
+        engine.SPECIES["critter_a"]["gene_pool"] = {"lifespan": {"no_such": 1, "short": 2, "normal": 0}}
+        self.assertEqual(engine.species_gene_pool("critter_a", "lifespan"), {"short": 2})
+        # Признака нет в пуле - "обычная особь": только доминантные аллели.
+        self.assertEqual(engine.species_gene_pool("critter_a", "active_period"), {"day": 1})
 
     def test_manual_action_with_spawn_species_creates_an_unidentified_creature(self):
         gathered = {**engine.MANUAL_ACTIONS["gather_a"], "spawn_species": "critter_a", "gain": {}}
@@ -3174,7 +3208,9 @@ class GeneticsTests(FixtureTestCase):
         s = GameState(buildings={"crossing_station": 1})
         a = self._spawn(s, "critter_a", lifespan="short")
         b = self._spawn(s, "critter_a", lifespan="normal")
-        with mock.patch.object(engine.random, "choice", side_effect=lambda pair: pair[0]):
+        # 0.99 - мимо фикстурной мутации (chance=0.5): иначе половина генома
+        # пришла бы из пула critter_b.
+        with mock.patch.object(engine.random, "choice", side_effect=lambda pair: pair[0]),                 mock.patch.object(engine.random, "random", return_value=0.99):
             result = engine.breed_creatures(s, a, b)
         self.assertTrue(result.ok, result.message)
         child = next(iter(s.creatures.values()))
@@ -3188,12 +3224,57 @@ class GeneticsTests(FixtureTestCase):
         a, b = self._spawn(s, "critter_a"), self._spawn(s, "critter_a")
         with mock.patch.object(engine.random, "choice", side_effect=lambda pair: pair[0]), \
                 mock.patch.object(engine.random, "random", return_value=0.0), \
-                mock.patch.object(engine.random, "choices", return_value=[{"species_id": "critter_b", "weight": 1}]):
+                mock.patch.object(engine.random, "choices", side_effect=_first_choice):
             result = engine.breed_creatures(s, a, b)
         self.assertTrue(result.ok, result.message)
         self.assertIn("Мутация!", result.message)
         child = next(iter(s.creatures.values()))
         self.assertEqual(child["genotype"]["species"], ["critter_b", "critter_b"])  # чистокровна
+
+    def test_mutation_child_carries_one_allele_per_trait_from_the_new_species_pool(self):
+        # Мутация critter_a x critter_a -> critter_b: у родителей только "обычные"
+        # гены, у critter_b в пуле - только short/fast/night/water. Потомок несёт по
+        # одной аллели из пула нового вида и по одной от родителя.
+        s = GameState(buildings={"crossing_station": 1})
+        a = self._spawn(s, "critter_a")
+        b = self._spawn(s, "critter_a", environment="fields")
+        with mock.patch.object(engine.random, "random", return_value=0.0):
+            result = engine.breed_creatures(s, a, b)
+        self.assertTrue(result.ok, result.message)
+        child = next(iter(s.creatures.values()))
+        genotype = child["genotype"]
+        self.assertEqual(genotype["species"], ["critter_b", "critter_b"])
+        self.assertEqual(genotype["lifespan"], ["short", "normal"])
+        self.assertEqual(genotype["output_multiplier"], ["fast", "normal"])
+        self.assertEqual(genotype["active_period"], ["night", "day"])
+        self.assertEqual(genotype["environment"][0], "water")
+        # Вторая половина - от ОДНОГО родителя целиком (монетка одна на геном).
+        self.assertIn(genotype["environment"][1], ("forest", "fields"))
+
+    def test_cross_without_mutation_takes_no_genes_from_species_pools(self):
+        s = GameState(buildings={"crossing_station": 1})
+        a = self._spawn(s, "critter_a", lifespan="short")
+        b = self._spawn(s, "critter_a", lifespan="short")
+        with mock.patch.object(engine.random, "random", return_value=0.99):
+            engine.breed_creatures(s, a, b)
+        child = next(iter(s.creatures.values()))
+        self.assertEqual(child["genotype"]["lifespan"], ["short", "short"])
+
+    def test_environment_mutation_rerolls_from_the_child_species_pool(self):
+        self.addCleanup(engine.GENETICS_SETTINGS.__setitem__, "environment_mutation_chance", 0.0)
+        engine.GENETICS_SETTINGS["environment_mutation_chance"] = 1.0
+        s = GameState(buildings={"crossing_station": 1})
+        a = self._spawn(s, "critter_b", environment="space")
+        b = self._spawn(s, "critter_b", environment="space")
+        engine.breed_creatures(s, a, b)
+        child = next(iter(s.creatures.values()))
+        self.assertEqual(child["genotype"]["environment"], ["water", "water"])
+
+    def test_species_catalog_exposes_gene_pool_shares(self):
+        catalog = {entry["id"]: entry for entry in engine.species_catalog_view(GameState())}
+        self.assertEqual(catalog["critter_a"]["gene_pool"]["environment"], {"forest": 0.75, "fields": 0.25})
+        self.assertEqual(catalog["critter_b"]["gene_pool"]["lifespan"], {"short": 1.0})
+        self.assertNotIn("species", catalog["critter_a"]["gene_pool"])
 
     def test_mutation_does_not_fire_when_chance_roll_fails(self):
         # chance=0.5 -> отрезок мутации [0, 0.5), остаток [0.5, 1) делится поровну
@@ -3217,7 +3298,7 @@ class GeneticsTests(FixtureTestCase):
         a, b = self._spawn(s, "critter_a"), self._spawn(s, "critter_a")
         with mock.patch.object(engine.random, "choice", side_effect=lambda pair: pair[0]), \
                 mock.patch.object(engine.random, "random", return_value=0.9), \
-                mock.patch.object(engine.random, "choices", return_value=[{"species_id": "critter_b", "weight": 1}]):
+                mock.patch.object(engine.random, "choices", side_effect=_first_choice):
             result = engine.breed_creatures(s, a, b)
         self.assertTrue(result.ok, result.message)
         child = next(iter(s.creatures.values()))

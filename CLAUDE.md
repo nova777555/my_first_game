@@ -261,7 +261,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Исследование за ходы (research_turns, апгрейд лаборатории research_speed) | `engine.py`: `tech_research_turns`, `research()`, `_process_research`, `cancel_research`; `state.active_research`; контент `techs.*.research_turns` + `buildings.*.upgrades[].type == "research_speed"`; `web_ui.html: researchProgressRow/renderResearchPanel`, `.tech-node.researching` |
 | Улучшения построек (типизированные + repeatable) | `engine.py`: `_apply_building_upgrades`, `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `purchase_building_upgrade`, `building_upgrade_prerequisite`, `effective_building_stats`; `web_ui.html: openBuildingUpgradesModal`; `content_editor.html: openBuildingUpgradesEditorModal` |
 | Охота: мобы/боссы, схватка, боевой навык | `engine.py`: `MOBS`, `COMBAT_SKILL_ID`, `search_mob_any`, `summon_boss`, `attack_encounter`, `abandon_encounter`, `_weapon_bonuses`; `state.active_encounter`; `web_ui.py: hunting_view`; `web_ui.html: renderActiveEncounterBlock` |
-| Разведение существ: фермы, скрещивание, генетика, синтез | `engine.py`: `GENOTYPE_TRAIT_IDS`, `MUTATIONS_BY_PAIR`, `trait_alleles`, `_cross_genotype`, `breed_creatures`, `spawn_creature`, `analyze_creature`, `synthesize_creature`, `_ensure_farm_instances`, `_process_habitat`; `state.creatures`/`state.farm_instances`/`state.known_alleles`; контент `species`/`genetic_traits`/`mutations`/`genetics`; `web_ui.html: renderFarmSection`, `renderCreatureBankSection`, `openSpeciesBookModal`, `openBreedingModal`, `openGeneticsLabModal` |
+| Разведение существ: фермы, скрещивание, генетика, синтез | `engine.py`: `GENOTYPE_TRAIT_IDS`, `MUTATIONS_BY_PAIR`, `trait_alleles`, `species_gene_pool`, `_cross_genotype`, `breed_creatures`, `spawn_creature`, `analyze_creature`, `synthesize_creature`, `_ensure_farm_instances`, `_process_habitat`; `state.creatures`/`state.farm_instances`/`state.known_alleles`; контент `species`/`genetic_traits`/`mutations`/`genetics`; `web_ui.html: renderFarmSection`, `renderCreatureBankSection`, `openSpeciesBookModal`, `openBreedingModal`, `openGeneticsLabModal` |
 | Навыки (generic-прокачка, любое число линеек) | `engine.py`: `skill_level`, `skill_level_effects`, `add_skill_xp`, `skills_view`; `state.skill_xp`; контент `skills`; `web_ui.html: openSkillsModal` |
 | Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_kind`, `soul_collector_accepts_kind`, `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `resources.*.soul_kind` + `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: openSoulSynthesizerModal` |
 | Ритуальный круг: ритуалы, сборщики ритуалов | `engine.py`: `ritual_pedestal_capacity`, `is_ritual_recipe_available`, `start_ritual`/`cancel_ritual`, `_process_ritual_jobs`, `building_assembler_capacity`, `ritual_recipe_for_resource`, `_ritual_autocraft_failure`, `_advance_ritual_step`; `state.ritual_jobs`; контент `ritual_recipes` + `buildings.*.ritual_circle` + `autocraft_assembler.building`; `web_ui.py: ritual_altars_view`; `web_ui.html: openRitualCircleModal`, `sourceOrderKey` |
@@ -676,9 +676,9 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 
 Отдельная подсистема (пасеки/фермы существ, менделевское наследование,
 мутации при скрещивании, генетическая лаборатория) — контент `species`
-(один вид = одна аллель признака `"species"`), `genetic_traits` (остальные 4
-признака: `lifespan`/`output_multiplier`/`active_period`/`environment`, общие
-для всех видов), `mutations` (рецепты скрещивания пар видов) и `genetics`
+(один вид = одна аллель признака `"species"`), `genetic_traits` (каталог аллелей
+остальных 4 признаков: `lifespan`/`output_multiplier`/`active_period`/`environment`,
+без весов), `mutations` (рецепты скрещивания пар видов) и `genetics`
 (глобальные настройки: `synthesis_cost`, `environment_mutation_chance`).
 
 - **Особь** (`state.creatures[id]`) — генотип из 5 признаков
@@ -691,6 +691,15 @@ job механизма (`crafting_view: job`), по завершении (`log.m
   построению на каждый признак (`_roll_wild_genotype`) — скрытых генов у
   только что пойманной особи нет, разнообразие появляется только через
   скрещивание/мутацию.
+- **Пул генов вида** (`species.*.gene_pool` = `{признак: {аллель: вес}}`,
+  `engine.species_gene_pool`; прямое пожелание, 2026-09-27) — какие гены вид
+  носит от природы: ради редкого гена нужно добыть вид-носитель, опознать и
+  дальше синтезировать. Валидатор требует пул по всем 4 признакам. Пул читают
+  дикий улов, мутация (потомку-мутанту одна аллель каждой пары — из пула НОВОГО
+  вида, вторая — от одного родителя, как в Forestry) и мутация среды (пул вида
+  потомка). Синтез пул НЕ читает — берёт любое изученное (`known_alleles`).
+  Игроку пул виден в «Книге видов» (`renderSpeciesBookGenes`); редактор —
+  `renderGenePoolEditor`, переименование/удаление аллели протягивается в пулы.
 - **Постройки-фермы** (`buildings.*.breeding_slots > 0`, напр. пасека) имеют
   ИНДИВИДУАЛЬНЫЕ ЭКЗЕМПЛЯРЫ (`state.farm_instances[instance_id]`), НЕ единый
   агрегат по типу — в отличие от большинства остальных построек в игре.
