@@ -6263,14 +6263,20 @@ def cancel_energy_job(state: GameState, index: int) -> ActionResult:
     """Останавливает крафт за энергию немедленно, БЕЗ траты хода, и освобождает
     преобразователь - чтобы игрок, запустивший слишком дорогой по энергии рецепт, не
     был обязан ждать его окончания. Вся энергия, что уже вложена в job["progress"],
-    НЕ возвращается (она уже потрачена по-настоящему - см. _process_energy_jobs);
-    возвращать, помимо неё, нечего - крафт за энергию не резервирует никаких других
-    ресурсов при запуске (см. start_energy_recipe)."""
+    НЕ возвращается (она уже потрачена по-настоящему - см. _process_energy_jobs).
+    Материальная цена рецепта (consumes, списана при запуске) возвращается целиком,
+    как cost у cancel_manual_job; партия заказа возвращает её в резерв своего заказа -
+    иначе заказ перезапускал бы партию без сырья и висел молча."""
     if not isinstance(index, int) or not (0 <= index < len(state.energy_jobs)):
         return ActionResult(False, "Такого крафта за энергию уже нет.")
     job = state.energy_jobs.pop(index)
-    name = ENERGY_RECIPES[job["recipe_id"]]["name"]
-    return ActionResult(True, f"Крафт за энергию «{name}» отменён.")
+    recipe = ENERGY_RECIPES[job["recipe_id"]]
+    # "cost" - материалы, списанные при запуске (нет у рецепта без consumes).
+    refund = job.get("cost", {})
+    order = _find_order(state, job.get("order_id")) if job.get("order_id") is not None else None
+    _gain(order["reserved"] if order is not None else state.resources, refund)
+    suffix = " Материалы возвращены." if refund else ""
+    return ActionResult(True, f"Крафт за энергию «{recipe['name']}» отменён.{suffix}")
 
 
 def start_energy_recipe(state: GameState, recipe_id: str) -> ActionResult:
@@ -6311,7 +6317,10 @@ def start_energy_recipe(state: GameState, recipe_id: str) -> ActionResult:
         deferred = _pay_or_defer(state, consumes, f"крафт «{recipe['name']}»", "start_energy_recipe", recipe_id)
         if deferred is not None:
             return deferred
-    state.energy_jobs.append({"recipe_id": recipe_id, "progress": 0, "building_id": building_id})
+    job = {"recipe_id": recipe_id, "progress": 0, "building_id": building_id}
+    if consumes:
+        job["cost"] = dict(consumes)  # вернуть при отмене (cancel_energy_job)
+    state.energy_jobs.append(job)
     return ActionResult(True, f"Запущен крафт за энергию: {recipe['name']}.")
 
 
@@ -8961,6 +8970,8 @@ def _advance_energy_step(state: GameState, order: dict, step: dict, budgets: dic
         _pay_from_order(state, order, consumes, 1)
         job = {"recipe_id": step["recipe_id"], "progress": 0, "building_id": building_id,
                "order_id": order["id"], "order_resource": step["resource_id"]}
+        if consumes:
+            job["cost"] = dict(consumes)  # вернуть в резерв при отмене (cancel_energy_job)
         state.energy_jobs.append(job)
         running.append(job)
         if per_batch <= 0:

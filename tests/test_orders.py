@@ -461,6 +461,26 @@ class ConverterRecipeOrderTests(OrdersTestCase):
         engine._process_orders(s, engine.ProductionReport(), {})
         self.assertEqual([j["building_id"] for j in s.energy_jobs], ["matter_generator"])
 
+    def test_cancelling_an_order_batch_returns_its_materials_to_the_order(self):
+        s = GameState(
+            resources={"raw_a": 12}, buildings={"matter_generator": 1, "cpu": 1, "e_gen": 1, "e_bank": 1},
+            building_upgrades={"matter_generator": ["matter_auto"]},
+        )
+        self.assertTrue(engine.order_recipe(s, "energy_recipe:upgrade_matter", 1).ok)
+        engine._process_orders(s, engine.ProductionReport(), {})
+        self.assertEqual(s.orders[0]["reserved"].get("raw_a"), 0)
+        self.assertTrue(engine.cancel_energy_job(s, 0).ok)
+        self.assertEqual(s.orders[0]["reserved"]["raw_a"], 5)  # заказ перезапустит партию сам
+        self.assertIsNotNone(self.turns_until_done(s))
+        self.assertEqual((s.resources.get("upgraded_matter"), s.resources["raw_a"]), (1, 7))
+
+    def test_cancelling_a_players_batch_returns_its_materials(self):
+        s = GameState(resources={"raw_a": 12}, buildings={"matter_generator": 1})
+        self.assertTrue(engine.start_energy_recipe(s, "upgrade_matter").ok)
+        self.assertEqual(s.resources["raw_a"], 7)
+        self.assertTrue(engine.cancel_energy_job(s, 0).ok)
+        self.assertEqual((s.resources["raw_a"], s.energy_jobs), (12, []))
+
     def test_random_output_counts_batches_not_units(self):
         s = GameState(resources={"energy": 100}, buildings={"conv_asm": 1, "cpu": 1, "e_bank": 1})
         self.assertTrue(engine.order_recipe(s, "energy_recipe:make_variable", 2).ok)
