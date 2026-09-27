@@ -1700,10 +1700,6 @@
   .ench-circle.locked .core { box-shadow: inset 0 0 0 2px var(--lvl-c, var(--blueprint)), 0 0 20px color-mix(in srgb, var(--lvl-c, var(--blueprint)) 45%, transparent); background: color-mix(in srgb, var(--lvl-c, var(--blueprint)) 12%, var(--bg)); }
   .ench-circle.spinning .core svg { animation: ench-spin-flicker .09s steps(1) infinite; }
   @keyframes ench-spin-flicker { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-  .ench-circle .lvl-badge { position: absolute; bottom: -3px; right: -3px; font-family: Consolas, monospace; font-size: 9px; font-weight: 700;
-    background: var(--modal); border: 1px solid var(--lvl-c, var(--border)); color: var(--lvl-c, var(--muted)); width: 18px; height: 18px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .15s; }
-  .ench-circle.locked .lvl-badge { opacity: 1; }
   .ench-circle.success .core { animation: ench-circle-win-pulse .9s ease-in-out infinite; }
   @keyframes ench-circle-win-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.4); } }
   .ench-circle.fail .core { box-shadow: inset 0 0 0 2px var(--danger), 0 0 18px rgba(224,82,74,.4); }
@@ -7767,6 +7763,13 @@ function lvlColorVar(level) { return level === 1 ? "var(--lvl1)" : level === 2 ?
 function lvlColorRgb(level) { return level === 1 ? "95,208,232" : level === 2 ? "95,208,232" : "240,160,48"; }
 function lvlRoman(level) { return level === 1 ? "I" : level === 2 ? "II" : "III"; }
 
+// Барабан теперь хранит только ТИПЫ (см. game/engine.py: enchantment_pool) -
+// круг во время прокрутки/фиксации больше не несёт уровень, поэтому у него
+// один нейтральный цвет вместо lvlColorVar/lvlColorRgb (те остаются только для
+// мест, где уровень реально есть - применённые зачарования/прогресс "Доступно").
+const ENCH_ROLL_COLOR_VAR = "var(--lvl2)";
+const ENCH_ROLL_COLOR_RGB = "95,208,232";
+
 function openEnchantingModal() {
   const data = VIEW.enchanting;
   closeEnchantingModal();
@@ -7932,7 +7935,7 @@ function renderEnchantingCenter(tool, data) {
     const circle = el("div", { class: "ench-circle", id: `enchCircle${i}` });
     circle.append(
       el("div", { class: "ring" }), el("div", { class: "ring2" }),
-      el("div", { class: "core" }), el("div", { class: "lvl-badge" }),
+      el("div", { class: "core" }),
     );
     slot.appendChild(circle);
     slot.appendChild(el("div", { class: "ench-shock-ring", id: `enchShock${i}` }));
@@ -8105,7 +8108,7 @@ function spinEnchCircle(idx, pool, forced, duration) {
     let steps = 0;
     const tick = () => {
       const pick = pool[Math.floor(Math.random() * pool.length)];
-      setEnchCircleCore(circleEl, pick.enchant_id, lvlColorVar(pick.level));
+      setEnchCircleCore(circleEl, pick.enchant_id, ENCH_ROLL_COLOR_VAR);
       steps++;
       const delay = 50 + steps * 8;
       if (steps * delay < duration) {
@@ -8114,11 +8117,9 @@ function spinEnchCircle(idx, pool, forced, duration) {
       }
       circleEl.classList.remove("spinning");
       circleEl.classList.add("locked");
-      const color = lvlColorVar(forced.level);
+      const color = ENCH_ROLL_COLOR_VAR;
       setEnchCircleCore(circleEl, forced.enchant_id, color);
-      const badge = circleEl.querySelector(".lvl-badge");
-      if (badge) badge.textContent = lvlRoman(forced.level);
-      const rgb = lvlColorRgb(forced.level);
+      const rgb = ENCH_ROLL_COLOR_RGB;
       if (enchantingFx[idx]) { enchantingFx[idx].setAmbientColor(rgb, 500); enchantingFx[idx].burst(rgb, 16, 2.6); }
       playEnchShock(idx, color);
       playEnchChime(idx);
@@ -8148,7 +8149,7 @@ function spinEnchCircle(idx, pool, forced, duration) {
 // перерисовывается ТОЛЬКО в самом конце, когда круги уже отыграли исход.
 async function playEnchantRoll(enchantResult, newState) {
   const tool = VIEW.enchanting.tools.find(t => t.id === enchantResult.tool_id);
-  const pool = tool ? tool.pool.flatMap(g => g.levels.map(lv => ({ enchant_id: g.enchant_id, level: lv.level }))) : [];
+  const pool = tool ? tool.pool.map(g => ({ enchant_id: g.enchant_id })) : [];
   if (pool.length) {
     const glow = document.getElementById("enchAltarGlow");
     if (glow) { glow.style.setProperty("--ench-glow-rgb", "95,208,232"); glow.style.setProperty("--ench-glow-a", ".04"); }
@@ -8159,11 +8160,12 @@ async function playEnchantRoll(enchantResult, newState) {
     await spinEnchCircle(1, pool, circles[1], 900);
 
     // Совпадение решает ТОЛЬКО первый круг vs остальные - если второй уже
-    // разошёлся с первым (id ИЛИ уровень), успех все 3 круга больше
+    // разошёлся с первым (enchant_id, барабан больше не хранит уровень - см.
+    // game/engine.py: enchantment_pool), успех все 3 круга больше
     // математически невозможен. Тянуть искусственную интригу третьего круга
     // незачем - короткая пауза и почти мгновенное раскрытие настоящего
     // символа (duration=0) вместо полноценной прокрутки.
-    const stillInPlay = circles[1].enchant_id === circles[0].enchant_id && circles[1].level === circles[0].level;
+    const stillInPlay = circles[1].enchant_id === circles[0].enchant_id;
     if (stillInPlay) {
       await sleep(220);
       await spinEnchCircle(2, pool, circles[2], 1050);

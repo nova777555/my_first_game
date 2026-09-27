@@ -42,8 +42,9 @@ class EnchantmentPoolTests(FixtureTestCase):
     def test_pool_for_mining_tool_includes_kind_specific_and_universal(self):
         pool = engine.enchantment_pool("pickaxe")
         self.assertEqual({p["enchant_id"] for p in pool}, {"test_luck", "test_durability"})
-        # test_luck - 2 уровня, test_durability - 1 уровень (универсальное) = 3 символа.
-        self.assertEqual(len(pool), 3)
+        # Барабан хранит только ТИПЫ (не разворачивается по уровням) - см.
+        # game/engine.py: enchantment_pool.
+        self.assertEqual(len(pool), 2)
 
     def test_pool_for_weapon_tool_excludes_armor_only_enchants(self):
         pool = engine.enchantment_pool("sword")
@@ -91,9 +92,9 @@ class EnchantToolTests(FixtureTestCase):
         self.assertFalse(result.ok)
         self.assertEqual(s.resources, {})
 
-    def test_success_pays_cost_and_applies_the_matched_enchantment(self):
+    def test_success_pays_cost_and_applies_the_first_level(self):
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5})
-        pick = {"enchant_id": "test_luck", "level": 1, "value": 2.0}
+        pick = {"enchant_id": "test_luck"}
         with mock.patch("random.choice", return_value=pick):
             result = engine.enchant_tool(s, "pickaxe")
         self.assertTrue(result.ok, result.message)
@@ -101,34 +102,46 @@ class EnchantToolTests(FixtureTestCase):
         self.assertEqual(s.tool_enchantments["pickaxe"], {"test_luck": 1})
         self.assertTrue(result.enchant["success"])
         self.assertEqual(result.enchant["applied"], {"enchant_id": "test_luck", "level": 1})
-        self.assertEqual(len(result.enchant["circles"]), 3)
+        self.assertEqual(result.enchant["circles"], [pick, pick, pick])
 
-    def test_success_never_downgrades_an_already_stronger_level(self):
+    def test_success_advances_an_already_owned_enchantment_by_one_level(self):
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
-                       tool_enchantments={"pickaxe": {"test_luck": 2}})
-        pick = {"enchant_id": "test_luck", "level": 1, "value": 2.0}
+                       tool_enchantments={"pickaxe": {"test_luck": 1}})
+        pick = {"enchant_id": "test_luck"}
         with mock.patch("random.choice", return_value=pick):
             result = engine.enchant_tool(s, "pickaxe")
         self.assertTrue(result.enchant["success"])
         self.assertEqual(s.tool_enchantments["pickaxe"], {"test_luck": 2})
+        self.assertEqual(result.enchant["applied"], {"enchant_id": "test_luck", "level": 2})
 
-    def test_matching_a_weaker_enchantment_wins_over_a_stronger_owned_one(self):
-        # Совпадение решает КАКОЕ зачарование сработало - "сильнейшее побеждает"
-        # касается только УРОВНЯ ТОГО ЖЕ зачарования, не выбора между разными id.
+    def test_success_at_the_max_level_does_not_advance_further(self):
+        # test_luck определено во fixtures с 2 уровнями (см. ENCHANTMENTS выше) -
+        # уровень 2 - потолок, дальнейшие совпадения его не поднимают.
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
-                       tool_enchantments={"pickaxe": {"test_durability": 1}})
-        pick = {"enchant_id": "test_luck", "level": 2, "value": 3.0}
+                       tool_enchantments={"pickaxe": {"test_luck": 2}})
+        pick = {"enchant_id": "test_luck"}
         with mock.patch("random.choice", return_value=pick):
             result = engine.enchant_tool(s, "pickaxe")
-        self.assertEqual(s.tool_enchantments["pickaxe"], {"test_durability": 1, "test_luck": 2})
+        self.assertTrue(result.enchant["success"])
+        self.assertEqual(s.tool_enchantments["pickaxe"], {"test_luck": 2})
+        self.assertEqual(result.enchant["applied"], {"enchant_id": "test_luck", "level": 2})
+
+    def test_success_on_a_different_enchant_id_does_not_touch_an_existing_one(self):
+        s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
+                       tool_enchantments={"pickaxe": {"test_durability": 1}})
+        pick = {"enchant_id": "test_luck"}
+        with mock.patch("random.choice", return_value=pick):
+            result = engine.enchant_tool(s, "pickaxe")
+        self.assertTrue(result.enchant["success"])
+        self.assertEqual(s.tool_enchantments["pickaxe"], {"test_durability": 1, "test_luck": 1})
 
     def test_failure_clears_every_enchantment_on_that_tool(self):
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
                        tool_enchantments={"pickaxe": {"test_luck": 2, "test_durability": 1}})
         picks = [
-            {"enchant_id": "test_luck", "level": 1, "value": 2.0},
-            {"enchant_id": "test_luck", "level": 2, "value": 3.0},
-            {"enchant_id": "test_durability", "level": 1, "value": 2.0},
+            {"enchant_id": "test_luck"},
+            {"enchant_id": "test_durability"},
+            {"enchant_id": "test_luck"},
         ]
         with mock.patch("random.choice", side_effect=picks):
             result = engine.enchant_tool(s, "pickaxe")
@@ -141,9 +154,9 @@ class EnchantToolTests(FixtureTestCase):
     def test_failure_on_a_tool_with_no_prior_enchantments_is_a_plain_message(self):
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5})
         picks = [
-            {"enchant_id": "test_luck", "level": 1, "value": 2.0},
-            {"enchant_id": "test_luck", "level": 2, "value": 3.0},
-            {"enchant_id": "test_durability", "level": 1, "value": 2.0},
+            {"enchant_id": "test_luck"},
+            {"enchant_id": "test_durability"},
+            {"enchant_id": "test_luck"},
         ]
         with mock.patch("random.choice", side_effect=picks):
             result = engine.enchant_tool(s, "pickaxe")
@@ -156,9 +169,9 @@ class EnchantToolTests(FixtureTestCase):
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
                        tool_enchantments={"pickaxe": {"test_luck": 2, "test_durability": 1}})
         picks = [
-            {"enchant_id": "test_luck", "level": 1, "value": 2.0},
-            {"enchant_id": "test_luck", "level": 2, "value": 3.0},
-            {"enchant_id": "test_durability", "level": 1, "value": 2.0},
+            {"enchant_id": "test_luck"},
+            {"enchant_id": "test_durability"},
+            {"enchant_id": "test_luck"},
         ]
         with mock.patch.dict(engine.BUILDINGS["ench_table"]["enchanting_table"], {"strip_on_fail": False}), \
                 mock.patch("random.choice", side_effect=picks):
@@ -169,12 +182,12 @@ class EnchantToolTests(FixtureTestCase):
         # Цена попытки всё равно списывается - смягчён только сам исход провала.
         self.assertEqual(s.resources["raw_a"], 4)
 
-    def test_success_still_takes_the_max_level_when_strip_on_fail_is_disabled_in_content(self):
-        # Щадящий режим не трогает ветку удачи - "сильнейшее побеждает" по-прежнему
-        # действует между текущим и выпавшим уровнем.
+    def test_success_still_respects_the_level_cap_when_strip_on_fail_is_disabled_in_content(self):
+        # Щадящий режим правит только ветку провала - ветку удачи (потолок уровня)
+        # он не трогает.
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5},
                        tool_enchantments={"pickaxe": {"test_luck": 2}})
-        pick = {"enchant_id": "test_luck", "level": 1, "value": 2.0}
+        pick = {"enchant_id": "test_luck"}
         with mock.patch.dict(engine.BUILDINGS["ench_table"]["enchanting_table"], {"strip_on_fail": False}), \
                 mock.patch("random.choice", return_value=pick):
             result = engine.enchant_tool(s, "pickaxe")
@@ -183,7 +196,7 @@ class EnchantToolTests(FixtureTestCase):
 
     def test_does_not_advance_the_turn(self):
         s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5}, turn=7)
-        pick = {"enchant_id": "test_luck", "level": 1, "value": 2.0}
+        pick = {"enchant_id": "test_luck"}
         with mock.patch("random.choice", return_value=pick):
             engine.enchant_tool(s, "pickaxe")
         self.assertEqual(s.turn, 7)

@@ -773,8 +773,12 @@ def enchanting_view(state: GameState) -> dict:
     enchantment_pool/enchantable_tools). tools - только линейки с enchant_kind,
     каждая со своим статусом прочности (то же, что tools_view) плюс applied
     (уже наложенные зачарования) и pool (барабан - ЧЕМ ИМЕННО рискует игрок,
-    сгруппировано по зачарованию с уровнями и отметкой reached, для панели
-    "Доступно" справа)."""
+    ОДНА запись на тип зачарования, без разбивки по уровню - см.
+    enchantment_pool: совпадение всех трёх кругов теперь решает только тип, а
+    не тип+уровень). "levels" внутри каждой записи pool - НЕ барабан, а
+    прогресс ПО КОНТЕНТУ (enchantments.*.levels) с отметкой reached, для
+    панели "Доступно" справа - что уже достигнуто и что можно поднять дальше
+    очередным совпадением."""
     applied_by_tool = state.tool_enchantments
     tools = []
     for tool_id in engine.enchantable_tools():
@@ -786,14 +790,13 @@ def enchanting_view(state: GameState) -> dict:
         for entry in engine.enchantment_pool(tool_id):
             eid = entry["enchant_id"]
             ench = ENCHANTMENTS[eid]
-            group = pool_by_enchant.setdefault(eid, {
+            pool_by_enchant[eid] = {
                 "enchant_id": eid, "name": ench["name"], "description": ench.get("description", ""),
-                "levels": [],
-            })
-            group["levels"].append({
-                "level": entry["level"], "value": entry["value"],
-                "reached": own_applied.get(eid, 0) >= entry["level"],
-            })
+                "levels": [
+                    {"level": i, "value": lvl.get("value"), "reached": own_applied.get(eid, 0) >= i}
+                    for i, lvl in enumerate(ench.get("levels", []), start=1)
+                ],
+            }
         tools.append({
             "id": tool_id, "name": tool["name"], "kind": tool.get("enchant_kind"),
             "tier": engine.tool_tier(state, tool_id), "tier_name": engine.tool_tier_name(state, tool_id),

@@ -3874,12 +3874,15 @@ def _enchant_effect_value(state: GameState, tool_id: str, effect_type: str, defa
 
 
 def enchantment_pool(tool_id: str) -> list[dict]:
-    """Все (enchant_id, level, value) зачарования, доступные ДЛЯ ЭТОГО инструмента -
-    те, чей applies_to_kind совпадает с tools.*.enchant_kind этой линейки, плюс
+    """Все ТИПЫ зачарований, доступные ДЛЯ ЭТОГО инструмента - те, чей
+    applies_to_kind совпадает с tools.*.enchant_kind этой линейки, плюс
     универсальные (applies_to_kind is None, например "Прочность"). Пусто, если у
     инструмента вовсе нет enchant_kind (не зачаровываемый) - см. content.json
     tools.*.enchant_kind. Это и есть "барабан" трёх магических кругов
-    (enchant_tool) - порядок совпадает с ENCHANTMENTS/levels в контенте."""
+    (enchant_tool) - порядок совпадает с ENCHANTMENTS в контенте. ОДНА запись на
+    enchant_id (не на уровень - см. enchant_tool: совпадение всех трёх кругов
+    решает только ТИП, конкретный уровень значения тут не участвует, поэтому
+    уровни зачарования сюда не разворачиваются)."""
     kind = TOOLS.get(tool_id, {}).get("enchant_kind")
     if kind is None:
         return []
@@ -3888,8 +3891,9 @@ def enchantment_pool(tool_id: str) -> list[dict]:
         applies_to_kind = enchant.get("applies_to_kind")
         if applies_to_kind is not None and applies_to_kind != kind:
             continue
-        for i, lvl in enumerate(enchant.get("levels", []), start=1):
-            pool.append({"enchant_id": enchant_id, "level": i, "value": lvl.get("value")})
+        if not enchant.get("levels"):
+            continue
+        pool.append({"enchant_id": enchant_id})
     return pool
 
 
@@ -3940,8 +3944,10 @@ def _roll_enchant_circles(pool: list[dict]) -> list[dict]:
     """Три круга - три НЕЗАВИСИМЫХ равновероятных броска по всему барабану
     (enchantment_pool), без корреляции между ними (в отличие от демо-мокапа,
     который специально подыгрывал совпадениям ради наглядности - здесь честная
-    механика). Совпадение всех трёх (enchant_id И level) - удача, которую игрок
-    видит РЕДКО, если барабан большой."""
+    механика). Совпадение всех трёх (один и тот же ТИП зачарования, без учёта
+    уровня - см. enchant_tool) - удача, которую игрок видит РЕДКО, если барабан
+    большой, но не исчезающе редко: типов в барабане меньше, чем было бы
+    (тип x уровень) комбинаций, поэтому шанс совпадения заметно выше."""
     return [random.choice(pool) for _ in range(3)]
 
 
@@ -3951,10 +3957,14 @@ def enchant_tool(state: GameState, tool_id: str) -> ActionResult:
     же принцип, что claim_quest_reward/_roll_loot_case_prize - сервер бросает
     кости один раз, ActionResult.enchant несёт уже готовый результат для
     анимации, а не семя для клиента). Успех (все 3 круга показали ОДИНАКОВЫЙ
-    enchant_id И level) применяет его - см. tool_enchant_level/_enchant_effect_value,
-    никогда не ПОНИЖАЕТ уже стоящий более сильный уровень того же зачарования.
-    Провал при buildings.*.enchanting_table.strip_on_fail (дефолт, старое
-    поведение - настройка КОНТЕНТА, правит автор через редактор, не игрок, см.
+    enchant_id - барабан хранит только ТИПЫ, см. enchantment_pool, конкретный
+    уровень в розыгрыше не участвует) поднимает уровень ЭТОГО зачарования на
+    инструменте РОВНО НА ОДИН (не был - становится 1, был 1 - становится 2 и
+    т.д. - см. tool_enchant_level/_enchant_effect_value), не выше максимального
+    уровня из content.json enchantments.*.levels; успех на уже максимальном
+    уровне просто ничего не меняет (потолок, не откат). Провал при
+    buildings.*.enchanting_table.strip_on_fail (дефолт, старое поведение -
+    настройка КОНТЕНТА, правит автор через редактор, не игрок, см.
     enchanting_table_strip_on_fail) СНИМАЕТ с инструмента ВСЕ его зачарования
     разом; с выключенным флагом провал просто ничего не даёт - зачарования
     остаются как были. Не тратит ход - это манипуляция с предметом, как
@@ -3977,16 +3987,21 @@ def enchant_tool(state: GameState, tool_id: str) -> ActionResult:
 
     circles = _roll_enchant_circles(pool)
     first = circles[0]
-    success = all(c["enchant_id"] == first["enchant_id"] and c["level"] == first["level"] for c in circles)
-    circles_out = [{"enchant_id": c["enchant_id"], "level": c["level"]} for c in circles]
+    success = all(c["enchant_id"] == first["enchant_id"] for c in circles)
+    circles_out = [{"enchant_id": c["enchant_id"]} for c in circles]
 
     if success:
-        enchant_id, level = first["enchant_id"], first["level"]
+        enchant_id = first["enchant_id"]
         enchant_name = ENCHANTMENTS[enchant_id]["name"]
+        max_level = len(ENCHANTMENTS[enchant_id].get("levels", []))
         applied = state.tool_enchantments.setdefault(tool_id, {})
-        new_level = max(applied.get(enchant_id, 0), level)
+        current_level = applied.get(enchant_id, 0)
+        new_level = min(current_level + 1, max_level) if max_level else current_level
         applied[enchant_id] = new_level
-        message = f"«{tool_name}» зачарован: {enchant_name} {level}."
+        if new_level > current_level:
+            message = f"«{tool_name}» зачарован: {enchant_name} {new_level}."
+        else:
+            message = f"«{tool_name}»: {enchant_name} уже на максимальном уровне."
         result = {"tool_id": tool_id, "circles": circles_out, "success": True,
                   "applied": {"enchant_id": enchant_id, "level": new_level}}
     else:
