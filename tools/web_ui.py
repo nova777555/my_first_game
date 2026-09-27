@@ -23,6 +23,7 @@ import re
 import sys
 import threading
 import time
+import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -148,13 +149,42 @@ def _migrate_legacy_save() -> None:
     _LEGACY_SAVE_PATH.replace(SAVE_PATH)
 
 
+# Что игрок должен узнать о загрузке автосейва (он был битым и отложен в копию) -
+# отдаётся ОДИН раз, первым /api/state (build_view не трогает, см. do_GET).
+LOAD_NOTICE: str | None = None
+
+
+def _set_aside_autosave() -> Path:
+    """Откладывает текущий автосейв в копию рядом (не удаляет) - она видна в
+    «Открыть» как обычное сохранение, её можно вернуть, когда причина устранена."""
+    SAVES_DIR.mkdir(exist_ok=True)
+    backup = SAVES_DIR / f"autosave.broken-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    SAVE_PATH.replace(backup)
+    return backup
+
+
+def read_save(path: Path) -> GameState:
+    """Сохранение с диска - уже очищенное от ссылок на удалённый контент."""
+    state = GameState.load(str(path))
+    engine.drop_removed_content(state)
+    return state
+
+
 def load_state() -> GameState:
+    global LOAD_NOTICE
     _migrate_legacy_save()
-    if SAVE_PATH.exists():
-        state = GameState.load(str(SAVE_PATH))
-        engine.drop_removed_content(state)
-        return state
-    return GameState()
+    if not SAVE_PATH.exists():
+        return GameState()
+    try:
+        return read_save(SAVE_PATH)
+    except Exception as e:  # битый файл не должен мешать запуску: игрок увидит пустое окно
+        traceback.print_exc()
+        backup = _set_aside_autosave()
+        LOAD_NOTICE = (
+            f"Автосейв не удалось прочитать ({type(e).__name__}: {e}) - начата новая игра. "
+            f"Старый файл не удалён: он лежит в сохранениях под именем «{backup.stem}»."
+        )
+        return GameState()
 
 
 def save_state(state: GameState) -> None:
@@ -218,7 +248,7 @@ def cost_list(cost: dict, state: GameState | None = None) -> list[dict]:
     каком месте его вообще стоит рисовать кликабельным (см. costChip в
     web_ui.html), лишнее поле в остальных местах просто игнорируется."""
     jump = _recipe_board_jump(state)
-    return [{"id": r, "name": RESOURCE_NAMES[r], "amount": a, "jump_to": jump.get(r)} for r, a in cost.items()]
+    return [{"id": r, "name": RESOURCE_NAMES.get(r, r), "amount": a, "jump_to": jump.get(r)} for r, a in cost.items()]
 
 
 def manual_action_cost_list(cost: dict, cost_chance: dict, state: GameState) -> list[dict]:
@@ -3358,9 +3388,19 @@ def _preview_payload(state: GameState, preview: dict) -> dict:
 STATE = load_state()
 
 
+# Запросы, меняющие STATE, идут по одному: снимок до запроса и откат после ошибки не
+# должны перемешаться с чужим запросом (сервер многопоточный).
+_STATE_LOCK = threading.RLock()
+# Служебные запросы без изменения партии - без снимка и без очереди.
+_UNGUARDED_POSTS = {"/api/heartbeat", "/api/shutdown"}
+
+
 class Handler(BaseHTTPRequestHandler):
+    _status: int | None = None
+
     def _json(self, status: int, payload) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self._status = status  # после сборки тела: с этого места ответ уже отправляется
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -3383,7 +3423,17 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/api/state":
-            self._json(200, build_view(STATE))
+            global LOAD_NOTICE
+            try:
+                view = build_view(STATE)
+            except Exception as e:
+                # Иначе страница осталась бы пустой без объяснений (см. loadState).
+                traceback.print_exc()
+                self._json(500, {"error": f"{type(e).__name__}: {e}"})
+                return
+            if LOAD_NOTICE:
+                view["load_notice"], LOAD_NOTICE = LOAD_NOTICE, None
+            self._json(200, view)
         elif self.path == "/api/saves":
             self._json(200, {"saves": list_saves()})
         elif self.path == "/api/sources_summary":
@@ -3412,6 +3462,35 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        """Ход применяется целиком или никак: исключение посреди действия (ошибка в
+        движке) или отказ-ошибка (4xx) откатывают STATE к снимку до запроса - иначе
+        следующий клик продолжил бы с наполовину применённого хода и сохранил его."""
+        global STATE
+        if self.path in _UNGUARDED_POSTS:
+            self._handle_post()
+            return
+        with _STATE_LOCK:
+            snapshot = json.dumps(STATE.to_dict())
+            try:
+                self._handle_post()
+            except Exception as e:
+                traceback.print_exc()
+                if self._status is not None:
+                    return  # ответ уже ушёл (оборвалась связь при отправке) - действие состоялось
+                STATE = GameState.from_dict(json.loads(snapshot))
+                save_state(STATE)  # на случай, если ход успел записаться до ошибки
+                message = f"Ошибка в движке - действие отменено ({type(e).__name__}: {e})."
+                payload = {"error": message, "ok": False, "message": message}
+                try:
+                    payload["state"] = build_view(STATE)
+                except Exception:
+                    traceback.print_exc()
+                self._json(500, payload)
+                return
+            if self._status is not None and self._status >= 400:
+                STATE = GameState.from_dict(json.loads(snapshot))
+
+    def _handle_post(self) -> None:
         global STATE, _LAST_ENERGY_SHORTFALL
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b""
@@ -3432,7 +3511,8 @@ class Handler(BaseHTTPRequestHandler):
                 scale = int(raw_scale) if raw_scale is not None else None
                 log = run_turn(STATE, payload.get("type"), payload.get("id"), scale=scale, qte_hit=payload.get("qte") is True)
             except (KeyError, ValueError) as e:
-                self._json(400, {"error": str(e)})
+                # Откат хода - в do_POST (ответ 4xx).
+                self._json(400, {"error": f"Действие отменено: {type(e).__name__}: {e}"})
                 return
             self._json(200, {"log": log, "state": build_view(STATE)})
         elif self.path == "/api/autocraft_preview":
@@ -3795,6 +3875,10 @@ class Handler(BaseHTTPRequestHandler):
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/reset":
+            # keep_copy - «Начать заново» с экрана ошибки: сейв, который не открылся,
+            # не затирается, а откладывается в копию.
+            if payload.get("keep_copy") and SAVE_PATH.exists():
+                _set_aside_autosave()
             STATE = GameState()
             _LAST_ENERGY_SHORTFALL = {}
             save_state(STATE)
@@ -3824,8 +3908,14 @@ class Handler(BaseHTTPRequestHandler):
             if path is None or not path.exists():
                 self._json(404, {"error": "Такого сохранения нет."})
                 return
-            STATE = GameState.load(str(path))
-            engine.drop_removed_content(STATE)
+            try:
+                loaded = read_save(path)
+                build_view(loaded)
+            except Exception as e:
+                traceback.print_exc()
+                self._json(400, {"error": f"Сохранение «{name}» не открывается ({type(e).__name__}: {e})."})
+                return
+            STATE = loaded
             STATE.save_name = name  # имя определяется выбранным слотом, а не тем, что лежало в файле
             _LAST_ENERGY_SHORTFALL = {}  # снимок относится к предыдущей партии, а не к загруженной
             save_state(STATE)  # загруженное сохранение становится текущим автосохранением

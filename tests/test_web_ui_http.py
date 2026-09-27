@@ -1798,6 +1798,65 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertFalse(resp["ok"])
 
+    def test_engine_error_mid_turn_rolls_the_whole_action_back(self):
+        # Действие прошло, ход упал посреди - ни ресурсов действия, ни номера хода.
+        web_ui.STATE = GameState(resources={"raw_a": 1})
+        with mock.patch.object(engine, "check_quests", side_effect=RuntimeError("сломано")):
+            status, resp = self._post("/api/action", {"type": "manual", "id": "gather_a"})
+        self.assertEqual(status, 500)
+        self.assertFalse(resp["ok"])
+        self.assertIn("действие отменено", resp["error"])
+        self.assertEqual((web_ui.STATE.turn, web_ui.STATE.resources), (1, {"raw_a": 1}))
+        self.assertEqual(resp["state"]["turn"], 1)
+        # Следующий клик работает как обычно.
+        status, resp = self._post("/api/action", {"type": "manual", "id": "gather_a"})
+        self.assertEqual((status, web_ui.STATE.turn, web_ui.STATE.resources["raw_a"]), (200, 2, 4))
+
+    def test_bad_request_leaves_state_untouched(self):
+        web_ui.STATE = GameState(resources={"raw_a": 1})
+        with mock.patch.object(engine, "advance_turn", side_effect=KeyError("сломано")):
+            status, resp = self._post("/api/action", {"type": "manual", "id": "gather_a"})
+        self.assertEqual(status, 400)
+        self.assertIn("Действие отменено", resp["error"])
+        self.assertEqual(web_ui.STATE.resources, {"raw_a": 1})
+
+    def test_state_that_cannot_be_shown_reports_an_error(self):
+        with mock.patch.object(web_ui, "build_view", side_effect=KeyError("old_mob")):
+            status, resp = self._get("/api/state")
+        self.assertEqual(status, 500)
+        self.assertIn("old_mob", resp["error"])
+
+    def test_broken_autosave_is_set_aside_and_a_new_game_starts(self):
+        web_ui.SAVE_PATH.write_text("{битый", encoding="utf-8")
+        state = web_ui.load_state()
+        self.assertEqual(state.turn, 1)
+        self.assertFalse(web_ui.SAVE_PATH.exists())
+        backups = list(web_ui.SAVES_DIR.glob("autosave.broken-*.json"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), "{битый")
+        self.assertIn(backups[0].stem, web_ui.LOAD_NOTICE)
+        # Сообщение - один раз, первым запросом состояния.
+        status, view = self._get("/api/state")
+        self.assertIn(backups[0].stem, view["load_notice"])
+        status, view = self._get("/api/state")
+        self.assertNotIn("load_notice", view)
+
+    def test_reset_with_keep_copy_sets_the_autosave_aside(self):
+        GameState(turn=40).save(str(web_ui.SAVE_PATH))
+        status, resp = self._post("/api/reset", {"keep_copy": True})
+        self.assertEqual((status, resp["state"]["turn"]), (200, 1))
+        backups = list(web_ui.SAVES_DIR.glob("autosave.broken-*.json"))
+        self.assertEqual(GameState.load(str(backups[0])).turn, 40)
+
+    def test_broken_named_save_does_not_replace_the_current_game(self):
+        web_ui.STATE = GameState(turn=7)
+        web_ui.SAVES_DIR.mkdir(exist_ok=True)
+        (web_ui.SAVES_DIR / "битый.json").write_text("[]", encoding="utf-8")
+        status, resp = self._post("/api/saves/load", {"name": "битый"})
+        self.assertEqual(status, 400)
+        self.assertIn("не открывается", resp["error"])
+        self.assertEqual(web_ui.STATE.turn, 7)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -587,6 +587,8 @@
     background-size: 17px 17px; animation: job-bar-stripes 1s linear infinite;
   }
   #loadingOverlay .loading-label { font-size: 12px; color: var(--muted); }
+  #loadingOverlay.load-error .loading-bar { display: none; }
+  #loadingOverlay.load-error .loading-label { max-width: 520px; text-align: center; font-size: 13px; color: var(--danger); }
   /* Каркас "Чертёж" - 1:1 порт из канваса (design-канвас, вариант B), см.
      CLAUDE.md. Скобки - НАСТОЯЩИЕ 4 div'а (не CSS-трюк с фоновыми градиентами),
      чтобы совпадать с канвасом побитово; вставляются автоматически в ЛЮБОЙ
@@ -3787,15 +3789,56 @@ function nextPaint() {
 async function loadState() {
   const overlay = document.getElementById("loadingOverlay");
   const label = document.getElementById("loadingLabel");
+  let error = null;
   try {
     const res = await fetch("/api/state");
-    VIEW = await res.json();
+    const payload = await res.json();
+    if (!res.ok) {
+      error = payload.error || "Ошибка запроса.";
+      return;
+    }
+    VIEW = payload;
     label.textContent = "Отрисовка интерфейса...";
     await nextPaint();
     setupBackgroundMusic();
     renderAll();
+  } catch (e) {
+    error = String(e && e.message || e);
   } finally {
-    overlay.classList.add("hidden");
+    if (error) showLoadError(error);
+    else overlay.classList.add("hidden");
+  }
+  if (VIEW && VIEW.load_notice) {
+    confirmModal(VIEW.load_notice, { title: "Автосейв повреждён", confirmText: "Понятно", cancelText: null });
+  }
+}
+
+// Экран загрузки остаётся, но вместо полосы - что сломалось и выход: новая игра,
+// а сейв, который не открылся, не затирается, а откладывается в копию (/api/reset
+// keep_copy). Страница не перезагружается - уход со страницы гасит сервер.
+function showLoadError(error) {
+  const overlay = document.getElementById("loadingOverlay");
+  overlay.classList.remove("hidden");
+  overlay.classList.add("load-error");
+  document.getElementById("loadingLabel").textContent =
+    "Игра не смогла открыть сохранение: " + error +
+    ". Скорее всего, в контенте удалено или изменено то, на что ссылается сейв.";
+  let restart = document.getElementById("loadErrorRestart");
+  if (!restart) {
+    restart = el("button", {
+      id: "loadErrorRestart", class: "primary", text: "Начать новую игру (сейв сохранится копией)",
+      onclick: async () => {
+        restart.disabled = true;
+        await fetch("/api/reset", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keep_copy: true }),
+        });
+        overlay.classList.remove("load-error");
+        document.getElementById("loadingLabel").textContent = "Загрузка сохранения...";
+        restart.remove();
+        loadState();
+      },
+    });
+    overlay.appendChild(restart);
   }
 }
 
@@ -4029,9 +4072,10 @@ function confirmModal(message, { title = "Подтверждение", confirmTe
     function onKeydown(e) { if (e.key === "Escape") finish(false); }
     document.addEventListener("keydown", onKeydown);
 
-    const cancelBtn = el("button", { text: cancelText, onclick: () => finish(false) });
+    // cancelText: null - просто сообщение с одной кнопкой.
+    const cancelBtn = cancelText ? el("button", { text: cancelText, onclick: () => finish(false) }) : null;
     const confirmBtn = el("button", { class: danger ? "danger" : "primary", text: confirmText, onclick: () => finish(true) });
-    modal.appendChild(el("div", { class: "confirm-modal-footer" }, [cancelBtn, confirmBtn]));
+    modal.appendChild(el("div", { class: "confirm-modal-footer" }, [cancelBtn, confirmBtn].filter(Boolean)));
 
     overlay.addEventListener("click", (e) => { if (e.target === overlay) finish(false); });
     overlay.appendChild(modal);
