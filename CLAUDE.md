@@ -84,7 +84,8 @@ tools/content_validation.py    - validate(dict) -> [errors]; тоже НЕ им�
 
 Generic-поля построек (есть у ЛЮБОЙ постройки, не завязаны на конкретный id):
 `description` (обязательна, валидируется строго), `cost`/`produces`/`consumes`/
-`repair_cost`, `breakdown_chance`, `energy_storage` (ёмкость хранилища ОДНОЙ
+`repair_cost`, `location` (+ `pattern`/`pattern_mirror` — где собирается, см.
+«Постройки собираются в механизмах»), `breakdown_chance`, `energy_storage` (ёмкость хранилища ОДНОЙ
 копии), `active_period` (`null`/`day`/`night`), `compute_power` (процессор:
 максимальный размер ОДНОГО заказа автокрафта), `autocraft_slots` (доп. заказы
 одновременно), `autocraft_assembler` (`{location | building, per_turn}` — сборщик
@@ -186,6 +187,25 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 (`openConverterModal`, `VIEW.categories.converter` — туда НЕ попадают рецепты,
 собираемые в сетке). Автокрафт/автоматизатор узор не читают.
 
+**Постройки собираются в механизмах** (прямое пожелание, 2026-09-27): вкладки
+«Построить» и `categories.build` больше нет. `buildings.*.location` — механизм
+(локация с `crafting`), крафт в нём сразу ставит постройку через тот же
+`engine.build()` (этапы, `max_count`, докрафт заказом — как раньше); ключ рецепта
+`building:<id>` (`grid_recipe_key`), заказать «×N» нельзя. На сетке нужен
+`pattern` (слой над `cost`, общая таблица форм); **сборщик** —
+`crafting.stacks: true`: форма не важна, ячейка — стопка `{id, amount}`, рецепт
+узнаётся по набору стопок, РОВНО равному цене без энергии (`_normalize_stacks`/
+`_stacks_match` ↔ `web_ui.html: craftGridStacksMatch`), одинаковые цены в одном
+сборщике — ошибка валидации; там же живут и ручные действия без узора
+(`is_grid_action`). Многоэтапная постройка — только в сборщике (матчится цена
+текущего этапа). В справочнике постройка — id `building:<id>` (`building_item_id`,
+`building_sources`; на складе такого id нет). Без `location` постройку в игре не
+поставить — валидатор молчит, редактор показывает плашку, а
+`test_building_crafting.RealContentBuildingsTests` требует `location` у всех
+построек реального контента. Реальный контент: «Сборочный стол» (3×2, стопки)
+собирается на верстаке, все остальные постройки — в нём, кроме отладочных
+`wood_generator`/`lumber_camp` на верстаке.
+
 Модалка механизма (`openCraftGridModal`, одна на ЛЮБУЮ локацию с `crafting`) и
 склад (`openStorage`, по прямому пожеланию) — три колонки: закреплённые
 рецепты | сетка/склад | справочник. Панели рецептов есть ТОЛЬКО там и в модалке
@@ -263,7 +283,8 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Генератор материи и репликатор (постройка «на излишках энергии»; материя -> любой ресурс с ценой за шт., лимит материи за ход, модалка, источник автокрафта) | `engine.py`: проход `surplus_consumers` в `advance_turn`, `energy_breakdown(include_surplus_only=)`, `replicate`, `_process_replicator_jobs`, `cancel_replicator_job`, `replication_matter_cost`, `replicator_max_matter_per_turn`, `replication_storage_free`, `_autocraft_replicator_building`, `_advance_replicate_step`, `replicator_eta_turns`; `state.replicator_jobs`; контент `buildings.*.replicator`/`energy_surplus_only` + `resources.*.replication_cost` (`content.py: RESOURCE_REPLICATION_COST`) + апгрейд `replicator_throughput`; `web_ui.py`: `replicator_view`, тип действия `replicate` (`"<ресурс>:<кол-во>"`), `cancel_job kind=replicator`, источник `kind: replicator`; `web_ui.html: openReplicatorModal`; тесты `tests/test_replicator.py` |
 | Крафт из энергии (преобразователь) | контент `energy_recipes` (+ необязательные `machine`/`consumes`/`pattern`) + `buildings.*.energy_converter`; `engine.py`: `CONVERTER_LOCATION_ID`, `start_energy_recipe`, `_process_energy_jobs`, `energy_converter_capacity`/`_max_energy_per_turn(state, building_id)`; сетка слотов — `grid_energy_recipes_at`, `match_grid_target`, `grid_recipe_key`; `web_ui.py: _energy_grid_recipe_view`/`_converter_jobs_view`; `web_ui.html: craftGridEnergyRow` |
 | Энергосистема: несколько типов машин + приоритеты | `engine.py`: `energy_converter_building_types`, `energy_priority`/`set_energy_priority`, `ProductionReport.energy_shortfall`; контент `buildings.*.energy_priority`; `web_ui.html: openPrioritiesModal` (вкладка "Энергосистема") |
-| Многоэтапное строительство | контент `buildings.*.construction_stages`; `engine.py`: `current_construction_stage`, `state.construction_progress` |
+| Многоэтапное строительство | контент `buildings.*.construction_stages`; `engine.py`: `current_construction_stage`, `building_recipe_cost`, `state.construction_progress` |
+| Сборка построек в механизмах, сборщик (стопки без формы) | `engine.py`: `location_stacks`, `grid_buildings_at`, `building_pattern`, `_normalize_stacks`/`_stacks_match`, `match_grid_target` (kind `building`), `BUILDING_KEY_PREFIX`; `web_ui.py`: `_building_grid_recipe_view`, `building_sources`, `building_item_id`, `craft_grid_view` (→ `build`); `web_ui.html`: `craftGridStackAdd`/`craftGridStackTake`, `craftGridRecipeLayout`, `sourcesStacksVisual`; `content_editor.html`: `buildingPatternOpts`, «Где собирается», флаг «сборщик» в `craftingGridRow`; тесты `tests/test_building_crafting.py` |
 | Многоходовые ручные действия | контент `manual_actions.*.duration_turns`; `engine.py`: `do_manual_action`, `_process_manual_jobs`, `cancel_manual_job`; `state.manual_jobs`; `web_ui.html: manualJobProgressRow` (прогресс + отмена и на карточке действия, и в панели «Долгие действия») |
 | Задержка после клика (антиавтокликер, клиент-онли) | контент `ui.default_action_delay_ms` + `click_delay_ms`; `web_ui.html`: `tryRunAction`/`applyCooldownVisual` |
 | Звук: пресеты, кастомные файлы (действия + ритуалы + 3 глобальных слота), громкость | контент `manual_actions.*.sound`/`ritual_recipes.*.sound` + `ui.sounds` (`background_music`/`lootbox_open`/`button_click`); `web_ui.html`: `SOUND_PRESETS`, `playSound`/`playCustomSound`/`playGlobalSound`, `_sfxVolume`/`_musicVolume`; `web_ui.py`: `sound_url`, `SOUNDS_DIR`; `content_editor.html`: `soundRow` (вызывается и на карточке ручного действия, и на карточке ритуала), вкладка «Настройки» |
