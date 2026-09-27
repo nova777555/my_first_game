@@ -7176,8 +7176,9 @@ def house_creature(state: GameState, creature_id: str, farm_instance_id: str) ->
         return ActionResult(False, f"«{name}» не подходит для «{BUILDINGS[building_id]['name']}».")
     if farm_instance_slots_used(state, farm_instance_id) >= farm_instance_slot_capacity(state, farm_instance_id):
         return ActionResult(False, "Все слоты этой фермы заняты.")
+    # Возраст - свойство особи: переселение его не обнуляет (иначе «выселить и
+    # заселить обратно» давало бы бессмертие без улучшения breeding_immortality).
     creature["farm_instance_id"] = farm_instance_id
-    creature["turns_alive"] = 0
     return ActionResult(True, f"«{name}» поселён(а) в «{BUILDINGS[building_id]['name']}».")
 
 

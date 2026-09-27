@@ -3212,6 +3212,18 @@ class GeneticsTests(FixtureTestCase):
         self.assertTrue(result.ok, result.message)
         self.assertIsNone(s.creatures[cid]["farm_instance_id"])
 
+    def test_rehousing_keeps_the_creature_age(self):
+        # «Выселить и заселить обратно» не молодит особь - иначе это бессмертие
+        # без улучшения breeding_immortality.
+        s = GameState(buildings={"apiary": 1})
+        cid = self._spawn(s, "critter_a")
+        instance_id = self._farm_instance(s, "apiary")
+        engine.house_creature(s, cid, instance_id)
+        s.creatures[cid]["turns_alive"] = 11
+        engine.release_creature(s, cid)
+        engine.house_creature(s, cid, instance_id)
+        self.assertEqual(s.creatures[cid]["turns_alive"], 11)
+
     def test_release_creature_fails_when_not_housed_or_unknown(self):
         s = GameState()
         cid = self._spawn(s, "critter_a")
