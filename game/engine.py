@@ -1830,6 +1830,9 @@ def _place_order(
         "final_energy": final_energy,
         "status": None, "waits_energy": False,
         "output": {r: a for r, a in (output or {}).items() if storage_capacity(state, r) is not None},
+        # итоговые ресурсы целиком (output выше - только те, что упираются в склад): по ним
+        # финал заказа «рецепт ×N» отличает результат от остатков (report.orders_finished)
+        "results": list(output or {}),
     }
     if extra:
         order.update(extra)
@@ -7879,6 +7882,8 @@ class ProductionReport:
     autocraft_completed: list[str] = field(default_factory=list)  # resource_id фоновых задач, завершившихся в этот ход
     manual_completed: list[str] = field(default_factory=list)  # action_id многоходовых ручных действий, завершившихся в этот ход
     pending_finished: list[str] = field(default_factory=list)  # label отложенных действий, завершившихся в этот ход
+    # те же заказы подробно (_report_order_finished): что выдано на склад - для уведомления в UI
+    orders_finished: list[dict] = field(default_factory=list)
     habitat_died: dict[str, int] = field(default_factory=dict)  # species_id -> сколько особей умерло от старости в этот ход
     # building_id (тип энергетической машины) -> на сколько энергии её активным
     # job'ам не хватило в этот ход (сумма по всем её job'ам: сколько они МОГЛИ БЫ
@@ -8953,8 +8958,13 @@ def _finalize_order(state: GameState, order: dict, report: ProductionReport) -> 
     (игрок видит причину и может отменить)."""
     if order["kind"] == "recipe":
         state.orders.remove(order)
-        _gain(state.resources, order["reserved"])
+        reserved = order["reserved"]
+        _gain(state.resources, reserved)
         report.pending_finished.append(order["label"])
+        # результат - итоговые ресурсы рецепта; у заказа из старого сохранения без
+        # "results" - всё, что ушло на склад
+        results = order.get("results") or list(reserved)
+        _report_order_finished(report, order, {r: reserved[r] for r in results if reserved.get(r, 0) > 0})
         return
     if state.resources.get(ENERGY_RESOURCE_ID, 0) < order.get("final_energy", 0):
         order["status"], order["waits_energy"] = "ждёт энергию", True
@@ -8963,9 +8973,12 @@ def _finalize_order(state: GameState, order: dict, report: ProductionReport) -> 
     state.orders.remove(order)
     reserved = order["reserved"]
     _gain(state.resources, reserved)
+    before = dict(state.resources)
     result = _ORDER_RETRY[order["kind"]](state, order)
     if result.ok and not result.pending:
         report.pending_finished.append(order["label"])
+        gained = {r: a - before.get(r, 0) for r, a in state.resources.items() if a > before.get(r, 0)}
+        _report_order_finished(report, order, gained)
         return
     if result.ok:
         return  # действие оформило себе новый заказ (например, цена выросла)
@@ -8978,6 +8991,17 @@ def _finalize_order(state: GameState, order: dict, report: ProductionReport) -> 
     order["reserved"] = back
     order["status"], order["waits_energy"] = result.message, False
     state.orders.insert(index, order)
+
+
+def _report_order_finished(report: ProductionReport, order: dict, gained: dict) -> None:
+    """Запись в report.orders_finished: UI показывает по ней, что заказ готов, - иначе
+    заказ, выполненный в тот же ход, исчезал бы молча (прогресс в панели «Заказы» он
+    не успевает показать). autocraft - были ли у заказа шаги автокрафта: заказ клика,
+    который ждал ТОЛЬКО энергию, - не автокрафт, а отложенный клик."""
+    report.orders_finished.append({
+        "id": order["id"], "kind": order["kind"], "target_id": order["target_id"],
+        "label": order["label"], "gained": gained, "autocraft": bool(order["steps"]),
+    })
 
 
 def orders_view(state: GameState) -> list[dict]:

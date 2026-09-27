@@ -1607,6 +1607,28 @@
 
   .toast-error { background: linear-gradient(135deg, #3a1f1f, #20242a); border: 1px solid var(--danger); font-size: 12px; color: var(--text); }
 
+  /* Готовый заказ автокрафта (showOrderToast): полоска снизу - сколько тосту осталось. */
+  .toast-order {
+    position: relative; overflow: hidden; cursor: pointer;
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px 10px;
+    background: linear-gradient(135deg, #0f2f28, #20242a); border: 1px solid var(--ok);
+    animation: toast-in .25s ease-out;
+  }
+  .toast-order::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+    background: var(--ok); transform-origin: left; animation: toast-order-life var(--life, 4500ms) linear forwards;
+  }
+  @keyframes toast-order-life { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  .toast-order .icon { position: relative; flex-shrink: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+  .toast-order .icon .check {
+    position: absolute; right: -5px; bottom: -5px; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--ok); color: #0f2f28; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center;
+  }
+  .toast-order .icon.bare .check { position: static; width: 24px; height: 24px; line-height: 24px; font-size: 14px; }
+  .toast-order .title { color: var(--ok); font-weight: 700; font-size: 12px; }
+  .toast-order .desc { font-size: 11px; color: var(--muted); }
+  .toast-order .gain { font-size: 12px; color: var(--text); }
+
   .lootbox-modal { max-width: 480px; text-align: center; }
   .lootbox-viewport { position: relative; height: 96px; margin: 24px 16px 0; overflow: hidden; border-radius: 0; background: #0d1116; border: 1px solid rgba(255,255,255,.12); }
   .lootbox-track { position: absolute; top: 0; left: 0; display: flex; height: 100%; will-change: transform; }
@@ -2891,6 +2913,19 @@
   .cg-order-row .cg-batch-input { width: 64px; }
   .cg-order-note { font-size: 11px; color: var(--muted); line-height: 1.35; }
   .cg-order-note.bad { color: var(--danger); }
+  /* Заказ этого рецепта только что выполнен (orderDoneFlash): вспышка и угасание.
+     Длительность - ORDER_DONE_FLASH_MS, отрицательная задержка продолжает анимацию
+     при пересборке модалки, а не запускает её заново. */
+  .cg-order-done {
+    padding: 4px 8px; font-size: 11px; color: var(--ok); border: 1px solid rgba(74,201,160,.55);
+    background: rgba(74,201,160,.1); animation: cg-order-done 3500ms ease-out forwards;
+  }
+  @keyframes cg-order-done {
+    0% { background: rgba(74,201,160,.45); transform: scale(.96); }
+    10% { background: rgba(74,201,160,.12); transform: scale(1); }
+    85% { opacity: 1; }
+    100% { opacity: 0; background: rgba(74,201,160,.1); }
+  }
   /* Панель «Заказы». */
   .order-step { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); margin-top: 4px; }
   .order-reserved { font-size: 11px; color: var(--muted); margin-top: 4px; }
@@ -11445,6 +11480,26 @@ function sourceOrderKey(src) {
 // ход, как клик, а сборщики/механизмы делают остальное.
 let orderQtyByAction = {};
 let orderPreviewCache = {};
+// Ключ рецепта -> {gained, at}: заказ «рецепт ×N» только что выполнен (pushLog,
+// log.orders_finished) - блок «Заказать» отмечает это прямо под кнопкой, иначе
+// заказ, готовый в тот же ход, исчезал бы без следа.
+const ORDER_DONE_FLASH_MS = 3500;
+let orderDoneFlash = {};
+
+function orderGainText(gained) {
+  return (gained || []).map(g => `+${formatAmount(g.amount)} ${g.name}`).join(", ");
+}
+
+function orderDoneLine(actionId) {
+  const done = orderDoneFlash[actionId];
+  const elapsed = done ? Date.now() - done.at : Infinity;
+  if (elapsed >= ORDER_DONE_FLASH_MS) return null;
+  const gain = orderGainText(done.gained);
+  const line = el("div", { class: "cg-order-done", text: gain ? `✓ Готово: ${gain} - на складе` : "✓ Заказ выполнен" });
+  line.style.animationDelay = `-${elapsed}ms`;
+  setTimeout(() => line.remove(), ORDER_DONE_FLASH_MS - elapsed);
+  return line;
+}
 
 function sourcesOrderBlock(actionId, host) {
   const qty = Math.max(1, orderQtyByAction[actionId] || 1);
@@ -11463,6 +11518,8 @@ function sourcesOrderBlock(actionId, host) {
   const btn = el("button", { type: "button", class: "cg-src-act", text: `Заказать ×${qty}` });
   row.append(input, btn);
   box.appendChild(row);
+  const doneLine = orderDoneLine(actionId);
+  if (doneLine) box.appendChild(doneLine);
 
   const key = `${actionId}:${qty}:${VIEW.turn}:${VIEW.autocraft.orders.length}`;
   const preview = orderPreviewCache[key];
@@ -14756,6 +14813,36 @@ function showQuestToast(quest) {
   setTimeout(() => toast.remove(), 5000);
 }
 
+// Заказ автокрафта выполнен (log.orders_finished): иконка результата и что пришло
+// на склад. Нужен прежде всего заказу, готовому в ход оформления, - прогресс в панели
+// «Заказы» он показать не успевает и исчезал бы молча. Заказ клика, который ждал
+// только энергию (autocraft: false), - не автокрафт: тоста нет, строка в журнале есть.
+// Больше трёх сразу не держим - старые уходят; клик скрывает.
+const ORDER_TOAST_MS = 4500;
+function showOrderToast(order) {
+  const banner = document.getElementById("toastBanner");
+  const toast = el("div", { class: "toast-order", title: "Скрыть" });
+  toast.style.setProperty("--life", `${ORDER_TOAST_MS}ms`);
+  const iconId = order.gained.length ? order.gained[0].id
+    : (order.kind === "build" ? `${BUILDING_ITEM_PREFIX}${order.target_id}` : null);
+  const iconDef = iconId ? resourceIcon(iconId) : null;
+  const icon = el("div", { class: "icon" + (iconDef ? "" : " bare") });
+  if (iconDef) icon.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 32));
+  icon.appendChild(el("span", { class: "check", text: "✓" }));
+  toast.appendChild(icon);
+  const text = el("div", { style: "min-width:0;" });
+  text.appendChild(el("div", { class: "title", text: "Заказ выполнен" }));
+  text.appendChild(el("div", { class: "desc", text: order.label }));
+  const gain = orderGainText(order.gained);
+  if (gain) text.appendChild(el("div", { class: "gain", text: gain }));
+  toast.appendChild(text);
+  toast.addEventListener("click", () => toast.remove());
+  banner.appendChild(toast);
+  const shown = banner.querySelectorAll(".toast-order");
+  for (let i = 0; i < shown.length - 3; i++) shown[i].remove();
+  setTimeout(() => toast.remove(), ORDER_TOAST_MS);
+}
+
 function pushLog(log) {
   const list = document.getElementById("logList");
   // "Умный" автоскролл: свежие записи теперь появляются СВЕРХУ, так что читающий
@@ -14789,8 +14876,17 @@ function pushLog(log) {
   if (log.autocraft_completed && log.autocraft_completed.length) {
     entry.appendChild(el("div", { class: "msg", text: `Автокрафт докрафтил: ${log.autocraft_completed.join(", ")}` }));
   }
-  if (log.pending_finished && log.pending_finished.length) {
-    entry.appendChild(el("div", { class: "msg", text: `Дождалось автокрафта и завершилось: ${log.pending_finished.join(", ")}` }));
+  const ordersFinished = log.orders_finished || [];
+  if (ordersFinished.length) {
+    const line = ordersFinished.map(o => {
+      const gain = orderGainText(o.gained);
+      return gain ? `${o.label} (${gain})` : o.label;
+    }).join("; ");
+    entry.appendChild(el("div", { class: "msg", text: `Заказ выполнен: ${line}` }));
+    ordersFinished.forEach(o => {
+      if (o.kind === "recipe") orderDoneFlash[o.target_id] = { gained: o.gained, at: Date.now() };
+      if (o.autocraft) showOrderToast(o);
+    });
   }
   if (log.energy_crafted && log.energy_crafted.length) {
     entry.appendChild(el("div", { class: "msg", text: `Крафт из энергии завершён: ${log.energy_crafted.join(", ")}` }));

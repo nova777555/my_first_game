@@ -870,5 +870,71 @@ class AutomationRuleVersusOrderTests(OrdersTestCase):
         self.assertIn("m_slow", s.manual_jobs)  # правило работает дальше, когда механизм свободен
 
 
+class FinishedReportTests(OrdersTestCase):
+    """report.orders_finished - по нему UI сообщает о готовом заказе, в том числе
+    выполненном в тот же ход (прогресс в панели «Заказы» такой заказ не показывает)."""
+
+    @staticmethod
+    def finished_until_done(s, limit=10):
+        finished = []
+        for _ in range(limit):
+            finished += engine.advance_turn(s).orders_finished
+            if not s.orders:
+                break
+        return finished
+
+    def test_instant_recipe_order_reports_its_result(self):
+        s = self.mech_state(resources={"raw_a": 30}, buildings={"m_asm_fast": 1})
+        order_id = s.next_order_id
+        engine.order_recipe(s, "m_quick", 20)
+        report = engine.advance_turn(s)
+        self.assertEqual(report.orders_finished, [{
+            "id": order_id, "kind": "recipe", "target_id": "m_quick", "label": "«Тест: быстрый» ×20",
+            "gained": {"m_out": 20}, "autocraft": True,
+        }])
+
+    def test_recipe_result_excludes_leftover_intermediates(self):
+        s = self.mech_state(resources={"raw_a": 10}, buildings={"m_asm_fast": 1})
+        engine.order_recipe(s, "m_join", 1)
+        s.orders[0]["reserved"]["m_a"] = 1  # остаток промежуточного - на склад, но не «результат»
+        [entry] = self.finished_until_done(s)
+        self.assertEqual(entry["gained"], {"e_top": 1})
+        self.assertEqual(s.resources.get("m_a"), 1)
+
+    def test_every_output_of_a_multi_output_recipe_is_the_result(self):
+        s = self.mech_state(resources={"raw_a": 10}, buildings={"m_asm_fast": 1})
+        engine.order_recipe(s, "m_split", 2)
+        [entry] = self.finished_until_done(s)
+        self.assertEqual(entry["gained"], {"m_a": 2, "m_b": 2})
+
+    def test_click_order_reports_what_the_action_gave(self):
+        s = self.mech_state(resources={"raw_a": 5})
+        self.assertTrue(engine.do_manual_action(s, "use_m_out").pending)
+        [entry] = self.finished_until_done(s)
+        self.assertEqual((entry["kind"], entry["target_id"]), ("manual", "use_m_out"))
+        self.assertEqual(entry["gained"], {"e_top": 1})
+        self.assertTrue(entry["autocraft"])
+
+    def test_click_that_only_waited_for_energy_is_not_autocraft(self):
+        engine.MANUAL_ACTIONS = {
+            **engine.MANUAL_ACTIONS, "spark": _action("Тест: искра", "yard", {"energy": 7}, {"yard_out": 1}),
+        }
+        s = GameState(buildings={"e_gen": 1, "e_bank": 1})
+        self.assertTrue(engine.do_manual_action(s, "spark").pending)
+        [entry] = self.finished_until_done(s)
+        self.assertEqual(entry["gained"], {"yard_out": 1})
+        self.assertFalse(entry["autocraft"])
+
+    def test_order_that_failed_at_the_end_is_not_reported(self):
+        s = self.mech_state(resources={"raw_a": 5, "raw_b": 1})
+        engine.build(s, "big_thing")
+        s.buildings["big_thing"] = 1  # max_count 1 - финальное действие откажет
+        finished = []
+        for _ in range(4):
+            finished += engine.advance_turn(s).orders_finished
+        self.assertEqual(finished, [])
+        self.assertEqual(len(s.orders), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

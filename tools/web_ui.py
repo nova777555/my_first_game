@@ -2775,7 +2775,7 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
     log = {
         "message": None, "ok": True, "action_deltas": [], "production_deltas": [],
         "idle": [], "broken": [], "quests_completed": [], "autocraft_completed": [],
-        "pending_finished": [], "energy_crafted": [], "sound_url": None,
+        "pending_finished": [], "orders_finished": [], "energy_crafted": [], "sound_url": None,
         "manual_completed": [], "manual_completed_ids": [], "energy_completed_keys": [], "combat": None, "boss_fled": None,
         "automation_fired": [], "ritual_completed": [], "breed": None,
         "reactor_accidents": [], "pending": False, "replicated": [], "smeltery": [],
@@ -2826,7 +2826,22 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
     # готового результата (тот же принцип, что ritual_completed ниже).
     log["manual_completed_ids"] = list(report.manual_completed)
     log["pending_finished"] = list(report.pending_finished)
-    log["energy_crafted"] = [ENERGY_RECIPES[rid]["name"] for rid, count in report.crafted.items() for _ in range(count)]
+    # Готовые заказы с тем, что они выдали на склад: тост «Заказ выполнен» и отметка в
+    # блоке «Заказать ×N» (web_ui.html: showOrderToast/orderDoneFlash) - заказ, готовый
+    # в ход оформления, иначе исчезал бы молча. target_id заказа «рецепт ×N» - ключ
+    # рецепта, тот же, что у кнопки «Заказать».
+    log["orders_finished"] = [
+        {
+            "id": e["id"], "kind": e["kind"], "target_id": e["target_id"], "label": e["label"],
+            "autocraft": e["autocraft"],
+            "gained": [
+                {"id": rid, "name": RESOURCE_NAMES.get(rid, rid), "amount": engine._format_amount(amount)}
+                for rid, amount in e["gained"].items()
+            ],
+        }
+        for e in report.orders_finished
+    ]
+    log["energy_crafted"] =[ENERGY_RECIPES[rid]["name"] for rid, count in report.crafted.items() for _ in range(count)]
     # Ключи сеточных рецептов (engine.grid_recipe_key) завершившихся крафтов за
     # энергию - для эффекта готового результата в модалке преобразователя, тот
     # же приём, что manual_completed_ids у печи.
