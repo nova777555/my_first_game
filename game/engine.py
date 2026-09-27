@@ -505,7 +505,7 @@ class AutocraftFailure:
     missing - ВСЁ, чего не хватает и что автокрафт сделать не может (сырьё или ресурс,
     чей рецепт ему сейчас недоступен), resource_id -> недостача; заполняет _plan_order."""
     resource_id: str
-    reason: str  # "no_processor" | "no_recipe" | "not_automated" | "tech_locked" | "building_missing" | "ritual_pedestals" | "random_result" | "insufficient_compute" | "no_free_slots" | "in_progress" | "no_storage_space"
+    reason: str  # "no_processor" | "no_recipe" | "not_automated" | "tech_locked" | "building_missing" | "ritual_pedestals" | "random_result" | "no_output" | "insufficient_compute" | "no_free_slots" | "in_progress" | "no_storage_space"
     building_id: str | None = None
     extra: dict = field(default_factory=dict)
     missing: dict = field(default_factory=dict)
@@ -523,6 +523,7 @@ _AUTOCRAFT_REASON_TEXT = {
     "in_progress": "«{name}» уже докрафтывается в фоне",
     "ritual_pedestals": "ритуалу «{ritual}» нужно {need} пьедесталов в кольце, у «{building}» их {have}",
     "random_result": "у рецепта «{name}» случайный результат - автокрафт его не делает",
+    "no_output": "«{name}» не кладётся на склад - заказать нечего",
 }
 
 
@@ -1907,6 +1908,9 @@ def _order_target_error(state: GameState, key: str) -> tuple[str | None, str | N
         return action["name"], f"«{action['name']}» ещё не открыт."
     if not action["cost"] or not is_manual_action_deterministic(target_id):
         return action["name"], f"«{action['name']}» заказать нельзя - у него случайный результат или нет цены."
+    if not action["gain"]:
+        # Только spawn_species (платная ловля особи) - заказу нечего выдать на склад.
+        return action["name"], f"«{action['name']}» заказать нельзя - оно ничего не кладёт на склад."
     return action["name"], None
 
 
@@ -1994,6 +1998,9 @@ def check_order(state: GameState, key: str, qty: int) -> AutocraftFailure | None
             return AutocraftFailure(target_id, "no_recipe")
     elif kind == "building":
         return AutocraftFailure(target_id, "no_recipe")  # см. _order_target_error
+    elif not MANUAL_ACTIONS[target_id]["gain"]:
+        # Только spawn_species - см. _order_target_error.
+        return AutocraftFailure(MANUAL_ACTIONS[target_id].get("spawn_species") or target_id, "no_output")
     elif not is_manual_action_unlocked(target_id, state):
         return AutocraftFailure(next(iter(MANUAL_ACTIONS[target_id]["gain"])), "tech_locked")
     failure, spec = _recipe_order_spec(state, key, qty)

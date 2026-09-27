@@ -956,6 +956,23 @@ class FinishedReportTests(OrdersTestCase):
         self.assertEqual(len(s.orders), 1)
 
 
+class SpawnOnlyActionOrderTests(OrdersTestCase):
+    """Действие с ценой, но без gain (только spawn_species - платная ловля особи):
+    валидатор его разрешает, а заказу «×N» нечего выдать на склад."""
+
+    def test_cannot_be_ordered_and_does_not_crash(self):
+        engine.MANUAL_ACTIONS = {
+            **engine.MANUAL_ACTIONS,
+            "paid_catch": _action("Тест: платная ловля", "m_loc", {"raw_a": 1}, {}, spawn_species="critter_a"),
+        }
+        s = self.mech_state(resources={"raw_a": 5})
+        self.assertEqual(engine.check_order(s, "paid_catch", 2).reason, "no_output")
+        result = engine.order_recipe(s, "paid_catch", 2)
+        self.assertFalse(result.ok)
+        self.assertIn("ничего не кладёт на склад", result.message)
+        self.assertEqual(s.orders, [])
+
+
 class OrderRetryCoverageTests(unittest.TestCase):
     """Каждый вид заказа, который оформляет _pay_or_defer, обязан уметь выполниться
     по готовности (_ORDER_RETRY) - иначе _finalize_order падает KeyError на КАЖДОМ
