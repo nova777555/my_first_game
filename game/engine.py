@@ -1121,21 +1121,288 @@ def _find_order(state: GameState, order_id) -> dict | None:
     return next((o for o in state.orders if o["id"] == order_id), None)
 
 
+def _refund_existing(target: dict, amounts: dict) -> None:
+    """Возврат при снятии задачи удалённого контента: ресурсы, которых в контенте уже
+    нет, вернуть некуда - они пропадают."""
+    _gain(target, {r: a for r, a in amounts.items() if r in RESOURCE_NAMES})
+
+
+def _job_refund_target(state: GameState, job: dict) -> dict:
+    """Куда возвращать цену снятой задачи: партия заказа - в резерв своего заказа."""
+    order = _find_order(state, job.get("order_id")) if job.get("order_id") is not None else None
+    return order["reserved"] if order is not None else state.resources
+
+
+def _upgrade_ids(building_id: str) -> set[str]:
+    return {u["id"] for u in BUILDINGS.get(building_id, {}).get("upgrades", [])}
+
+
+def _order_references_exist(state: GameState, order: dict) -> bool:
+    """Все ли id, на которые ссылается заказ (его цель и шаги), ещё есть в контенте."""
+    kind, target = order["kind"], order["target_id"]
+    if kind == "recipe":
+        rkind, rid = parse_grid_recipe_key(target)
+        ok = {
+            "energy_recipe": ENERGY_RECIPES, "ritual_recipe": RITUAL_RECIPES,
+            "replicator": RESOURCE_NAMES, "building": BUILDINGS, "manual_action": MANUAL_ACTIONS,
+        }[rkind].__contains__(rid)
+    elif kind in ("building_upgrade", "farm_instance_upgrade", "reactor_instance_upgrade", "soul_instance_upgrade"):
+        owner, _, upgrade_id = target.partition(":")
+        if kind == "building_upgrade":
+            building_id = owner
+        else:
+            instances = {
+                "farm_instance_upgrade": state.farm_instances, "reactor_instance_upgrade": state.reactor_instances,
+                "soul_instance_upgrade": state.soul_collector_instances,
+            }[kind]
+            building_id = instances.get(owner, {}).get("building_id")
+        ok = upgrade_id in _upgrade_ids(building_id)
+    elif kind == "synthesize":
+        ok = all(a in trait_alleles(t) for t, a in order.get("chosen_alleles", {}).items())
+    elif kind == "storage_upgrade":
+        ok = target in RESOURCE_STORAGE
+    else:
+        table = {
+            "manual": MANUAL_ACTIONS, "build": BUILDINGS, "tech": TECHS, "repair": BUILDINGS,
+            "upgrade_tool": TOOLS, "repair_tool": TOOLS, "start_energy_recipe": ENERGY_RECIPES,
+            "start_ritual": RITUAL_RECIPES, "summon_boss": MOBS,
+        }.get(kind)
+        ok = table is not None and target in table
+    if not ok:
+        return False
+    for step in order.get("steps", []):
+        if step.get("resource_id") not in RESOURCE_NAMES:
+            return False
+        if step["kind"] in ("action", "long") and step.get("action_id") not in MANUAL_ACTIONS:
+            return False
+        if step["kind"] == "energy" and step.get("recipe_id") not in ENERGY_RECIPES:
+            return False
+        if step["kind"] == "ritual" and step.get("recipe_id") not in RITUAL_RECIPES:
+            return False
+    return True
+
+
+def _repair_genotype(creature: dict) -> bool:
+    """Аллели, которых в контенте больше нет, заменяет второй аллелью пары (или
+    доминантной/первой аллелью признака). False - спасать нечего: вида особи больше нет."""
+    genotype = creature["genotype"]
+    for trait_id in GENOTYPE_TRAIT_IDS:
+        alleles = trait_alleles(trait_id)
+        pair = genotype.get(trait_id)
+        if pair is None or all(a in alleles for a in pair):
+            continue
+        known = [a for a in pair if a in alleles]
+        if not known:
+            if trait_id == "species":
+                return False
+            fallback = next((aid for aid, a in alleles.items() if a.get("dominant")), next(iter(alleles), None))
+            if fallback is None:
+                genotype.pop(trait_id)
+                continue
+            known = [fallback]
+        genotype[trait_id] = [a if a in alleles else known[0] for a in pair]
+    creature["species_id"] = _phenotype_allele("species", genotype["species"])
+    return True
+
+
+def _return_reactor_cell(state: GameState, cell: dict) -> None:
+    """Компонент и катализатор ячейки - на склад (выгоревшее топливо - своим остатком),
+    как remove_reactor_component; удалённые из контента ресурсы пропадают."""
+    resource_id = cell["resource_id"]
+    if cell.get("charge") == 0:
+        resource_id = RESOURCE_REACTOR_COMPONENT.get(resource_id, {}).get("spent_result", resource_id)
+    _refund_existing(state.resources, {resource_id: 1})
+    if cell.get("catalyst_id") is not None:
+        _refund_existing(state.resources, {cell["catalyst_id"]: 1})
+
+
+def _drop_removed_instances(state: GameState) -> None:
+    """Физические экземпляры (фермы, синтезаторы душ, реакторы): экземпляр постройки,
+    которой больше нет (или она больше не того вида), снимается, его содержимое
+    возвращается - особи в банк, души и компоненты на склад. У живых экземпляров
+    убираются души/компоненты, которые этот экземпляр больше не принимает."""
+    for iid in [i for i, inst in state.farm_instances.items() if not _is_farm_building(inst["building_id"])]:
+        del state.farm_instances[iid]
+    for creature in state.creatures.values():
+        home = creature.get("farm_instance_id")
+        # id ТИПА фермы - старое сохранение, его расселит _ensure_farm_instances.
+        if home is not None and home not in state.farm_instances and not _is_farm_building(home):
+            creature["farm_instance_id"] = None
+
+    for iid, inst in list(state.soul_collector_instances.items()):
+        accepts = soul_collector_accepts_kind(inst["building_id"])
+        alive = _is_soul_collector_building(inst["building_id"])
+        kept = []
+        for soul_id in inst.get("installed", []):
+            if alive and soul_id in SOUL_RECIPES and soul_kind(soul_id) == accepts:
+                kept.append(soul_id)
+            else:
+                _refund_existing(state.resources, {soul_id: 1})
+        inst["installed"] = kept
+        if not alive:
+            del state.soul_collector_instances[iid]
+    for building_id in list(state.soul_slots):
+        souls = state.soul_slots.pop(building_id)
+        if _is_soul_collector_building(building_id):
+            state.soul_slots[building_id] = [s for s in souls if s in RESOURCE_NAMES]
+        else:
+            _refund_existing(state.resources, Counter(souls))
+
+    for iid, inst in list(state.reactor_instances.items()):
+        alive = _is_reactor_building(inst["building_id"])
+        grid = inst.get("grid", [])
+        for i, cell in enumerate(grid):
+            if cell is None:
+                continue
+            role = reactor_component_role(cell["resource_id"])
+            if not alive or role is None or not reactor_accepts_role(inst["building_id"], role):
+                _return_reactor_cell(state, cell)
+                grid[i] = None
+                continue
+            catalyst_id = cell.get("catalyst_id")
+            if catalyst_id is not None and role not in RESOURCE_REACTOR_CATALYST.get(catalyst_id, {}).get("applies_to", []):
+                _refund_existing(state.resources, {catalyst_id: 1})
+                cell["catalyst_id"] = None
+        if inst.get("coolant_fluid") is not None and inst["coolant_fluid"] not in RESOURCE_REACTOR_COOLANT_FLUID:
+            inst["coolant_fluid"] = next(iter(RESOURCE_REACTOR_COOLANT_FLUID), None)
+        if not alive:
+            del state.reactor_instances[iid]
+
+    for instances in (state.farm_instances, state.soul_collector_instances, state.reactor_instances):
+        for inst in instances.values():
+            allowed = _upgrade_ids(inst["building_id"])
+            inst["upgrades"] = [u for u in inst.get("upgrades", []) if u in allowed]
+            if inst.get("broken_type") is not None and inst["broken_type"] not in BREAKDOWN_TYPES:
+                inst["broken_type"] = None
+
+
+def _drop_removed_jobs(state: GameState) -> None:
+    """Идущие задачи, рецепт или механизм которых удалён из контента, снимаются, как
+    отменой: списанная цена - на склад (партия заказа - в резерв заказа)."""
+    for action_id in [a for a in state.manual_jobs if a not in MANUAL_ACTIONS]:
+        job = state.manual_jobs.pop(action_id)
+        _refund_existing(_job_refund_target(state, job), job.get("cost", {}))
+    kept = []
+    for job in state.energy_jobs:
+        building = BUILDINGS.get(job.get("building_id"), {})
+        if job["recipe_id"] in ENERGY_RECIPES and (job.get("building_id") is None or building.get("energy_converter")):
+            kept.append(job)
+        else:
+            _refund_existing(_job_refund_target(state, job), job.get("cost", {}))
+    state.energy_jobs = kept
+    for building_id, job in list(state.ritual_jobs.items()):
+        if BUILDINGS.get(building_id, {}).get("ritual_circle") and job["recipe_id"] in RITUAL_RECIPES:
+            continue
+        del state.ritual_jobs[building_id]
+        _refund_existing(state.resources, job.get("cost", {}))
+    kept = []
+    for job in state.replicator_jobs:
+        if BUILDINGS.get(job["building_id"], {}).get("replicator") and job["resource_id"] in RESOURCE_NAMES:
+            kept.append(job)
+            continue
+        matter = replicator_matter(job["building_id"]) if BUILDINGS.get(job["building_id"], {}).get("replicator") else None
+        refund = max(0, job["cost"] - job["progress"])
+        if matter is not None and not RESOURCE_FRACTIONAL.get(matter, False):
+            refund = math.floor(refund + 1e-9)
+        if matter is not None and refund > 0:
+            _refund_existing(_job_refund_target(state, job), {matter: round(refund, 9)})
+    state.replicator_jobs = kept
+    if state.active_research is not None and state.active_research["tech_id"] not in TECHS:
+        _refund_existing(state.resources, state.active_research.get("cost", {}))
+        state.active_research = None
+    if state.active_encounter is not None and state.active_encounter.get("mob_id") not in MOBS:
+        state.active_encounter = None
+    for order in list(state.orders):
+        if not _order_references_exist(state, order):
+            state.orders.remove(order)
+            _refund_existing(state.resources, order["reserved"])
+            for job in [*state.manual_jobs.values(), *state.energy_jobs, *state.replicator_jobs]:
+                if job.get("order_id") == order["id"]:
+                    job.pop("order_id", None)
+        else:
+            order["reserved"] = {r: a for r, a in order["reserved"].items() if r in RESOURCE_NAMES}
+
+
 def drop_removed_content(state: GameState) -> None:
-    """Сохранение старше контента: убирает постройки, которых в content.json больше нет
-    (например, удалённый «Ускоритель автокрафта»), вместе с их поломками, улучшениями и
-    ползунком вкл/выкл - иначе первый же обход state.buildings упал бы KeyError.
-    Вызывается при загрузке сохранения (tools/web_ui.py: load_state/открытие)."""
+    """Сохранение старше контента: снимает всё, что ссылается на удалённое из
+    content.json (или на то, что сменило вид: постройка больше не синтезатор, у
+    инструмента меньше тиров и т.п.) - иначе первый же ход или экран упал бы KeyError.
+    Постройки уходят вместе с поломками, улучшениями и ползунком; задачи, заказы,
+    исследование, души и компоненты реактора снимаются, как отменой, с возвратом
+    списанного на склад. Вызывается при загрузке сохранения (tools/web_ui.py:
+    load_state/открытие)."""
     for building_id in [b for b in state.buildings if b not in BUILDINGS]:
         state.buildings.pop(building_id, None)
         state.broken.pop(building_id, None)
         state.building_upgrades.pop(building_id, None)
         state.building_disabled.pop(building_id, None)
-    # Репликации постройки, которая больше не репликатор, или ресурса, которого нет.
-    state.replicator_jobs = [
-        j for j in state.replicator_jobs
-        if BUILDINGS.get(j["building_id"], {}).get("replicator") and j["resource_id"] in RESOURCE_NAMES
-    ]
+    for building_id in [b for b in state.construction_progress if b not in BUILDINGS]:
+        state.construction_progress.pop(building_id)
+    for building_id, done in list(state.construction_progress.items()):
+        if not 0 < done < len(building_construction_stages(building_id)):
+            state.construction_progress.pop(building_id)
+    for building_id in list(state.building_upgrades):
+        allowed = _upgrade_ids(building_id)
+        state.building_upgrades[building_id] = [u for u in state.building_upgrades[building_id] if u in allowed]
+    for building_id, types in state.broken_types.items():
+        state.broken_types[building_id] = [t if t in BREAKDOWN_TYPES else None for t in types]
+    for building_id in [b for b in state.building_disabled if b not in BUILDINGS]:
+        state.building_disabled.pop(building_id)
+    _drop_removed_instances(state)
+    _drop_removed_jobs(state)
+    for building_id in [b for b in state.automation_rules if not BUILDINGS.get(b, {}).get("automation_hub")]:
+        state.automation_rules.pop(building_id)
+    target_tables = {"manual_action": MANUAL_ACTIONS, "energy_recipe": ENERGY_RECIPES, "ritual_recipe": RITUAL_RECIPES}
+    for building_id, rules in state.automation_rules.items():
+        state.automation_rules[building_id] = [
+            r for r in rules
+            if r.get("target_id") in target_tables.get(r.get("kind", "manual_action"), {})
+            and all(c.get("resource") in RESOURCE_NAMES for c in r.get("conditions", []))
+        ]
+
+    # Инструменты: удалённая линейка, тир сверх списка, зачарования.
+    for tool_id in [t for t in state.tool_tiers if t not in TOOLS]:
+        state.tool_tiers.pop(tool_id)
+    for tool_id, tier in list(state.tool_tiers.items()):
+        top = len(TOOLS[tool_id]["tiers"])
+        if tier > top:
+            state.tool_tiers[tool_id] = top
+            state.tool_durability.pop(tool_id, None)
+    for tool_id in [t for t in state.tool_durability if t not in TOOLS]:
+        state.tool_durability.pop(tool_id)
+    for tool_id in list(state.tool_enchantments):
+        levels = {
+            e: min(level, len(ENCHANTMENTS[e].get("levels", [])))
+            for e, level in state.tool_enchantments[tool_id].items()
+            if e in ENCHANTMENTS and ENCHANTMENTS[e].get("levels")
+        }
+        if tool_id in TOOLS and levels:
+            state.tool_enchantments[tool_id] = levels
+        else:
+            state.tool_enchantments.pop(tool_id)
+    for resource_id in list(state.storage_tier):
+        tiers = RESOURCE_STORAGE.get(resource_id, {}).get("tiers", [])
+        if not tiers:
+            state.storage_tier.pop(resource_id)
+        else:
+            state.storage_tier[resource_id] = min(state.storage_tier[resource_id], len(tiers))
+    state.move_cooldowns = {m: t for m, t in state.move_cooldowns.items() if m in COMBAT_MOVES}
+
+    # Особи и генетика.
+    for creature_id in list(state.creatures):
+        if not _repair_genotype(state.creatures[creature_id]):
+            del state.creatures[creature_id]
+    for trait_id in list(state.known_alleles):
+        alleles = trait_alleles(trait_id) if trait_id in GENOTYPE_TRAIT_IDS else {}
+        state.known_alleles[trait_id] = [a for a in state.known_alleles[trait_id] if a in alleles]
+    state.species_discovered &= set(SPECIES)
+
+    # Шахта: клетка с рудой, которой больше нет, становится пустой породой.
+    if state.active_mine_field:
+        for cell in state.active_mine_field.get("cells", []):
+            if cell.get("resource") is not None and cell["resource"] not in MINING_INFO:
+                cell["resource"] = None
+
     # Плавильни: постройка больше не плавильня, рецепт или ресурс тигля пропал из контента.
     for building_id in [b for b in state.smelteries if not is_smeltery(b)]:
         _drop_smeltery(state, building_id)
@@ -7818,7 +8085,9 @@ def research(state: GameState, tech_id: str) -> ActionResult:
     if duration <= 1:
         state.techs.add(tech_id)
         return ActionResult(True, f"{switch_prefix}Изучено: {tech['name']}.")
-    state.active_research = {"tech_id": tech_id, "turns_total": duration, "turns_done": 0}
+    state.active_research = {
+        "tech_id": tech_id, "turns_total": duration, "turns_done": 0, "cost": dict(tech["cost"]),
+    }
     return ActionResult(True, f"{switch_prefix}Начато исследование «{tech['name']}» (займётся {duration} х.).")
 
 
@@ -7833,7 +8102,7 @@ def cancel_research(state: GameState) -> ActionResult:
         return ActionResult(False, "Сейчас ничего не исследуется.")
     tech = TECHS[job["tech_id"]]
     state.active_research = None
-    _gain(state.resources, tech["cost"])
+    _gain(state.resources, job.get("cost", tech["cost"]))
     return ActionResult(True, f"Исследование «{tech['name']}» отменено, затраты возвращены.")
 
 

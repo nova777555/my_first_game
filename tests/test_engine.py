@@ -1593,7 +1593,7 @@ class MultiTurnResearchTests(FixtureTestCase):
         self.assertIn("Начато", result.message)
         self.assertNotIn("tech_tier2_slow", s.techs)
         self.assertEqual(s.resources["raw_a"], 4)  # cost списан сразу
-        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow", "turns_total": 5, "turns_done": 0})
+        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow", "turns_total": 5, "turns_done": 0, "cost": {"raw_a": 1}})
 
     def test_advancing_turns_completes_research_after_turns_total(self):
         s = GameState(resources={"raw_a": 5}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2_slow"})
@@ -1640,7 +1640,7 @@ class MultiTurnResearchTests(FixtureTestCase):
         self.assertEqual(s.resources["raw_b"], 9)  # новый cost списан
         # Новый job СВЕЖИЙ (своё research_turns=4, turns_done=0), не донашивает
         # turns_done=1, накопленный отменённым tech_tier2_slow.
-        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow_b", "turns_total": 4, "turns_done": 0})
+        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow_b", "turns_total": 4, "turns_done": 0, "cost": {"raw_b": 1}})
 
     def test_reclicking_the_same_active_research_is_a_no_op(self):
         s = GameState(resources={"raw_a": 10}, buildings={"lab2": 1}, solved_hypotheses={"tech_tier2_slow"})
@@ -1648,7 +1648,7 @@ class MultiTurnResearchTests(FixtureTestCase):
         result = engine.research(s, "tech_tier2_slow")
         self.assertFalse(result.ok)
         self.assertEqual(result.message, "Уже исследуется.")
-        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow", "turns_total": 5, "turns_done": 0})
+        self.assertEqual(s.active_research, {"tech_id": "tech_tier2_slow", "turns_total": 5, "turns_done": 0, "cost": {"raw_a": 1}})
         self.assertEqual(s.resources["raw_a"], 9)  # cost не списан повторно
 
     def test_failed_switch_does_not_touch_the_original_research(self):
