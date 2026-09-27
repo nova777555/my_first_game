@@ -1948,6 +1948,19 @@ class MechanismScaleSliderTests(FixtureTestCase):
         engine.purchase_building_upgrade(s, "mechanism_a", "mech_a_scale")
         self.assertEqual(engine.mechanism_scale_cap("mechanism_a", s), 2)
 
+    def test_scale_cap_counts_every_purchase_of_a_repeatable_scale(self):
+        # Как _apply_building_upgrades: repeatable-scale, купленный 3 раза, - x6,
+        # и ползунок обязан доставать до того же x6.
+        upgrade = next(u for u in engine.BUILDINGS["mechanism_a"]["upgrades"] if u["id"] == "mech_a_scale")
+        upgrade = {**upgrade, "repeatable": True, "cost_growth": 2}
+        building = {**engine.BUILDINGS["mechanism_a"], "upgrades": [upgrade]}
+        engine.BUILDINGS = {**engine.BUILDINGS, "mechanism_a": building}
+        s = GameState(buildings={"mechanism_a": 1}, building_upgrades={"mechanism_a": ["mech_a_scale"] * 3})
+        self.assertEqual(engine.mechanism_scale_cap("mechanism_a", s), 6)
+        cost, _ = engine.effective_manual_action_stats("mechanism_a_action", s)
+        cost_at_cap, _ = engine.effective_manual_action_stats("mechanism_a_action", s, chosen_scale=6)
+        self.assertEqual(cost, cost_at_cap)
+
     def test_do_manual_action_at_scale_1_pays_base_amounts_despite_upgrade(self):
         # mech_a_scale куплен (cap=2), но явный scale=1 не обязывает игрока к x2 -
         # ровно то, о чём была просьба: не заставлять делать сразу много.

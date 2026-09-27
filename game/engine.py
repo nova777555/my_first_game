@@ -2811,8 +2811,14 @@ def mechanism_scale_cap(building_id: str, state: GameState) -> int:
     cap = 1
     purchased = state.building_upgrades.get(building_id, [])
     for upgrade in BUILDINGS[building_id].get("upgrades", []):
-        if upgrade["id"] in purchased and upgrade["type"] == "scale":
-            cap = max(cap, upgrade["value"])
+        if upgrade["type"] != "scale":
+            continue
+        # _purchased_upgrade_value - как в _apply_building_upgrades: repeatable-scale,
+        # купленный N раз, это value * N, иначе ползунок не доставал бы до масштаба,
+        # который автокрафт и клик без ползунка уже применяют.
+        value = _purchased_upgrade_value(purchased, upgrade)
+        if value is not None:
+            cap = max(cap, value)
     return math.floor(cap)
 
 
