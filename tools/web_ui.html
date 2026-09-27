@@ -2919,6 +2919,11 @@
     white-space: nowrap; font-size: 12px; color: var(--accent);
   }
   .cg-arrow-energy.short { color: var(--danger, #e05050); }
+  /* Масштаб механизма (scale-улучшение): узор - на один раз, спишется ×N - над стрелкой. */
+  .cg-arrow-scale {
+    position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
+    white-space: nowrap; font-family: Consolas, monospace; font-size: 12px; font-weight: 700; color: var(--blueprint);
+  }
   .cg-arrow.cg-arrow-busy { color: #5a4a30; }
   .cg-arrow-fill {
     position: absolute; left: 0; top: 0; bottom: 0; width: 0; overflow: hidden;
@@ -12284,6 +12289,17 @@ function openCraftGridModal(locationId) {
         : `Энергия за крафт: ${formatAmount(energyCost.amount)}`,
     }));
   }
+  // Масштаб механизма: на сетке - узор одного раза, а спишется и выйдет ×N
+  // (tools/web_ui.py: crafting_view cost/gain уже с масштабом).
+  if (matched && matched.scale > 1) {
+    const list = items => items.map(c => `${c.name} ${formatAmount(c.amount)}`).join(", ");
+    arrow.appendChild(el("span", {
+      class: "cg-arrow-scale",
+      text: `×${matched.scale}`,
+      title: `Масштаб механизма ×${matched.scale}: узор на сетке - на один раз, `
+        + `а спишется ${list(matched.cost)} и выйдет ${list(matched.gain)}`,
+    }));
+  }
   stage.appendChild(arrow);
   const outputSlot = el("div", { class: "cg-output" });
   // В выходном слоте - результат разложенного узора; если узора нет, а
@@ -12323,7 +12339,9 @@ function openCraftGridModal(locationId) {
 
   const resultName = !matched ? (entry.stacks ? "Набор стопок не распознан" : "Узор не распознан")
     : matched.kind === "building" ? craftGridBuildingResultName(matched)
-    : `${matched.name} → ${matched.gain.map(g => g.name).join(", ")}`;
+    : matched.scale > 1
+      ? `${matched.name} ×${matched.scale}: спишется ${matched.cost.map(c => `${c.name} ${formatAmount(c.amount)}`).join(", ")}`
+      : `${matched.name} → ${matched.gain.map(g => g.name).join(", ")}`;
   centerCol.appendChild(el("div", { class: "cg-result-name", text: resultName }));
 
   const controlsRow = el("div", { class: "cg-controls-row" });

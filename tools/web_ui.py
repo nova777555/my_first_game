@@ -1796,6 +1796,13 @@ def _condition_progress_text(condition: dict, state: GameState) -> str:
     return kind
 
 
+def grid_action_scale(action_id: str, state: GameState) -> int:
+    """Масштаб, с которым сеточный рецепт крафтится в модалке механизма: купленный
+    scale механизма (целый, как у ползунка), 1 - если его нет."""
+    building_id = engine.action_mechanism_building(MANUAL_ACTIONS[action_id])
+    return engine.mechanism_scale_cap(building_id, state) if building_id else 1
+
+
 def crafting_view(state: GameState) -> list[dict]:
     """Раздел на КАЖДУЮ открытую локацию-верстак (locations.*.crafting) - размер
     сетки, банк доступных ресурсов игрока и сами сеточные рецепты этой локации
@@ -1804,8 +1811,9 @@ def crafting_view(state: GameState) -> list[dict]:
     reactor_instances_view), а не только на "открытую в модалке прямо сейчас" -
     сервер ничего не знает про состояние клиентской модалки.
 
-    cost в ответе - РЕАЛЬНАЯ (effective_manual_action_stats, chosen_scale=1), а
-    не буквальный узор из content.json - см. PLAN_grid_crafting.md, раздел
+    cost в ответе - РЕАЛЬНАЯ (effective_manual_action_stats с масштабом механизма,
+    grid_action_scale - с ним же крафтит craft_grid_view), а не буквальный узор из
+    content.json - см. PLAN_grid_crafting.md, раздел
     "Факты о коде": апгрейды механизма (requires_building) домножают именно
     его, узор при этом определяет, КАКОЙ рецепт собран, а не сколько спишется.
     "enough" - чисто информационная подсветка (сырья хватает прямо сейчас без
@@ -1830,7 +1838,8 @@ def crafting_view(state: GameState) -> list[dict]:
         recipes = []
         for aid in engine.grid_actions_at(lid, state):
             action = MANUAL_ACTIONS[aid]
-            cost, gain = engine.effective_manual_action_stats(aid, state, chosen_scale=1)
+            scale = grid_action_scale(aid, state)
+            cost, gain = engine.effective_manual_action_stats(aid, state, chosen_scale=scale)
             recipes.append({
                 # action_id - КЛЮЧ сеточного рецепта (engine.grid_recipe_key): у
                 # ручного действия это сам его id, у рецепта крафта за энергию -
@@ -1844,8 +1853,11 @@ def crafting_view(state: GameState) -> list[dict]:
                 # без энергии, её же ровно сверяет engine.match_grid_target.
                 "stack_cost": _stack_cost_list(action.get("cost") or {}) if stacks else None,
                 "pattern_mirror": bool(action.get("pattern_mirror")),
+                # Реальные цена и выход одного крафта - с масштабом механизма (узор
+                # на сетке - по-прежнему одна единица на ячейку).
                 "cost": manual_action_cost_list(cost, action.get("cost_chance", {}), state),
                 "gain": manual_action_gain_list(gain, action.get("gain_chance", {})),
+                "scale": scale,
                 "enough": all(state.resources.get(rid, 0) >= amt for rid, amt in cost.items()),
                 "pinned": aid in state.pinned_recipes,
                 "sound_url": sound_url(action.get("sound")),
@@ -1866,7 +1878,8 @@ def crafting_view(state: GameState) -> list[dict]:
         job = None
         for job_aid, running in state.manual_jobs.items():
             if MANUAL_ACTIONS[job_aid].get("location") == lid:
-                _, job_gain = engine.effective_manual_action_stats(job_aid, state, chosen_scale=1)
+                # Выход, снятый при запуске (с тем масштабом, что был выбран).
+                job_gain = running.get("gain") or engine.effective_manual_action_stats(job_aid, state, chosen_scale=1)[1]
                 job = {
                     "action_id": job_aid,
                     "name": MANUAL_ACTIONS[job_aid]["name"],
@@ -3150,11 +3163,14 @@ def craft_grid_view(state: GameState, location_id, placed, times) -> dict:
         # режем до одного запуска сразу, а не отдаём игроку "Скрафчено 1 из N".
         if engine.manual_action_duration(target_id, state) > 1:
             times_requested = 1
+    # Сеточный крафт идёт с купленным масштабом механизма - ровно тем, что модалка
+    # показывает на стрелке (crafting_view: scale), а не дробным значением улучшения.
+    scale = grid_action_scale(target_id, state) if action_type == "manual" else None
     action_id = engine.grid_recipe_key(kind, target_id)
     logs = []
     waiting = False
     for _ in range(times_requested):
-        log = run_turn(state, action_type, target_id)
+        log = run_turn(state, action_type, target_id, scale=scale)
         # Постройка/крафт за энергию своего звука не имеют - звучит механизм
         # (у ручного действия run_turn уже подставил его сам).
         if not log["sound_url"]:

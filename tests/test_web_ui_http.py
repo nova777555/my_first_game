@@ -1045,6 +1045,28 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertIn("test_reactor_zoning_2", purchased_1)
         self.assertNotIn("test_reactor_zoning_2", purchased_2)
 
+    def test_grid_modal_shows_and_charges_the_mechanism_scale(self):
+        # Верстак - механизм с купленным «Масштабом ×2»: узор тот же (2 ячейки), а
+        # модалка показывает и крафт списывает ×2.
+        locations = {**web_ui.LOCATIONS, "grid_loc": {**web_ui.LOCATIONS["grid_loc"], "requires_building": "mechanism_a"}}
+        with mock.patch.object(web_ui, "LOCATIONS", locations), mock.patch.object(engine, "LOCATIONS", locations):
+            web_ui.STATE = GameState(
+                resources={"raw_a": 4}, buildings={"mechanism_a": 1},
+                building_upgrades={"mechanism_a": ["mech_a_scale"]},
+            )
+            status, view = self._get("/api/state")
+            entry = next(c for c in view["crafting"] if c["location_id"] == "grid_loc")
+            recipe = next(r for r in entry["recipes"] if r["action_id"] == "grid_line")
+            self.assertEqual(recipe["scale"], 2)
+            self.assertEqual([(c["id"], c["amount"]) for c in recipe["cost"]], [("raw_a", 4)])
+            self.assertEqual([(g["id"], g["amount"]) for g in recipe["gain"]], [("grid_output", 2)])
+            status, resp = self._post("/api/craft_grid", {
+                "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 1,
+            })
+        self.assertTrue(resp["ok"], resp)
+        self.assertEqual(web_ui.STATE.resources.get("raw_a", 0), 0)
+        self.assertEqual(web_ui.STATE.resources["grid_output"], 2)
+
     def test_cancel_preview_reports_what_would_burn_without_cancelling(self):
         order = {"id": 1, "kind": "recipe", "target_id": "craft_mid", "label": "x", "steps": [],
                  "reserved": {"limited_res": 6, "raw_a": 2}, "energy_reserve": 0, "final_energy": 0,
