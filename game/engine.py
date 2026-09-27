@@ -613,6 +613,23 @@ def _physical_instances(state: GameState, building_id: str) -> dict[str, dict]:
     return {}
 
 
+def _instance_in_use(state: GameState, instance_id: str, instance: dict) -> bool:
+    """Работает ли физический экземпляр в этот ход (только такой может сломаться):
+    в пасеке живёт хоть одна особь, в синтезаторе стоит душа, в реакторе есть топливо
+    с зарядом."""
+    building_id = instance["building_id"]
+    if _is_farm_building(building_id):
+        return any(c.get("farm_instance_id") == instance_id for c in state.creatures.values())
+    if _is_soul_collector_building(building_id):
+        return bool(instance.get("installed"))
+    if _is_reactor_building(building_id):
+        return any(
+            cell is not None and reactor_component_role(cell["resource_id"]) == "fuel" and (cell.get("charge") or 0) > 0
+            for cell in instance.get("grid", [])
+        )
+    return True
+
+
 def _ensure_physical_instances(state: GameState) -> None:
     """Идемпотентно добирает недостающие физические экземпляры ВСЕХ трёх видов
     (фермы + синтезаторы душ + реакторы) - тонкая обёртка над
@@ -9806,10 +9823,16 @@ def advance_turn(state: GameState) -> ProductionReport:
             # purchase_farm_instance_upgrade/purchase_soul_collector_instance_upgrade) -
             # иммунный экземпляр просто не участвует в ролле вовсе, независимо от
             # общего chance этого типа построек.
-            instances = [inst for inst in _physical_instances(state, building_id).values() if inst["building_id"] == building_id]
+            instances = [
+                (iid, inst) for iid, inst in _physical_instances(state, building_id).items()
+                if inst["building_id"] == building_id
+            ]
             newly_broken = 0
-            for instance in instances:
+            for instance_id, instance in instances:
                 if instance["broken"] or _instance_has_upgrade_type(building_id, instance, "breakdown_immunity"):
+                    continue
+                # Не работает - не ломается: пустой экземпляр или тип без сырья на ход.
+                if runnable <= 0 or not _instance_in_use(state, instance_id, instance):
                     continue
                 if random.random() < chance:
                     instance["broken"] = True
@@ -9817,9 +9840,11 @@ def advance_turn(state: GameState) -> ProductionReport:
                     newly_broken += 1
             if newly_broken:
                 report.newly_broken[building_id] = newly_broken
-            state.broken[building_id] = sum(1 for inst in instances if inst["broken"])
+            state.broken[building_id] = sum(1 for _, inst in instances if inst["broken"])
         else:
-            newly_broken = sum(1 for _ in range(active) if random.random() < chance)
+            # Ломаться могут только копии, которые в этот ход отработали: простаивающая
+            # без сырья - как выключенная ползунком или не в своё время суток.
+            newly_broken = sum(1 for _ in range(runnable) if random.random() < chance)
             if newly_broken:
                 state.broken[building_id] = state.broken.get(building_id, 0) + newly_broken
                 report.newly_broken[building_id] = newly_broken

@@ -7,6 +7,7 @@
 Запуск всех тестов проекта: python -m unittest discover tests -v
 Запуск только этого файла:   python -m unittest tests.test_engine -v
 """
+import copy
 import sys
 import unittest
 from pathlib import Path
@@ -1317,6 +1318,27 @@ class MechanismToggleTests(FixtureTestCase):
             report = engine.advance_turn(s)
         self.assertEqual(report.newly_broken.get("factory"), 2)
         self.assertEqual(s.broken["factory"], 2)
+
+    def test_copies_idle_for_lack_of_input_cannot_break_down(self):
+        # Энергии хватает только на одну из трёх копий: две простаивают и не ломаются.
+        s = GameState(resources={"energy": 1}, buildings={"factory": 3})
+        with mock.patch("game.engine.random.random", return_value=0.0):
+            report = engine.advance_turn(s)
+        self.assertEqual(report.newly_broken.get("factory"), 1)
+
+    def test_empty_physical_instance_cannot_break_down(self):
+        # Синтезатор без душ не работает - не ломается; с душой - ломается.
+        buildings = copy.deepcopy(engine.BUILDINGS)
+        buildings["soul_synth"]["breakdown_chance"] = 1.0
+        with mock.patch.object(engine, "BUILDINGS", buildings):
+            s = GameState(buildings={"soul_synth": 2}, resources={"test_soul": 1})
+            engine._ensure_physical_instances(s)
+            first, second = s.soul_collector_instances
+            engine.insert_soul(s, first, "test_soul")
+            engine.advance_turn(s)
+        self.assertTrue(s.soul_collector_instances[first]["broken"])
+        self.assertFalse(s.soul_collector_instances[second]["broken"])
+        self.assertEqual(s.broken["soul_synth"], 1)
 
 
 class ResourceCapTests(FixtureTestCase):
