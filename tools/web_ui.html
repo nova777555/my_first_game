@@ -8975,7 +8975,9 @@ function animateResourceValue(node, from, to, duration = 350) {
   function step(now) {
     const t = Math.min(1, (now - start) / duration);
     const eased = 1 - Math.pow(1 - t, 3);
-    node.textContent = String(Math.round(from + (to - from) * eased));
+    // Промежуточные кадры - целые, последний - точное значение (у дробных ресурсов
+    // Math.round(to) показывал бы 45 вместо 44.5 до следующей перерисовки).
+    node.textContent = t < 1 ? String(Math.round(from + (to - from) * eased)) : fmtNum(to);
     if (t < 1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -8999,11 +9001,11 @@ function renderResources() {
     const iconDef = resourceIcon(rid);
     if (iconDef) tile.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 32));
     const info = el("div", { class: "info" });
-    const amountEl = el("div", { class: "amount mono", text: String(prevAmount !== undefined ? prevAmount : amount) });
+    const amountEl = el("div", { class: "amount mono", text: fmtNum(prevAmount !== undefined ? prevAmount : amount) });
     info.appendChild(amountEl);
     if (prevAmount !== undefined && prevAmount !== amount) animateResourceValue(amountEl, prevAmount, amount);
     prevResourceAmounts[rid] = amount;
-    if (rate !== 0) info.appendChild(el("div", { class: `rate ${rate > 0 ? "pos" : "neg"}`, text: `${rate > 0 ? "+" : ""}${rate}/ход` }));
+    if (rate !== 0) info.appendChild(el("div", { class: `rate ${rate > 0 ? "pos" : "neg"}`, text: `${rate > 0 ? "+" : ""}${fmtNum(rate)}/ход` }));
     // jump_to (см. engine.RECIPE_BOARD_BUILDING_ID/VIEW.resource_jump) - тот же
     // клик "перейти к рецепту", что и у чипов цены/плиток склада, только здесь
     // на закреплённой панели наверху, самом заметном месте с суммой ресурса.
@@ -10350,7 +10352,7 @@ function renderPriorityResourcePicker(container) {
     tile.classList.add("clickable");
     if (!recipeIds.has(rid)) tile.classList.add("no-recipe");
     if (rid === priorityResourceFilter) tile.classList.add("selected");
-    tile.appendChild(el("div", { class: "amount mono", text: String(VIEW.resources[rid] || 0) }));
+    tile.appendChild(el("div", { class: "amount mono", text: fmtNum(VIEW.resources[rid] || 0) }));
     tile.appendChild(el("div", { class: "name", text: VIEW.resource_names[rid] }));
     tile.title = recipeIds.has(rid) ? "" : "У этого ресурса пока нет рецепта для автокрафта";
     tile.addEventListener("click", () => { priorityResourceFilter = rid; openPrioritiesModal(); });
@@ -13633,8 +13635,15 @@ function scaleAmount(amount, scale) {
   if (isRangeAmount(amount)) return { min: amount.min * scale, max: amount.max * scale };
   return amount * scale;
 }
+// Число для показа: целое как есть, дробное - до сотых. Без этого хвосты float
+// (33.199999999999996, -5.600000000000001) попадали прямо в плитки и журнал.
+function fmtNum(value) {
+  if (typeof value !== "number" || Number.isInteger(value)) return String(value);
+  return String(Math.round(value * 100) / 100);
+}
+
 function formatAmount(amount) {
-  return isRangeAmount(amount) ? `${amount.min}-${amount.max}` : `${amount}`;
+  return isRangeAmount(amount) ? `${amount.min}-${amount.max}` : fmtNum(amount);
 }
 
 // chance (0..1, необязательный) - "Шанс потребления/получения" (см. CLAUDE.md):
@@ -15046,7 +15055,7 @@ function pushLog(log) {
 
   const deltas = [...(log.action_deltas || []), ...(log.production_deltas || [])];
   if (deltas.length) {
-    const line = deltas.map(d => `${d.amount > 0 ? "+" : ""}${d.amount} ${d.name}`).join(", ");
+    const line = deltas.map(d => `${d.amount > 0 ? "+" : ""}${fmtNum(d.amount)} ${d.name}`).join(", ");
     entry.appendChild(el("div", { class: "deltas", text: line }));
   }
   if (log.idle && log.idle.length) {
@@ -15813,9 +15822,9 @@ function openStorage() {
     // тогда показываем просто количество, без дроби "x / y".
     const amountEl = el("div", { class: "amount mono" });
     if (item && item.capacity !== null) {
-      amountEl.append(String(amount) + " ", el("span", { class: "cap", text: `/ ${item.capacity}` }));
+      amountEl.append(fmtNum(amount) + " ", el("span", { class: "cap", text: `/ ${item.capacity}` }));
     } else {
-      amountEl.textContent = String(amount);
+      amountEl.textContent = fmtNum(amount);
     }
     const nameEl = el("div", { class: "name", text: VIEW.resource_names[rid] });
     // Плитка сама по себе не кликабельна целиком (там уже сидят кнопки "★"/апгрейда,
