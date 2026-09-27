@@ -1385,9 +1385,17 @@ def _locked_grid_pinned_tile(key: str) -> dict | None:
         recipe = MANUAL_ACTIONS.get(target_id)
         location_id = recipe.get("location") if recipe else None
         gain = manual_action_gain_list(recipe.get("gain", {}), recipe.get("gain_chance", {})) if recipe else []
+        if recipe is not None and not engine.is_grid_action(target_id):
+            return None
+    elif kind == "building":
+        if not building_sources(target_id):
+            return None
+        recipe = BUILDINGS[target_id]
+        location_id = recipe["location"]
+        gain = [{"id": building_item_id(target_id), "name": recipe["name"], "amount": 1}]
     else:
         return None
-    if recipe is None or not recipe.get("pattern"):
+    if recipe is None or (kind == "energy_recipe" and not recipe.get("pattern")):
         return None
     return {
         "action_id": key, "kind": kind, "name": recipe["name"], "location_id": location_id,
@@ -1693,6 +1701,7 @@ def crafting_view(state: GameState) -> list[dict]:
         crafting = engine.location_crafting(lid)
         if crafting is None:
             continue
+        stacks = engine.location_stacks(lid)
         recipes = []
         for aid in engine.grid_actions_at(lid, state):
             action = MANUAL_ACTIONS[aid]
@@ -1700,12 +1709,15 @@ def crafting_view(state: GameState) -> list[dict]:
             recipes.append({
                 # action_id - КЛЮЧ сеточного рецепта (engine.grid_recipe_key): у
                 # ручного действия это сам его id, у рецепта крафта за энергию -
-                # "energy_recipe:<id>" (см. _energy_grid_recipe_view). Клиент
-                # сравнивает только ключи и не разбирает их.
+                # "energy_recipe:<id>" (см. _energy_grid_recipe_view), у постройки -
+                # "building:<id>". Клиент сравнивает только ключи и не разбирает их.
                 "action_id": aid,
                 "kind": "manual_action",
                 "name": action["name"],
-                "pattern": action["pattern"],
+                "pattern": action.get("pattern"),
+                # Сборщик (crafting.stacks): что разложить стопками - цена из контента
+                # без энергии, её же ровно сверяет engine.match_grid_target.
+                "stack_cost": _stack_cost_list(action.get("cost") or {}) if stacks else None,
                 "pattern_mirror": bool(action.get("pattern_mirror")),
                 "cost": manual_action_cost_list(cost, action.get("cost_chance", {}), state),
                 "gain": manual_action_gain_list(gain, action.get("gain_chance", {})),
@@ -1742,6 +1754,7 @@ def crafting_view(state: GameState) -> list[dict]:
         # за энергию (несколько преобразователей ведут их параллельно, по одному
         # на копию) - первый из них показывается стрелкой, как job печи.
         recipes.extend(_energy_grid_recipe_view(rid, state) for rid in engine.grid_energy_recipes_at(lid, state))
+        recipes.extend(_building_grid_recipe_view(bid, state, stacks) for bid in engine.grid_buildings_at(lid, state))
         energy_jobs = _converter_jobs_view(state) if lid == engine.CONVERTER_LOCATION_ID else []
         if job is None and energy_jobs:
             job = energy_jobs[0]
@@ -1750,6 +1763,8 @@ def crafting_view(state: GameState) -> list[dict]:
             "name": LOCATIONS[lid]["name"],
             "width": crafting["width"],
             "height": crafting["height"],
+            # Сборщик: ячейка - стопка (ресурс + количество), форма не важна.
+            "stacks": stacks,
             # Крафт пачкой ("Скрафтить ×N") - только у механизма с явным
             # crafting.batch (сейчас - верстак); остальным его позже дадут
             # улучшения. craft_grid_view режет times до 1 сам, не доверяя клиенту.
@@ -1803,6 +1818,7 @@ def _energy_grid_recipe_view(recipe_id: str, state: GameState) -> dict:
         "recipe_id": recipe_id,
         "name": recipe["name"],
         "pattern": recipe["pattern"],
+        "stack_cost": None,
         "pattern_mirror": bool(recipe.get("pattern_mirror")),
         "cost": cost_list(consumes, state),
         "gain": manual_action_gain_list(recipe.get("produces", {}), {}),
@@ -1818,6 +1834,53 @@ def _energy_grid_recipe_view(recipe_id: str, state: GameState) -> dict:
         # один крафт (даже если этот рецепт уже идёт в другом преобразователе).
         "available": free_building is not None,
         "machine_name": BUILDINGS[machine]["name"] if machine else None,
+    }
+
+
+def _stack_cost_list(cost: dict) -> list[dict]:
+    """Стопки для раскладки в сборщике (engine.stack_recipe_cost) - список для клиента."""
+    return [{"id": rid, "name": RESOURCE_NAMES[rid], "amount": amt} for rid, amt in engine.stack_recipe_cost(cost).items()]
+
+
+def building_item_id(building_id: str) -> str:
+    """Id постройки там, где клиент ждёт id ресурса: выход рецепта в модалке механизма,
+    строка и карточка справочника, закреплённая плитка. Совпадает с ключом рецепта
+    (engine.grid_recipe_key("building", ...)) - это разные пространства (ресурсы и
+    рецепты), совпадение безвредно. В state.resources такого id не бывает никогда."""
+    return engine.grid_recipe_key("building", building_id)
+
+
+def _building_grid_recipe_view(building_id: str, state: GameState, stacks: bool) -> dict:
+    """Постройка, собираемая в механизме (buildings.*.location), в форме сеточного
+    рецепта crafting_view: крафт сразу ставит постройку (engine.build), выходом служит
+    сама постройка (building_item_id). cost - цена текущего этапа у многоэтапной."""
+    b = BUILDINGS[building_id]
+    cost = engine.building_recipe_cost(building_id, state)
+    stage = engine.current_construction_stage(building_id, state)
+    owned = state.buildings.get(building_id, 0)
+    max_count = b.get("max_count")
+    return {
+        "action_id": engine.grid_recipe_key("building", building_id),
+        "kind": "building",
+        "building_id": building_id,
+        "name": b["name"],
+        "pattern": None if stacks else b.get("pattern"),
+        "stack_cost": _stack_cost_list(cost) if stacks else None,
+        "pattern_mirror": bool(b.get("pattern_mirror")),
+        "cost": cost_list(cost, state),
+        "gain": [{"id": building_item_id(building_id), "name": b["name"], "amount": 1}],
+        "enough": all(state.resources.get(rid, 0) >= amt for rid, amt in cost.items()),
+        "pinned": engine.grid_recipe_key("building", building_id) in state.pinned_recipes,
+        "sound_url": None,
+        "click_delay_ms": b.get("click_delay_ms"),
+        "duration_turns": None,
+        "owned": owned,
+        "max_count": max_count,
+        # Лимит достигнут - раскладка узнаётся, но «Построить» гаснет (build() и сам откажет).
+        "limit_reached": max_count is not None and owned >= max_count,
+        "stage_number": stage["number"] if stage else None,
+        "stage_total": stage["total"] if stage else None,
+        "stage_description": stage["description"] if stage else None,
     }
 
 
@@ -1913,7 +1976,11 @@ def resource_sources(resource_id: str) -> list[dict]:
     (soul_recipes), крафт за энергию (energy_recipes), ритуал
     (ritual_recipes), репликатор (resources.*.replication_cost), шахта
     (mining_info), лут/душа с моба (mobs.loot/soul_id),
-    приз лутбокса (loot_cases.prizes, с именем квеста-награды, если есть)."""
+    приз лутбокса (loot_cases.prizes, с именем квеста-награды, если есть).
+    resource_id вида building_item_id(...) - постройка: её единственный способ -
+    рецепт в механизме (building_sources)."""
+    if resource_id.startswith(engine.BUILDING_KEY_PREFIX):
+        return building_sources(resource_id[len(engine.BUILDING_KEY_PREFIX):])
     sources: list[dict] = []
 
     for aid, action in MANUAL_ACTIONS.items():
@@ -1921,23 +1988,26 @@ def resource_sources(resource_id: str) -> list[dict]:
         if not amount:
             continue
         pattern = action.get("pattern")
+        grid = engine.is_grid_action(aid)
         entry = {
-            "kind": "grid_craft" if pattern else "manual",
+            "kind": "grid_craft" if grid else "manual",
             "name": action["name"], "action_id": aid, "amount": _amount_display(amount),
             "cost": _plain_cost_list(action.get("cost", {})),
         }
         chance = (action.get("gain_chance") or {}).get(resource_id)
         if chance is not None and chance < 1:
             entry["chance"] = chance
-        if pattern:
+        if grid:
             location_id = action.get("location")
-            entry["location_id"] = location_id
-            entry["location_name"] = LOCATIONS.get(location_id, {}).get("name", location_id)
+            entry.update(_grid_source_place(location_id))
             # Сам узор - карточка рецепта рисует его сеткой (игрок должен видеть
             # целевую раскладку, а не только список ингредиентов). Размер rows =
-            # размер сетки механизма (валидатор: check_action_pattern).
+            # размер сетки механизма (валидатор: check_action_pattern). В сборщике
+            # узора нет - карточка рисует стопки (stack_cost).
             entry["pattern"] = pattern
             entry["pattern_mirror"] = bool(action.get("pattern_mirror"))
+            if entry["stacks"]:
+                entry["stack_cost"] = _stack_cost_list(action.get("cost") or {})
         sources.append(entry)
 
     # spawn_species - генетически НЕЗАВИСИМОЕ от gain поле (см. CLAUDE.md,
@@ -2134,6 +2204,47 @@ def resource_sources(resource_id: str) -> list[dict]:
     return sources
 
 
+def _grid_source_place(location_id) -> dict:
+    """Где собирается сеточный рецепт справочника: механизм, его сетка и режим
+    (stacks - сборщик: карточка рисует стопки вместо узора)."""
+    crafting = (LOCATIONS.get(location_id) or {}).get("crafting") or {}
+    return {
+        "location_id": location_id,
+        "location_name": LOCATIONS.get(location_id, {}).get("name", location_id),
+        "stacks": engine.location_stacks(location_id),
+        "grid_width": crafting.get("width"),
+        "grid_height": crafting.get("height"),
+    }
+
+
+def building_sources(building_id: str) -> list[dict]:
+    """Справочник для постройки (id building_item_id): рецепт в её механизме
+    (buildings.*.location) - узор или стопки сборщика. Пусто, если собрать её негде.
+    Цена многоэтапной - первого этапа (справочник по контенту, не по state);
+    «Разложить» берёт реальный текущий этап из crafting_view."""
+    b = BUILDINGS.get(building_id)
+    location_id = b.get("location") if b else None
+    if location_id not in LOCATIONS or engine.location_crafting(location_id) is None:
+        return []
+    place = _grid_source_place(location_id)
+    if not place["stacks"] and not b.get("pattern"):
+        return []
+    stages = engine.building_construction_stages(building_id)
+    cost = stages[0]["cost"] if stages else b.get("cost") or {}
+    key = engine.grid_recipe_key("building", building_id)
+    entry = {
+        "kind": "grid_craft", "name": b["name"], "action_id": key, "building_recipe": True,
+        "amount": 1, "cost": _plain_cost_list(cost), **place,
+        "pattern": None if place["stacks"] else b.get("pattern"),
+        "pattern_mirror": bool(b.get("pattern_mirror")),
+        "stage_total": len(stages) if stages else None,
+        "pin_key": key,
+    }
+    if place["stacks"]:
+        entry["stack_cost"] = _stack_cost_list(cost)
+    return [entry]
+
+
 _SMELTERY_SOURCE_KINDS = ("smelt", "alloy", "cast")
 # Поле записи resource_sources, которое отличает способ от других того же вида
 # (кроме сеточного крафта/плавильни - у них свой ключ, см. _source_pin_key).
@@ -2167,7 +2278,20 @@ def sources_summary_view() -> list[dict]:
         if not srcs:
             continue
         items.append({"id": rid, "name": RESOURCE_NAMES[rid], "kinds": sorted({s["kind"] for s in srcs})})
+    # Постройки - после ресурсов: их тоже ищут в справочнике («как собрать печь»).
+    for bid, b in BUILDINGS.items():
+        if building_sources(bid):
+            items.append({"id": building_item_id(bid), "name": b["name"], "kinds": ["grid_craft"], "building": True})
     return items
+
+
+def is_known_source_id(resource_id) -> bool:
+    """Id, который понимает справочник: ресурс или постройка (building_item_id)."""
+    if not isinstance(resource_id, str):
+        return False
+    if resource_id.startswith(engine.BUILDING_KEY_PREFIX):
+        return resource_id[len(engine.BUILDING_KEY_PREFIX):] in BUILDINGS
+    return resource_id in RESOURCE_NAMES
 
 
 def _location_opens_as_button(location_id: str) -> bool:
@@ -2183,8 +2307,8 @@ def _location_opens_as_button(location_id: str) -> bool:
     if any(l.get("parent_location") == location_id for l in LOCATIONS.values()):
         return False
     return not any(
-        a.get("location") == location_id and not a.get("pattern")
-        for a in MANUAL_ACTIONS.values()
+        a.get("location") == location_id and not engine.is_grid_action(aid)
+        for aid, a in MANUAL_ACTIONS.items()
     )
 
 
@@ -2356,44 +2480,6 @@ def build_view(state: GameState) -> dict:
         }
         for lid in engine.available_locations(state)
     ]
-    build = []
-    for bid in engine.available_buildings(state):
-        owned = state.buildings.get(bid, 0)
-        max_count = BUILDINGS[bid].get("max_count")
-        # Лимит построек достигнут - убираем карточку из каталога совсем, вместо
-        # того чтобы навсегда оставлять там большую неактивную кнопку (прямое
-        # пожелание, 2026-09-02) - штучную постройку всё равно видно в панели
-        # "Производственные мощности", и кнопка "⚙ Улучшения" (если у построики
-        # вообще есть upgrades) теперь тоже открывается оттуда, а не отсюда - так
-        # что каталог можно прятать безусловно, без исключения для построек с
-        # upgrades (было нужно, пока кнопка жила только здесь).
-        if max_count is not None and owned >= max_count:
-            continue
-        produces, consumes = engine.effective_building_stats(bid, state.techs, state.building_upgrades)
-        stage = engine.current_construction_stage(bid, state)
-        build.append({
-            "id": bid, "name": BUILDINGS[bid]["name"],
-            # Тот же tags, что у уже построенных копий (см. buildings.append выше) -
-            # даёт каталогу "Построить" фильтр по типу постройки, идентичный панели
-            # "Производственные мощности" (web_ui.html: renderBuildCatalogFilterBar/
-            # buildCatalogTagFilter), но без фильтра по состоянию/поломке - постройка
-            # из каталога ещё не построена, ломаться ей нечему.
-            "tags": BUILDINGS[bid].get("tags", []),
-            "cost": cost_list(stage["cost"] if stage else BUILDINGS[bid]["cost"], state),
-            "stage_number": stage["number"] if stage else None,
-            "stage_total": stage["total"] if stage else None,
-            "stage_description": stage["description"] if stage else None,
-            "description": BUILDINGS[bid].get("description", ""),
-            "owned": owned,
-            "max_count": max_count,
-            "produces": cost_list(produces), "consumes": cost_list(consumes),
-            "compute_power": BUILDINGS[bid].get("compute_power", 0),
-            "autocraft_slots": BUILDINGS[bid].get("autocraft_slots", 0),
-            "autocraft_assembler": assembler_view(bid),
-            "energy_converter": energy_converter_view(bid),
-            "click_delay_ms": BUILDINGS[bid].get("click_delay_ms"),
-            "upgrades": None if BUILDINGS[bid].get("breeding_slots") or BUILDINGS[bid].get("soul_collector") or BUILDINGS[bid].get("reactor") else building_upgrades_view(bid, state),
-        })
     tech = [
         {
             "id": tid, "name": TECHS[tid]["name"], "cost": cost_list(TECHS[tid]["cost"], state),
@@ -2452,6 +2538,9 @@ def build_view(state: GameState) -> dict:
         # показывать ★ и у такого рецепта, иначе повторный клик тихо откреплял бы.
         "pinned_recipes": list(state.pinned_recipes),
         "resource_names": RESOURCE_NAMES,
+        # Имена построек для id building_item_id - выход рецепта постройки в модалке
+        # механизма и справочник подписывают их тем же RESOURCE_NAME_LOOKUP.
+        "building_names": {bid: b["name"] for bid, b in BUILDINGS.items()},
         "resource_order": RESOURCE_ORDER,
         "energy_resource_id": engine.ENERGY_RESOURCE_ID,
         # Постройка-помощник (см. engine.RECIPE_BOARD_BUILDING_ID) - пока не работает
@@ -2522,7 +2611,7 @@ def build_view(state: GameState) -> dict:
         "techs_researched": len(state.techs),
         "techs_total": len(TECHS),
         "categories": {
-            "manual": manual, "build": build, "tech": tech,
+            "manual": manual, "tech": tech,
             "converter": converter,
         },
         "mine_field": engine.mine_field_view(state),
@@ -2825,6 +2914,10 @@ def craft_grid_view(state: GameState, location_id, placed, times) -> dict:
     if kind == "energy_recipe":
         times_requested = 1
         action_type = "start_energy_recipe"
+    elif kind == "building":
+        # Постройка: крафт сразу ставит её - тот же build(), что был у кнопки
+        # каталога (оплата, этапы, max_count, докрафт через заказ).
+        action_type = "build"
     else:
         action_type = "manual"
         # Многоходовой рецепт занимает механизм целиком (одна задача на локацию), так
@@ -3066,6 +3159,8 @@ def order_preview_view(state: GameState, action_id: str, qty: int) -> dict:
         matter = engine.replicator_matter(engine._autocraft_replicator_building(state) or replicators[0])
         total = {matter: engine.replication_matter_cost(target_id, qty, matter)}
         eta = engine.replicator_eta_turns(state, target_id, qty)
+    elif kind == "building":
+        raise KeyError("постройки не заказываются")
     else:
         if target_id not in MANUAL_ACTIONS:
             raise KeyError("неизвестный рецепт")
@@ -3243,7 +3338,7 @@ class Handler(BaseHTTPRequestHandler):
             # трогает STATE/save.json и не отдаёт "state" в ответе, за этим не
             # нужно перерисовывать всю игру.
             resource_id = payload.get("resource_id")
-            if resource_id not in RESOURCE_NAMES:
+            if not is_known_source_id(resource_id):
                 self._json(400, {"error": "неизвестный ресурс"})
                 return
             self._json(200, {"resource_id": resource_id, "sources": resource_sources(resource_id)})

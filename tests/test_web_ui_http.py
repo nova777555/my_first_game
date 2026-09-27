@@ -250,10 +250,11 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertIsInstance(state["default_action_delay_ms"], (int, float))
         self.assertGreaterEqual(state["default_action_delay_ms"], 0)
 
-    def test_build_and_manual_items_expose_click_delay_field(self):
+    def test_manual_items_expose_click_delay_field_and_there_is_no_build_catalog(self):
+        # Каталога «Построить» больше нет: постройки собираются в механизмах
+        # (buildings.*.location), их задержка - у рецепта в crafting_view.
         status, state = self._get("/api/state")
-        gen = next(b for b in state["categories"]["build"] if b["id"] == "gen")
-        self.assertIn("click_delay_ms", gen)
+        self.assertNotIn("build", state["categories"])
         gather_a = next(m for m in state["categories"]["manual"] if m["id"] == "gather_a")
         self.assertIn("click_delay_ms", gather_a)
 
@@ -388,12 +389,7 @@ class WebUiHttpTests(unittest.TestCase):
         gain_by_id = {g["id"]: g for g in craft_risky["gain"]}
         self.assertNotIn("chance", gain_by_id["risky_output"])  # у craft_risky шанс только на cost
 
-    def test_build_catalog_and_owned_buildings_expose_description(self):
-        status, state = self._get("/api/state")
-        self.assertEqual(status, 200)
-        gen_catalog = next(b for b in state["categories"]["build"] if b["id"] == "gen")
-        self.assertEqual(gen_catalog["description"], fixtures.BUILDINGS["gen"]["description"])
-
+    def test_owned_buildings_expose_description(self):
         web_ui.STATE.resources["raw_b"] = 5
         self._post("/api/action", {"type": "build", "id": "gen"})
         status, state = self._get("/api/state")
@@ -404,8 +400,8 @@ class WebUiHttpTests(unittest.TestCase):
         web_ui.STATE.resources["raw_b"] = 5
         self._post("/api/action", {"type": "build", "id": "gen"})
         status, state = self._get("/api/state")
-        gen_catalog = next(b for b in state["categories"]["build"] if b["id"] == "gen")
-        self.assertIsNone(gen_catalog["upgrades"])
+        gen_owned = next(b for b in state["buildings"] if b["id"] == "gen")
+        self.assertIsNone(gen_owned["upgrades"])
 
     def test_repair_is_no_longer_a_separate_category_and_is_driven_from_the_buildings_panel(self):
         # "gen" ломается без типа (breakdown_types не задан, breakdown_chance=0.0 -
@@ -483,7 +479,7 @@ class WebUiHttpTests(unittest.TestCase):
         web_ui.STATE.resources["raw_a"] = 100
         self._post("/api/action", {"type": "build", "id": "mechanism_a"})
         status, state = self._get("/api/state")
-        mech = next(b for b in state["categories"]["build"] if b["id"] == "mechanism_a")
+        mech = next(b for b in state["buildings"] if b["id"] == "mechanism_a")
         self.assertIsNotNone(mech["upgrades"])
         self.assertEqual(
             mech["upgrades"]["dependent_action_names"],
@@ -503,7 +499,7 @@ class WebUiHttpTests(unittest.TestCase):
         status, resp = self._post("/api/action", {"type": "building_upgrade", "id": "mechanism_a:mech_a_scale"})
         self.assertTrue(resp["log"]["ok"])
         status, state = self._get("/api/state")
-        mech = next(b for b in state["categories"]["build"] if b["id"] == "mechanism_a")
+        mech = next(b for b in state["buildings"] if b["id"] == "mechanism_a")
         current_action = mech["upgrades"]["current"]["example_action"]
         self.assertEqual({c["id"]: c["amount"] for c in current_action["gain"]}, {"mech_output": 6})
 
@@ -622,7 +618,7 @@ class WebUiHttpTests(unittest.TestCase):
         self._post("/api/action", {"type": "build", "id": "upgradable_factory"})
 
         status, state = self._get("/api/state")
-        factory = next(b for b in state["categories"]["build"] if b["id"] == "upgradable_factory")
+        factory = next(b for b in state["buildings"] if b["id"] == "upgradable_factory")
         ids_before = [u["id"] for u in factory["upgrades"]["upgrades"]]
         self.assertNotIn("uf_scale_more", ids_before)  # ещё не на очереди - не показывается
         self.assertIn("uf_scale", ids_before)  # первый в прогрессии - доступен сразу
@@ -635,62 +631,10 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
 
         status, state = self._get("/api/state")
-        factory = next(b for b in state["categories"]["build"] if b["id"] == "upgradable_factory")
+        factory = next(b for b in state["buildings"] if b["id"] == "upgradable_factory")
         ids = [u["id"] for u in factory["upgrades"]["upgrades"]]
         self.assertNotIn("uf_scale", ids)  # перекрытый более слабый уровень убран из списка
         self.assertIn("uf_scale_more", ids)
-
-    def test_build_catalog_tracks_multi_stage_progress_and_completes_last_stage(self):
-        web_ui.STATE.resources.update({"raw_a": 100, "raw_b": 100})
-
-        status, state = self._get("/api/state")
-        furnace = next(b for b in state["categories"]["build"] if b["id"] == "furnace")
-        self.assertEqual(furnace["stage_number"], 1)
-        self.assertEqual(furnace["stage_total"], 3)
-        self.assertEqual(furnace["stage_description"], "установить генератор")
-        self.assertEqual({c["id"]: c["amount"] for c in furnace["cost"]}, {"raw_a": 2})
-
-        status, resp = self._post("/api/action", {"type": "build", "id": "furnace"})
-        self.assertTrue(resp["log"]["ok"])
-        self.assertNotIn("furnace", [b["id"] for b in resp["state"]["buildings"]])
-        furnace2 = next(b for b in resp["state"]["categories"]["build"] if b["id"] == "furnace")
-        self.assertEqual(furnace2["stage_number"], 2)
-        self.assertEqual(furnace2["stage_description"], "установить радиатор")
-
-        self._post("/api/action", {"type": "build", "id": "furnace"})
-        status, resp = self._post("/api/action", {"type": "build", "id": "furnace"})
-        self.assertTrue(resp["log"]["ok"])
-        self.assertEqual(resp["log"]["message"], "Построено: Печь.")
-        self.assertIn("furnace", [b["id"] for b in resp["state"]["buildings"]])
-        furnace_final = next(b for b in resp["state"]["categories"]["build"] if b["id"] == "furnace")
-        # furnace без max_count - можно строить ещё одну копию, поэтому каталог
-        # снова показывает этап 1/3 (для СЛЕДУЮЩЕЙ копии), а не пропадает совсем.
-        self.assertEqual(furnace_final["stage_number"], 1)
-        self.assertEqual(next(b for b in resp["state"]["buildings"] if b["id"] == "furnace")["count"], 1)
-
-    def test_build_catalog_reports_stage_total_1_for_a_single_stage_list(self):
-        # kiln - ровно 1 этап в construction_stages; и bild_view, и actionLabel на
-        # фронте должны уметь отличить это от многоэтапной постройки (там stage_total
-        # должен позволить фронту НЕ показывать бессмысленный счётчик "1 из 1").
-        status, state = self._get("/api/state")
-        kiln = next(b for b in state["categories"]["build"] if b["id"] == "kiln")
-        self.assertEqual(kiln["stage_number"], 1)
-        self.assertEqual(kiln["stage_total"], 1)
-        self.assertEqual(kiln["stage_description"], "обжечь кирпичи")
-
-    def test_build_catalog_drops_a_building_once_its_max_count_is_reached(self):
-        # slot_hub (max_count=1, без upgrades) - как только построена единственная
-        # разрешённая копия, карточка должна пропасть из каталога "Построить"
-        # целиком, а не остаться там неактивной кнопкой (прямое пожелание,
-        # 2026-09-02) - штучную постройку по-прежнему видно в "buildings".
-        web_ui.STATE.resources["raw_a"] = 100
-        status, state = self._get("/api/state")
-        self.assertIn("slot_hub", [b["id"] for b in state["categories"]["build"]])
-
-        status, resp = self._post("/api/action", {"type": "build", "id": "slot_hub"})
-        self.assertTrue(resp["log"]["ok"])
-        self.assertNotIn("slot_hub", [b["id"] for b in resp["state"]["categories"]["build"]])
-        self.assertEqual(next(b for b in resp["state"]["buildings"] if b["id"] == "slot_hub")["count"], 1)
 
     def test_mining_new_field_and_hit_cell_over_http(self):
         # Поле шахты - отдельные эндпоинты (как insert_soul/house_creature), НЕ

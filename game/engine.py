@@ -1890,6 +1890,11 @@ def _order_target_error(state: GameState, key: str) -> tuple[str | None, str | N
         if target_id not in RESOURCE_REPLICATION_COST:
             return None, "Этот ресурс репликатор сделать не может."
         return f"Репликация: {RESOURCE_NAMES[target_id]}", None
+    if kind == "building":
+        # Крафт постройки сразу ставит её (build()), на склад ничего не кладёт -
+        # заказу «×N» нечего выдать.
+        name = BUILDINGS[target_id]["name"] if target_id in BUILDINGS else None
+        return name, "Постройки не заказываются - собери её в механизме."
     if target_id not in MANUAL_ACTIONS:
         return None, "Такого рецепта нет."
     action = MANUAL_ACTIONS[target_id]
@@ -1982,6 +1987,8 @@ def check_order(state: GameState, key: str, qty: int) -> AutocraftFailure | None
     elif kind == "replicator":
         if target_id not in RESOURCE_REPLICATION_COST:
             return AutocraftFailure(target_id, "no_recipe")
+    elif kind == "building":
+        return AutocraftFailure(target_id, "no_recipe")  # см. _order_target_error
     elif not is_manual_action_unlocked(target_id, state):
         return AutocraftFailure(next(iter(MANUAL_ACTIONS[target_id]["gain"])), "tech_locked")
     failure, spec = _recipe_order_spec(state, key, qty)
@@ -3014,6 +3021,15 @@ def location_crafting(location_id: str) -> dict | None:
     return LOCATIONS[location_id].get("crafting")
 
 
+def location_stacks(location_id) -> bool:
+    """crafting.stacks - механизм-сборщик: форма не важна, в ячейке лежит СТОПКА
+    (ресурс + количество), рецепт узнаётся по набору стопок, который обязан ровно
+    совпасть с ценой (см. _normalize_stacks). Узоров у рецептов такой локации нет."""
+    if location_id is None or location_id not in LOCATIONS:
+        return False
+    return bool((location_crafting(location_id) or {}).get("stacks"))
+
+
 def action_pattern(action_id: str) -> dict | None:
     """manual_actions.*.pattern ({"rows","key"}) - узор рецепта на сетке. None у
     действия, которое остаётся обычной карточкой даже внутри локации-механизма
@@ -3022,7 +3038,36 @@ def action_pattern(action_id: str) -> dict | None:
 
 
 def is_grid_action(action_id: str) -> bool:
-    return action_pattern(action_id) is not None
+    """Действие собирается в модалке механизма: у него есть узор, либо оно живёт в
+    сборщике (location_stacks) - там рецептом служит сама цена, узор не нужен."""
+    return action_pattern(action_id) is not None or location_stacks(MANUAL_ACTIONS[action_id].get("location"))
+
+
+def building_pattern(building_id: str) -> dict | None:
+    """buildings.*.pattern - узор постройки на сетке её механизма (buildings.*.location),
+    слой над cost, как у ручного действия. None в сборщике (там узоров нет)."""
+    return BUILDINGS[building_id].get("pattern")
+
+
+def building_recipe_cost(building_id: str, state: GameState) -> dict:
+    """Что спишет следующий крафт постройки: цена текущего этапа у многоэтапной
+    (current_construction_stage), иначе cost - то же, что платит build()."""
+    stage = current_construction_stage(building_id, state)
+    return stage["cost"] if stage else BUILDINGS[building_id]["cost"]
+
+
+def grid_buildings_at(location_id: str, state: GameState) -> list[str]:
+    """Постройки, которые игрок может собрать в механизме этой локации прямо сейчас
+    (buildings.*.location + гейт is_building_unlocked). Лимит max_count НЕ отсекает:
+    раскладка всё равно узнаётся, а build() объясняет, почему больше нельзя."""
+    if location_crafting(location_id) is None:
+        return []
+    stacks = location_stacks(location_id)
+    return [
+        bid for bid, b in BUILDINGS.items()
+        if b.get("location") == location_id and is_building_unlocked(bid, state)
+        and (stacks or building_pattern(bid) is not None)
+    ]
 
 
 def _pattern_shape(pattern: dict) -> tuple[tuple[str | None, ...], ...]:
@@ -3100,10 +3145,13 @@ RITUAL_RECIPE_KEY_PREFIX = "ritual_recipe:"
 # Репликация ресурса (resources.*.replication_cost): target_id - id РЕСУРСА. Ключ
 # заказа «×N» (N - единицы ресурса) и приоритета в state.action_priority.
 REPLICATOR_KEY_PREFIX = "replicator:"
+# Постройка, собираемая в механизме (buildings.*.location) - сеточный рецепт, но не
+# заказ и не цель автоматизатора: крафт сразу ставит постройку (build()).
+BUILDING_KEY_PREFIX = "building:"
 
 
 def grid_recipe_key(kind: str, target_id: str) -> str:
-    """Ключ рецепта (kind - из AUTOMATION_TARGET_KINDS или "replicator") в
+    """Ключ рецепта (kind - из AUTOMATION_TARGET_KINDS, "replicator" или "building") в
     state.pinned_recipes, в заказах «рецепт ×N», в state.action_priority и в ответах HTTP."""
     if kind == "energy_recipe":
         return ENERGY_RECIPE_KEY_PREFIX + target_id
@@ -3111,6 +3159,8 @@ def grid_recipe_key(kind: str, target_id: str) -> str:
         return RITUAL_RECIPE_KEY_PREFIX + target_id
     if kind == "replicator":
         return REPLICATOR_KEY_PREFIX + target_id
+    if kind == "building":
+        return BUILDING_KEY_PREFIX + target_id
     return target_id
 
 
@@ -3122,6 +3172,8 @@ def parse_grid_recipe_key(key: str) -> tuple[str, str]:
         return "ritual_recipe", key[len(RITUAL_RECIPE_KEY_PREFIX):]
     if key.startswith(REPLICATOR_KEY_PREFIX):
         return "replicator", key[len(REPLICATOR_KEY_PREFIX):]
+    if key.startswith(BUILDING_KEY_PREFIX):
+        return "building", key[len(BUILDING_KEY_PREFIX):]
     return "manual_action", key
 
 
@@ -3132,19 +3184,70 @@ def _shape_matches(pattern: dict, mirror: bool, normalized: tuple) -> bool:
     return mirror and tuple(tuple(reversed(row)) for row in shape) == normalized
 
 
+def _normalize_stacks(cells: list) -> dict[str, float]:
+    """Раскладка сборщика (location_stacks) - ячейка None или {"id", "amount"} (голый
+    id считается стопкой из 1) - в набор ресурс -> сумма по всем ячейкам: форма и
+    порядок не важны. Ячейка с неизвестным ресурсом или неположительным количеством
+    делает раскладку непригодной ({}): раскладка приходит из тела HTTP-запроса."""
+    total: dict[str, float] = {}
+    for cell in cells:
+        if cell is None:
+            continue
+        if isinstance(cell, str):
+            rid, amount = cell, 1
+        elif isinstance(cell, dict):
+            rid, amount = cell.get("id"), cell.get("amount")
+        else:
+            return {}
+        if (rid not in RESOURCE_NAMES or isinstance(amount, bool)
+                or not isinstance(amount, (int, float)) or amount <= 0):
+            return {}
+        total[rid] = total.get(rid, 0) + amount
+    return total
+
+
+def stack_recipe_cost(cost: dict) -> dict:
+    """Какие стопки нужно разложить в сборщике под эту цену: всё, кроме энергии - она,
+    как и в узоре, в ячейку не кладётся и списывается сверх (см. check_grid_pattern)."""
+    return {rid: amount for rid, amount in cost.items() if rid != ENERGY_RESOURCE_ID}
+
+
+def _stacks_match(cost: dict, laid: dict[str, float]) -> bool:
+    need = stack_recipe_cost(cost)
+    return bool(need) and set(need) == set(laid) and all(abs(laid[r] - need[r]) < 1e-9 for r in need)
+
+
 def match_grid_target(state: GameState, location_id: str, placed: list) -> tuple[str, str] | None:
     """Принимает раскладку игрока на сетке локации-механизма (список длиной
     width*height: id ресурса в ячейке или None) и возвращает собранный рецепт
-    как (kind, id) - kind из AUTOMATION_TARGET_KINDS: сеточное ручное действие
-    или рецепт крафта за энергию (только в преобразователе, см.
-    grid_energy_recipes_at). None - если сетки у локации нет, раскладка пуста
-    или не совпала ни с одним узором ОТКРЫТОГО рецепта этой локации (иначе игрок
-    мог бы собрать рецепт технологии, которую ещё не исследовал). Матчит только
-    рецепты ЭТОЙ локации - сетка соседнего механизма своих рецептов сюда не
-    приносит. Учитывает pattern_mirror - зеркальный по горизонтали узор тоже
-    засчитывается."""
-    crafting = location_crafting(location_id)
-    if crafting is None:
+    как (kind, id) - kind из AUTOMATION_TARGET_KINDS или "building": сеточное
+    ручное действие, рецепт крафта за энергию (только в преобразователе, см.
+    grid_energy_recipes_at) или постройка (buildings.*.location). None - если
+    сетки у локации нет, раскладка пуста или не совпала ни с одним узором
+    ОТКРЫТОГО рецепта этой локации (иначе игрок мог бы собрать рецепт технологии,
+    которую ещё не исследовал). Матчит только рецепты ЭТОЙ локации - сетка
+    соседнего механизма своих рецептов сюда не приносит. Учитывает pattern_mirror -
+    зеркальный по горизонтали узор тоже засчитывается.
+
+    Сборщик (location_stacks): ячейка - стопка {"id", "amount"}, форма не важна,
+    набор стопок обязан РОВНО совпасть с ценой рецепта из контента (у постройки -
+    с ценой текущего этапа) без энергии; иначе одинаковые по составу рецепты
+    (дерево + камень у половины построек) было бы не различить."""
+    crafting = location_crafting(location_id) if location_id in LOCATIONS else None
+    if crafting is None or len(placed) != crafting["width"] * crafting["height"]:
+        return None
+    if location_stacks(location_id):
+        laid = _normalize_stacks(placed)
+        if not laid:
+            return None
+        for action_id in grid_actions_at(location_id, state):
+            if _stacks_match(MANUAL_ACTIONS[action_id].get("cost") or {}, laid):
+                return "manual_action", action_id
+        for building_id in grid_buildings_at(location_id, state):
+            if _stacks_match(building_recipe_cost(building_id, state), laid):
+                return "building", building_id
+        return None
+    if any(cell is not None and not isinstance(cell, str) for cell in placed):
         return None
     normalized = _normalize_grid(placed, crafting["width"], crafting["height"])
     if not normalized:
@@ -3155,6 +3258,9 @@ def match_grid_target(state: GameState, location_id: str, placed: list) -> tuple
     for recipe_id in grid_energy_recipes_at(location_id, state):
         if _shape_matches(energy_recipe_pattern(recipe_id), bool(ENERGY_RECIPES[recipe_id].get("pattern_mirror")), normalized):
             return "energy_recipe", recipe_id
+    for building_id in grid_buildings_at(location_id, state):
+        if _shape_matches(building_pattern(building_id), bool(BUILDINGS[building_id].get("pattern_mirror")), normalized):
+            return "building", building_id
     return None
 
 
@@ -7078,6 +7184,10 @@ def toggle_pinned_recipe(state: GameState, action_id: str) -> ActionResult:
         if target_id not in ENERGY_RECIPES or energy_recipe_pattern(target_id) is None:
             return ActionResult(False, "Это не сеточный рецепт.")
         name = ENERGY_RECIPES[target_id]["name"]
+    elif kind == "building":
+        if target_id not in BUILDINGS or not BUILDINGS[target_id].get("location"):
+            return ActionResult(False, "Эту постройку нигде не собрать.")
+        name = BUILDINGS[target_id]["name"]
     else:
         if kind != "manual_action" or target_id not in MANUAL_ACTIONS or not is_grid_action(target_id):
             return ActionResult(False, "Это не сеточный рецепт.")

@@ -300,7 +300,25 @@ def validate(data: dict) -> list[str]:
             if not isinstance(chance, (int, float)) or isinstance(chance, bool) or not (0 <= chance <= 1):
                 errors.append(f"{where}: шанс для '{rid}' должен быть числом от 0 до 1")
 
+    def is_stacks_location(loc_id) -> bool:
+        crafting = locations.get(loc_id, {}).get("crafting") if loc_id in locations else None
+        return isinstance(crafting, dict) and crafting.get("stacks") is True
+
+    def check_stacks_recipe(label: str, entity: dict, costs: list) -> None:
+        """Рецепт сборщика (crafting.stacks): форма не важна, рецептом служит цена -
+        узор лишний, а цена без энергии обязана быть непустой (энергию, как и в узоре,
+        в ячейку не положить - разложить было бы нечего). costs - [(где, cost)], у
+        многоэтапной постройки по одной на этап."""
+        if entity.get("pattern") is not None or entity.get("pattern_mirror"):
+            errors.append(f"{label}: в сборщике форма не важна - узор (pattern) не нужен, рецептом служит сама цена")
+        for where, cost in costs:
+            if isinstance(cost, dict) and not any(rid != _ENERGY_RESOURCE_ID for rid in cost):
+                errors.append(f"{where}: в сборщике рецепт узнаётся по стопкам цены, а кроме энергии в ней ничего нет")
+
     def check_action_pattern(aid: str, action: dict, loc_id) -> None:
+        if is_stacks_location(loc_id):
+            check_stacks_recipe(f"Действие '{aid}'", action, [(f"Действие '{aid}'.cost", action.get("cost") or {})])
+            return
         check_grid_pattern(f"Действие '{aid}'", action, loc_id, "cost")
 
     def check_grid_pattern(label: str, action: dict, loc_id, cost_field: str) -> None:
@@ -712,6 +730,12 @@ def validate(data: dict) -> list[str]:
                 # batch - крафт пачкой ("Скрафтить ×N"), необязательный флаг.
                 if "batch" in crafting and not isinstance(crafting["batch"], bool):
                     errors.append(f"{where}.batch: должен быть true/false или отсутствовать")
+                # stacks - сборщик: форма не важна, в ячейке стопка (ресурс + количество),
+                # рецептом служит сама цена (game/engine.py: match_grid_target).
+                if "stacks" in crafting and not isinstance(crafting["stacks"], bool):
+                    errors.append(f"{where}.stacks: должен быть true/false или отсутствовать")
+                elif crafting.get("stacks") and lid == _CONVERTER_LOCATION_ID:
+                    errors.append(f"{where}.stacks: у преобразователя рецепты собираются только узором")
         # shows_building_mechanisms - в этой локации (обычно «Механизмы») появляются
         # кнопки открытия построек-механизмов (автоматизатор, синтезатор душ,
         # ритуальный круг, реактор), см. web_ui.html: buildingMechanismsAt.
@@ -801,8 +825,72 @@ def validate(data: dict) -> list[str]:
         for variant in variants:
             taken.setdefault(variant, label)
 
+    # То же для сборщика: форма там не важна, рецепт узнаётся по набору стопок (цена
+    # без энергии, game/engine.py: _stacks_match) - одинаковые цены не различить.
+    stacks_by_location: dict[str, dict[tuple, str]] = {}
+
+    def register_stacks(label: str, loc_id, cost) -> None:
+        if not isinstance(cost, dict):
+            return
+        items = [(rid, n) for rid, n in cost.items() if rid != _ENERGY_RESOURCE_ID]
+        if not items or not all(isinstance(n, (int, float)) and not isinstance(n, bool) for _, n in items):
+            return
+        need = tuple(sorted(items))
+        taken = stacks_by_location.setdefault(loc_id, {})
+        other = taken.get(need)
+        if other is not None and other != label:
+            errors.append(
+                f"{label}: тот же набор стопок уже занят ({other}) в сборщике '{loc_id}' - "
+                f"два рецепта с одинаковой ценой игроку не различить"
+            )
+            return
+        taken[need] = label
+
     for aid, a in manual_actions.items():
         register_pattern_shape(f"Действие '{aid}'", a, a.get("location"))
+        if is_stacks_location(a.get("location")):
+            register_stacks(f"Действие '{aid}'", a.get("location"), a.get("cost") or {})
+
+    # Где собирается постройка (buildings.*.location) - механизм с крафт-сеткой: на
+    # верстаке узор (pattern - слой над cost, как у ручного действия, та же таблица
+    # форм), в сборщике стопки. Без location постройку в игре не собрать нигде -
+    # это не ошибка (редактор предупреждает), но узор без location бессмыслен.
+    for bid, b in buildings.items():
+        label = f"Постройка '{bid}'"
+        loc_id = b.get("location")
+        if loc_id is None:
+            if b.get("pattern") is not None:
+                errors.append(f"{label}.pattern: узор есть, а где собирается постройка (location) не указано")
+            continue
+        if loc_id not in locations:
+            errors.append(f"{label}.location: неизвестная локация '{loc_id}'")
+            continue
+        if not isinstance(locations[loc_id].get("crafting"), dict):
+            errors.append(f"{label}.location: у локации '{loc_id}' нет крафт-сетки (crafting) - собрать постройку там негде")
+            continue
+        stages = b.get("construction_stages")
+        stage_costs = [
+            (f"{label}.construction_stages[{i}].cost", s.get("cost") or {})
+            for i, s in enumerate(stages) if isinstance(s, dict)
+        ] if isinstance(stages, list) and stages else []
+        if is_stacks_location(loc_id):
+            costs = stage_costs or [(f"{label}.cost", b.get("cost") or {})]
+            check_stacks_recipe(label, b, costs)
+            for _, cost in costs:
+                register_stacks(label, loc_id, cost)
+            continue
+        if stage_costs:
+            errors.append(
+                f"{label}: многоэтапную постройку собирают только в сборщике (crafting.stacks) - "
+                f"один узор не повторит цену каждого этапа"
+            )
+        if b.get("pattern") is None:
+            errors.append(
+                f"{label}: у механизма '{loc_id}' рецепты собираются узором, а у постройки узора (pattern) нет - "
+                f"собрать её будет нельзя"
+            )
+        check_grid_pattern(label, b, loc_id, "cost")
+        register_pattern_shape(label, b, loc_id)
 
     for bid, b in buildings.items():
         record_id(bid, "постройка")
