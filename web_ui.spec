@@ -13,6 +13,8 @@ a = Analysis(
         # web_ui.py ищет web_ui.html через Path(__file__).with_name(...) -
         # должен лежать рядом с самим web_ui.py внутри сборки (корень бандла).
         (os.path.join(ROOT, "tools", "web_ui.html"), "."),
+        # Оформление модалки механизма (фон, прогресс, движения, частицы) - тот же приём.
+        (os.path.join(ROOT, "tools", "mechanism_fx.js"), "."),
         # game/content.py ищет content.json тем же паттерном - должен лежать
         # рядом с game/content.py внутри сборки, то есть в подпапке game/.
         (os.path.join(ROOT, "game", "content.json"), "game"),

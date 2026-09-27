@@ -1559,6 +1559,57 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(resp["state"]["resources"]["raw_a"], 98)
         self.assertEqual(resp["state"]["resources"]["grid_output"], 1)
 
+    def test_crafting_view_exposes_mechanism_appearance(self):
+        status, state = self._get("/api/state")
+        entry = next(c for c in state["crafting"] if c["location_id"] == "grid_loc")
+        # Не оформлен - всё пусто, прогресс заливается слева направо (как стрелка).
+        self.assertEqual(entry["appearance"], {
+            "texture": None, "texture_dim": None, "progress_icon": None, "progress_fill": "right",
+            "motion": None, "particles": None,
+        })
+        icon = {"grid": ["A"], "palette": {"A": "#ffffff"}}
+        web_ui.LOCATIONS["grid_loc"]["appearance"] = {
+            "texture": icon, "progress_icon": icon, "progress_fill": "up",
+            "motion": "strike", "particles": "sparks", "sound": "mechanism_grid_loc.wav",
+        }
+        try:
+            status, state = self._get("/api/state")
+            look = next(c for c in state["crafting"] if c["location_id"] == "grid_loc")["appearance"]
+            self.assertEqual((look["progress_fill"], look["motion"], look["particles"]), ("up", "strike", "sparks"))
+            self.assertEqual(look["texture"], icon)
+            self.assertNotIn("sound", look)  # звук подставляет сервер в лог хода
+        finally:
+            del web_ui.LOCATIONS["grid_loc"]["appearance"]
+
+    def test_mechanism_sound_is_fallback_for_recipes_without_own_sound(self):
+        web_ui.STATE.resources["raw_a"] = 100
+        web_ui.LOCATIONS["grid_loc"]["appearance"] = {"sound": "mechanism_grid_loc.wav"}
+        try:
+            # сеточный крафт
+            status, resp = self._post("/api/craft_grid", {
+                "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 1,
+            })
+            self.assertEqual(resp["logs"][0]["sound_url"], "/sounds/mechanism_grid_loc.wav")
+            # обычная карточка действия той же локации
+            status, resp = self._post("/api/action", {"type": "manual", "id": "grid_plain_card"})
+            self.assertEqual(resp["log"]["sound_url"], "/sounds/mechanism_grid_loc.wav")
+            # свой звук рецепта главнее звука механизма
+            web_ui.MANUAL_ACTIONS["grid_line"]["sound"] = "grid_line.wav"
+            try:
+                status, resp = self._post("/api/craft_grid", {
+                    "location_id": "grid_loc", "placed": ["raw_a", "raw_a", None, None], "times": 1,
+                })
+                self.assertEqual(resp["logs"][0]["sound_url"], "/sounds/grid_line.wav")
+            finally:
+                del web_ui.MANUAL_ACTIONS["grid_line"]["sound"]
+        finally:
+            del web_ui.LOCATIONS["grid_loc"]["appearance"]
+
+    def test_mechanism_fx_js_is_served(self):
+        status, body = self._get_raw("/mechanism_fx.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"MECH_FX_MOTIONS", body)
+
     def test_craft_grid_rejects_unmatched_layout_without_spending_a_turn(self):
         status, resp = self._post("/api/craft_grid", {
             "location_id": "grid_loc", "placed": [None, None, None, None], "times": 1,

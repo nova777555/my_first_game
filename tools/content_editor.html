@@ -518,6 +518,35 @@
   .pattern-note.ok { background: #f2f7f0; border: 1px solid #b7cdb0; color: var(--ok); }
   .pattern-note.err { background: #fdf1ef; border: 1px solid #e0b3ac; color: var(--danger); }
   .pattern-note.warn { background: #fbf4e4; border: 1px solid #e3cf9c; color: #7a5a12; margin: 6px 0 10px; }
+
+  /* Окно «Оформление механизма» (openMechanismAppearanceModal): превью сцены в
+     цветах игры (tools/web_ui.html: .cg-stage/.cg-cell/.cg-output). */
+  .modal.settings-modal.appearance-modal { max-width: 720px; }
+  .appearance-body { padding: 4px 16px 14px; }
+  .mfx-preview { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 12px; }
+  .mfx-preview-stage {
+    display: flex; align-items: center; justify-content: center; gap: 20px; padding: 18px 22px;
+    background-color: #14171b; box-shadow: inset 0 0 0 1px rgba(240,160,48,.22); border-radius: 4px;
+  }
+  .mfx-preview-grid {
+    display: grid; grid-template-columns: repeat(2, 54px); gap: 5px; padding: 5px;
+    background: rgba(10,12,15,.6); box-shadow: 0 0 0 1px rgba(0,0,0,.55);
+  }
+  .mfx-preview-cell {
+    width: 54px; height: 54px; display: flex; align-items: center; justify-content: center;
+    background-color: rgba(0,0,0,.25); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+  }
+  .mfx-preview-arrow { display: flex; align-items: center; }
+  .mfx-preview-output {
+    width: 66px; height: 66px; background: #14171b;
+    box-shadow: inset 0 0 0 2px rgba(240,160,48,.55), 0 0 22px -6px rgba(240,160,48,.6);
+  }
+  .mfx-preview-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .mfx-seed-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .mfx-seed { display: inline-flex; align-items: center; gap: 5px; }
+  .mfx-swatch { width: 54px; height: 54px; flex: none; border: 1px solid var(--border); border-radius: 3px; background-color: #14171b; }
+  .mfx-swatch.mini { width: 22px; height: 22px; }
+  .mfx-swatch.empty { background: repeating-linear-gradient(45deg, #eee9df 0 6px, #f8f5ef 6px 12px); }
 </style>
 </head>
 <body>
@@ -569,6 +598,8 @@
 
 <div id="banner"></div>
 
+<!-- Общий с игрой код оформления механизма - превью окна «Оформление», см. tools/mechanism_fx.js. -->
+<script src="/mechanism_fx.js"></script>
 <script>
 let DATA = null;
 // Шаблоны повторяющихся "лестниц" карточек (тиры склада/инструмента, улучшения
@@ -3118,6 +3149,620 @@ function craftingGridRow(loc, lid) {
   return row;
 }
 
+// ---------- Оформление механизма (locations.*.appearance) ----------
+// Фон-текстура сцены, пиксельный прогресс, движение, частицы и звук модалки
+// механизма. Варианты движения/частиц и вся отрисовка - общий с игрой
+// tools/mechanism_fx.js, поэтому превью здесь = то, что увидит игрок.
+
+// Заготовки (MECHANISM_TEXTURE_SEEDS/MECHANISM_PROGRESS_SEEDS) - стартовые
+// картинки, чтобы не рисовать 32×32 с нуля: выбрал, потом доработал в «Нарисовать…».
+const MECHANISM_TEXTURE_SEEDS = {
+  planks: { name: "Доски", icon: { grid: [
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "CCCCCACCCCCCCCCCCCCCCCCCCCCCCCCC",
+    "BBBBBABBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "BBDDDABBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "BBBEBABEBDDDDDDDBBBBBBBBBBBBBBBB",
+    "BBBBBABBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "BBBDDADDDDDDBBBBBBBBBBBBBBBBBBBB",
+    "BBBDDADBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "CCCCCCCCCCCCCCCCCCCCCACCCCCCCCCC",
+    "BBBBBBBBBBBBBBBBBBBBBABBBBBBBBBB",
+    "BBBBBDDDDDDDDBBBBBBBBABBBBBBBBBB",
+    "BBBBBBBBBBBBBBBBBBBEBABEBBBBBBBB",
+    "BBBDDDDDDDDDDBBBBBBBBABBBBDDDDBB",
+    "BBBBBBBDDDDDBBBBBBBBBABBBBBBBBBB",
+    "BBBDDDDDDDDBBBBBBBBBBABBBBBBBBBB",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "CCCCCCCCCCCCCACCCCCCCCCCCCCCCCCC",
+    "BBBBBBBBBBBBBABBBBBBBBBBBBBBBBBB",
+    "BBDDDDDDDDDDDADBBBDDDDDDDBBBBBBB",
+    "BBBBBBBBBBBEDADEBBBBBBBBBBBBBBBB",
+    "BBBBBBBBBBBBBABBBBBBBBBBBBBBBBBB",
+    "BBBBBBBBBBBBBABBBBBBBBBBBDDDDBBB",
+    "BBBBBBBBBBBBBABBBBBBBBBBBBBBBBBB",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "CCCCCCCCCCCCCCCCCCCCCCCCCCCACCCC",
+    "BBBBDDDDDDDDBDDDDDDDBBBBBBBABBBB",
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBABBBB",
+    "DDDDDBBBBBBBBBBBBBBBBBBBBEBABEDD",
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBABBBB",
+    "BBBBBBBBBBBBDDDDDDBBBBBBBBBABBBB",
+    "DDDDDBBBBBBBBBBBBBBBBBBBBBBADDDD",
+  ], palette: {"A": "#4a2e17", "B": "#9a6b3f", "C": "#b98a52", "D": "#7d5230", "E": "#3a3d42"} } },
+  stone_bricks: { name: "Каменный кирпич", icon: { grid: [
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MHHHHHHHHHHHHHHHMHHHHHHHHHHHHHHH",
+    "MCACCCCCCCCCCCBDMCBCCCCCCCCCCCCD",
+    "MCACAACCCCBCCCCDMCCCCCCCCCCCCCCD",
+    "MCCCCCABCCCCCCCDMCCCCCCCCCCCCCCD",
+    "MCCCCCCCCBCCBCCDMCCCCCCACCCCCBCD",
+    "MCCCCCCCCCCCCCCDMCCCCCCCCCCCCCCD",
+    "MDDDDDDDDDDDDDDDMDDDDDDDDDDDDDDD",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "HHHHHHHHMHHHHHHHHHHHHHHHMHHHHHHH",
+    "CCCCCCCDMCAAAAAAAAABAAADMCCCCCCC",
+    "CCBCCCCDMAABAAABAAAAAAADMCCCCCCC",
+    "CBCCCCCDMAAAAAAAAAAAAAADMCCCCCCB",
+    "CCCCCCCDMABAABAAAAAAAAADMCCCCCCC",
+    "CCCCCCCDMAAAAAAACAAAAAADMBCCCCCC",
+    "DDDDDDDDMDDDDDDDDDDDDDDDMDDDDDDD",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "MHHHHHHHHHHHHHHHMHHHHHHHHHHHHHHH",
+    "MAAAAAAAAAAAAAADMAAAAAAAAAAAAAAD",
+    "MAAAAAACBAAAAAADMAAAAAACAABCAABD",
+    "MAAAAAAAAAAAAAADMAAABAAAAAAAAAAD",
+    "MAAAAAACAAAAACADMAAAAAAABAAAAAAD",
+    "MAAAAAAAAAAAAAADMAAABAAAAAAAAAAD",
+    "MDDDDDDDDDDDDDDDMDDDDDDDDDDDDDDD",
+    "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+    "HHHHHHHHMHHHHHHHHHHHHHHHMHHHHHHH",
+    "BBBBBBBDMCCCCCCCCBCCCCCDMABBBBCB",
+    "BBABBBBDMBCCCCBCCCCCCCCDMBBBBBBB",
+    "BBBBCBADMCBCCCCCCCCCCCCDMBBBBBBB",
+    "BBBCBBBDMCCCCCCCCCCCCCCDMBBBCBBB",
+    "BBBBBBBDMCCCCCCCCCCCCCCDMBBBBBBB",
+    "DDDDDDDDMDDDDDDDDDDDDDDDMDDDDDDD",
+  ], palette: {"M": "#2e3035", "A": "#6f7378", "B": "#7d8186", "C": "#62666b", "H": "#8e9297", "D": "#50545a"} } },
+  metal: { name: "Металл", icon: { grid: [
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HBBBBBBBBBBBBBBDHCBBBBBBBBCBBBBD",
+    "HBRDBBBBCBCBRDBDHBRDBBBBBBBBRDBD",
+    "HBDBBBBBBBBBDBBDHBDBBBBBBBBBDBBD",
+    "HBCBBBBBBCBBBBBDHBBBBCCBCBBBBCBD",
+    "HCBBBBBBBBBBCBBDHBCBBBCBBBBBBBBD",
+    "HBBBBBBBBBBBBBBDHBBCBBBBBBBBBBBD",
+    "HBBBBBBBBBBBCBBDHBBBBBBBBBBBBBBD",
+    "HBBBBBBBBBBBBBBDHBBBBBBBBBBBBBBD",
+    "HBBBBBBBBCBBBBBDHBBBBBBBCBCBBBBD",
+    "HBBBBCBBBBBBBCBDHBBBBBBBBBBBBBBD",
+    "HBCBBBBBBBBBBBCDHBBBBBBBBBBBBBBD",
+    "HCRDBCBBBBBCRDBDHBRDCBBBBBBBRDBD",
+    "HBDBBBBBBBBBDBBDHBDBBBBBBBBBDBBD",
+    "HBBBBBBBBBBBBBBDHBCBBBBBBBBBBBBD",
+    "HDDDDDDDDDDDDDDDHDDDDDDDDDDDDDDD",
+    "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
+    "HBBBBBBBBBBBBBBDHBBBBBBBBBBBBBBD",
+    "HBRDBBBBBBBBRDBDHBRDBBBBBBBCRDBD",
+    "HBDBBBBCBBBBDBBDHBDBCBBBBBBBDBBD",
+    "HBBBCBCBBBBBBBBDHCBBBBBBBBBBBBBD",
+    "HBBCBBBBBBBBCBBDHBBBBBBCBBBBBBCD",
+    "HBBBBBBBCBBBBBBDHBBBBBBBBBBBBBBD",
+    "HBBBBBBBBBBBBBBDHBBBBBBBBBBBBBBD",
+    "HBBBCBBCBBBBBBBDHBBBBBBBBBBBBCBD",
+    "HBBBBBBBBBCBBBBDHBBBBBCBBBBBBBBD",
+    "HCBBBBBBBBBBBBCDHBBBBBBBBBBBBBBD",
+    "HBBCBBBBBBCBBBBDHBBBBBBBBBBBBBBD",
+    "HBRDBBBBCBCBRDBDHBRDBBBBBBBBRDBD",
+    "HBDBBCBBBBBBDBBDHBDBBCBBBCBBDBBD",
+    "HBBBBBBBCBBBBBBDHBBBBBBBBBBBBBBD",
+    "HDDDDDDDDDDDDDDDHDDDDDDDDDDDDDDD",
+  ], palette: {"B": "#6c747e", "H": "#98a0aa", "D": "#454c55", "C": "#626a74", "R": "#c3c9d0"} } },
+  tech_panel: { name: "Техно-панель", icon: { grid: [
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAADAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAACAAAAAAAAAAAA",
+    "BAADCCCCCCCAAAAABAACAAAAAAAAAAAA",
+    "BAAAAAAAAACAAAAABAACAAAAAAAAAAAA",
+    "BAAAAAAAAACAAAAABAACAAAAAAAAAAAA",
+    "BAAAAAAAAACAAAAABAACCCCCCCCCDAAA",
+    "BAAAAAAAAACAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAACCCCDABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAADAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAACAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAACAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAACAAAAAAACCCCCCCCCCCCCCDAAAAA",
+    "BAAACAAAAAAACAAABAAAAAAAAAAAAAAA",
+    "BAAACAAAAAAACAAABAAAAAAAAAAAAAAA",
+    "BAAACAAAAAAACAAABAAAAAAAAAAAAAAA",
+    "BAAACCCCCCCCCAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+    "BAAAAAAAAAAAAAAABAAAAAAAAAAAAAAA",
+  ], palette: {"A": "#1d252d", "B": "#2a3640", "C": "#2b7f9e", "D": "#7ee0ff"} } },
+};
+const MECHANISM_PROGRESS_SEEDS = {
+  hammer: { name: "Молот", icon: { grid: [
+    "..................HHHH..........",
+    "..................HHHH..........",
+    "................HHMMMMHH........",
+    "................HHMMMMHH........",
+    "..............HHMMMMMMMMHH......",
+    "..............HHMMMMMMMMHH......",
+    "................DDMMMMMMMMHH....",
+    "................DDMMMMMMMMHH....",
+    "..................DDMMMMMMMMHH..",
+    "..................DDMMMMMMMMHH..",
+    "..................WWDDMMMMMMMMHH",
+    "..................WWDDMMMMMMMMHH",
+    "................WWWWSSDDMMMMMMDD",
+    "................WWWWSSDDMMMMMMDD",
+    "..............WWWWSS....DDMMDD..",
+    "..............WWWWSS....DDMMDD..",
+    "............WWWWSS........DD....",
+    "............WWWWSS........DD....",
+    "..........WWWWSS................",
+    "..........WWWWSS................",
+    "........WWWWSS..................",
+    "........WWWWSS..................",
+    "......WWWWSS....................",
+    "......WWWWSS....................",
+    "....WWWWSS......................",
+    "....WWWWSS......................",
+    "......SS........................",
+    "......SS........................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+  ], palette: {"H": "#eef1f4", "M": "#aeb5bd", "D": "#5f666e", "W": "#b98a52", "S": "#7d5230"} } },
+  flame: { name: "Пламя", icon: { grid: [
+    "................................",
+    "................................",
+    "..................RR............",
+    "..................RR............",
+    "................RRRR............",
+    "................RRRR............",
+    "..............RRRRRRRR..........",
+    "..............RRRRRRRR..........",
+    "............RRRRRRRRRRRR........",
+    "............RRRRRRRRRRRR........",
+    "........RRRRRRRROORRRRRR........",
+    "........RRRRRRRROORRRRRR........",
+    "......RRRRRRRRRROOOORRRRRR......",
+    "......RRRRRRRRRROOOORRRRRR......",
+    "......RRRRRROOOOOOOOOORRRR......",
+    "......RRRRRROOOOOOOOOORRRR......",
+    "......RRRROOOOOOOOOOOORRRR......",
+    "......RRRROOOOOOOOOOOORRRR......",
+    "....RRRROOOOOOOOYYOOOOOORRRR....",
+    "....RRRROOOOOOOOYYOOOOOORRRR....",
+    "....RRRROOOOOOYYYYYYOOOORRRR....",
+    "....RRRROOOOOOYYYYYYOOOORRRR....",
+    "......RROOOOYYYYYYYYOOOORR......",
+    "......RROOOOYYYYYYYYOOOORR......",
+    "......RROOYYYYYYYYYYYYOORR......",
+    "......RROOYYYYYYYYYYYYOORR......",
+    "........RROOYYYYYYYYOORR........",
+    "........RROOYYYYYYYYOORR........",
+    "..........RRYYYYYYYYRR..........",
+    "..........RRYYYYYYYYRR..........",
+    "................................",
+    "................................",
+  ], palette: {"Y": "#fff1a8", "O": "#ffab2e", "R": "#e2461e"} } },
+  gear: { name: "Шестерня", icon: { grid: [
+    "................................",
+    "................................",
+    "..............HHHH..............",
+    "..............HHHH..............",
+    "......HH......HHHH......MM......",
+    "......HH......HHHH......MM......",
+    "....HHHHHHHHHHHHHHHHHHMMMMMM....",
+    "....HHHHHHHHHHHHHHHHHHMMMMMM....",
+    "......HHHHHHHHHHHHHHMMMMMM......",
+    "......HHHHHHHHHHHHHHMMMMMM......",
+    "......HHHHHHDDDDDDDDMMMMMM......",
+    "......HHHHHHDDDDDDDDMMMMMM......",
+    "......HHHHDDDD....DDDDMMDD......",
+    "......HHHHDDDD....DDDDMMDD......",
+    "..HHHHHHHHDD........DDDDDDDDDD..",
+    "..HHHHHHHHDD........DDDDDDDDDD..",
+    "..HHHHHHHHDD........DDDDDDDDDD..",
+    "..HHHHHHHHDD........DDDDDDDDDD..",
+    "......HHHHDDDD....DDDDDDDD......",
+    "......HHHHDDDD....DDDDDDDD......",
+    "......HHMMMMDDDDDDDDDDDDDD......",
+    "......HHMMMMDDDDDDDDDDDDDD......",
+    "......MMMMMMMMDDDDDDDDDDDD......",
+    "......MMMMMMMMDDDDDDDDDDDD......",
+    "....MMMMMMMMDDDDDDDDDDDDDDDD....",
+    "....MMMMMMMMDDDDDDDDDDDDDDDD....",
+    "......MM......DDDD......DD......",
+    "......MM......DDDD......DD......",
+    "..............DDDD..............",
+    "..............DDDD..............",
+    "................................",
+    "................................",
+  ], palette: {"H": "#d3d8de", "M": "#9aa2ab", "D": "#5c636b"} } },
+  saw: { name: "Диск пилы", icon: { grid: [
+    "................TT..............",
+    "................TT..............",
+    "........TTTTTT..TTTT............",
+    "........TTTTTT..TTTT............",
+    "..........TTHHHHHHHHTTTTTT......",
+    "..........TTHHHHHHHHTTTTTT......",
+    "....TTTTHHHHHHHHHHHHHHMMTT......",
+    "....TTTTHHHHHHHHHHHHHHMMTT......",
+    "....TTHHHHHHHHHHHHHHMMMMMM..TT..",
+    "....TTHHHHHHHHHHHHHHMMMMMM..TT..",
+    "....TTHHHHHHHHDDDDMMMMMMMMTTTT..",
+    "....TTHHHHHHHHDDDDMMMMMMMMTTTT..",
+    "..TTHHHHHHHHDD....DDMMMMMMMMTT..",
+    "..TTHHHHHHHHDD....DDMMMMMMMMTT..",
+    "TTTTHHHHHHDD........DDMMMMMM....",
+    "TTTTHHHHHHDD........DDMMMMMM....",
+    "....HHHHHHDD........DDMMMMMMTTTT",
+    "....HHHHHHDD........DDMMMMMMTTTT",
+    "..TTHHHHHHMMDD....DDMMMMMMMMTT..",
+    "..TTHHHHHHMMDD....DDMMMMMMMMTT..",
+    "..TTTTHHMMMMMMDDDDMMMMMMMMTT....",
+    "..TTTTHHMMMMMMDDDDMMMMMMMMTT....",
+    "..TT..MMMMMMMMMMMMMMMMMMMMTT....",
+    "..TT..MMMMMMMMMMMMMMMMMMMMTT....",
+    "......TTMMMMMMMMMMMMMMMMTTTT....",
+    "......TTMMMMMMMMMMMMMMMMTTTT....",
+    "......TTTTTTMMMMMMMMTT..........",
+    "......TTTTTTMMMMMMMMTT..........",
+    "............TTTT..TTTTTT........",
+    "............TTTT..TTTTTT........",
+    "..............TT................",
+    "..............TT................",
+  ], palette: {"T": "#eef1f4", "H": "#c3c9d0", "M": "#8f97a0", "D": "#4e555c"} } },
+  bolt: { name: "Молния", icon: { grid: [
+    "....................EEEEEEEEEE..",
+    "....................EEEEEEEEEE..",
+    "..................EEYYYYYYYYEE..",
+    "..................EEYYYYYYYYEE..",
+    "................EEYYWWYYYYEE....",
+    "................EEYYWWYYYYEE....",
+    "..............EEYYWWYYYYEE......",
+    "..............EEYYWWYYYYEE......",
+    "............EEYYWWYYYYEE........",
+    "............EEYYWWYYYYEE........",
+    "..........EEYYWWYYYYEEEEEEEEEE..",
+    "..........EEYYWWYYYYEEEEEEEEEE..",
+    "........EEYYWWYYYYYYYYYYYYYYEE..",
+    "........EEYYWWYYYYYYYYYYYYYYEE..",
+    "......EEEEEEEEEEEEYYYYYYYYEE....",
+    "......EEEEEEEEEEEEYYYYYYYYEE....",
+    "................EEYYYYYYEE......",
+    "................EEYYYYYYEE......",
+    "..............EEYYYYYYEE........",
+    "..............EEYYYYYYEE........",
+    "............EEYYYYYYEE..........",
+    "............EEYYYYYYEE..........",
+    "..........EEYYYYYYEE............",
+    "..........EEYYYYYYEE............",
+    "..........EEYYYYEE..............",
+    "..........EEYYYYEE..............",
+    "........EEYYYYEE................",
+    "........EEYYYYEE................",
+    "........EEYYEE..................",
+    "........EEYYEE..................",
+    "........EEEE....................",
+    "........EEEE....................",
+  ], palette: {"Y": "#ffe066", "W": "#fff6c4", "E": "#d49400"} } },
+};
+
+function mechanismAppearanceSummary(loc) {
+  const look = loc.appearance || {};
+  const parts = [];
+  if (look.texture) parts.push("фон");
+  if (look.progress_icon) parts.push(`прогресс (${MECH_FX_FILLS[look.progress_fill || "right"]})`);
+  if (look.motion) parts.push(MECH_FX_MOTIONS[look.motion] ? MECH_FX_MOTIONS[look.motion].name : look.motion);
+  if (look.particles) parts.push(MECH_FX_PARTICLES[look.particles] ? MECH_FX_PARTICLES[look.particles].name : look.particles);
+  if (look.sound) parts.push("звук");
+  return parts.length ? parts.join(" · ") : "по умолчанию (без фона, стрелка, стандартные искры)";
+}
+
+function mechanismAppearanceRow(loc, lid) {
+  const row = el("div", { class: "field-row settings-summary-row" });
+  row.appendChild(el("label", { text: "Оформление механизма" }));
+  const summary = el("span", { class: "hint", text: mechanismAppearanceSummary(loc) });
+  row.appendChild(summary);
+  row.appendChild(el("button", { class: "small", text: "Оформление", onclick: () => {
+    openMechanismAppearanceModal(loc, lid, () => { summary.textContent = mechanismAppearanceSummary(loc); });
+  }}));
+  return row;
+}
+
+function cloneIcon(icon) {
+  return { grid: icon.grid.slice(), palette: { ...icon.palette } };
+}
+
+// Та же стрелка, что craftGridArrowSvg в игре - прогресс по умолчанию.
+function mechanismPreviewArrowSvg(color) {
+  const svg = svgEl("svg", { width: "38", height: "20", viewBox: "0 0 38 20", fill: "none" });
+  svg.style.color = color;
+  svg.appendChild(svgEl("path", { d: "M2 10h30M25 3l8 7-8 7", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "square" }));
+  return svg;
+}
+
+function openMechanismAppearanceModal(loc, lid, onChange) {
+  const overlay = el("div", { class: "modal-overlay" });
+  const close = () => { overlay.remove(); onChange(); };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  const modal = el("div", { class: "modal settings-modal appearance-modal" });
+  const head = el("div", { class: "modal-head" });
+  head.appendChild(el("strong", { text: `Оформление: ${loc.name}` }));
+  head.appendChild(el("button", { text: "Закрыть", onclick: close }));
+  modal.appendChild(head);
+  const content = el("div", { class: "appearance-body" });
+  modal.appendChild(content);
+  content.appendChild(el("p", { class: "hint", text:
+    "Как выглядит модалка этого механизма в игре: фон сцены (сетка → прогресс → результат), прогресс-бар долгого "
+    + "крафта, его движение, частицы при готовом крафте и звук. Меняется только сцена - колонки по бокам и рамка "
+    + "окна у всех механизмов общие. Работает у локации с крафт-сеткой. Кнопки под превью проигрывают крафт так же, "
+    + "как в игре: долгий крафт - «1 ход = 1 удар»." }));
+  if (!loc.crafting) {
+    content.appendChild(el("div", { class: "pattern-note warn", text:
+      "У этой локации нет крафт-сетки - модалки механизма в игре у неё нет, оформление не покажется, пока сетку не включат." }));
+  }
+
+  const look = () => loc.appearance || {};
+  const setLook = (key, value) => {
+    if (!loc.appearance) loc.appearance = {};
+    if (value === null || value === undefined || value === "") delete loc.appearance[key];
+    else loc.appearance[key] = value;
+    if (!Object.keys(loc.appearance).length) delete loc.appearance;
+    renderBody();
+  };
+
+  // ---- превью сцены ----
+  const preview = el("div", { class: "mfx-preview" });
+  let progress = 0;
+  let previewArrow = null;
+  let previewArt = null;
+  let previewFill = null;
+  let previewOutput = null;
+  let resetTimer = null;
+
+  function buildPreviewStage() {
+    const a = look();
+    preview.innerHTML = "";
+    const stage = el("div", { class: "mfx-preview-stage" });
+    const textureStyle = mechFxTextureStyle(a);
+    if (textureStyle) Object.assign(stage.style, textureStyle);
+    const grid = el("div", { class: "mfx-preview-grid" });
+    [DEFAULT_ICONS.wood, DEFAULT_ICONS.stone, DEFAULT_ICONS.planks, null].forEach(icon => {
+      const cell = el("div", { class: "mfx-preview-cell" });
+      if (icon) cell.appendChild(pixelIcon(icon.grid, icon.palette, 30));
+      grid.appendChild(cell);
+    });
+    stage.appendChild(grid);
+    previewArrow = el("div", { class: "mfx-preview-arrow" });
+    if (a.progress_icon) {
+      const built = mechFxProgressArt(a.progress_icon, a.motion);
+      previewArt = built.art;
+      previewFill = built.fill;
+    } else {
+      const base = mechanismPreviewArrowSvg("#f0a030");
+      base.classList.add("mfx-base");
+      previewFill = el("div", { class: "mfx-fill" }, [mechanismPreviewArrowSvg("#ffc861")]);
+      previewArt = mechFxMotionWrap([base, previewFill], a.motion);
+    }
+    previewArrow.appendChild(previewArt);
+    stage.appendChild(previewArrow);
+    previewOutput = el("div", { class: "mfx-preview-output" });
+    stage.appendChild(previewOutput);
+    preview.appendChild(stage);
+    applyProgress(progress, progress);
+
+    const controls = el("div", { class: "mfx-preview-controls" });
+    controls.appendChild(el("button", { class: "small", type: "button", text: "▶ Мгновенный крафт", onclick: () => {
+      hit(false);
+      burst();
+    }}));
+    controls.appendChild(el("button", { class: "small", type: "button", text: "▶ Ход долгого крафта (+25%)", onclick: () => {
+      if (resetTimer) return;
+      const from = progress;
+      progress = Math.min(1, progress + 0.25);
+      applyProgress(from, progress);
+      hit(true);
+      if (progress >= 1) {
+        burst();
+        resetTimer = setTimeout(() => { resetTimer = null; progress = 0; applyProgress(0, 0); }, 450);
+      }
+    }}));
+    controls.appendChild(el("span", { class: "hint", text: progress > 0 && progress < 1
+      ? `идёт долгий крафт: ${Math.round(progress * 100)}%` : "механизм свободен" }));
+    preview.appendChild(controls);
+  }
+
+  function applyProgress(from, to) {
+    const a = look();
+    mechFxSetState(previewArt, { active: to > 0, running: to > 0 && to < 1 });
+    mechFxSetFill(previewFill, a.progress_icon ? a.progress_fill : "right", from, to);
+    const hintEl = preview.querySelector(".mfx-preview-controls .hint");
+    if (hintEl) hintEl.textContent = to > 0 && to < 1 ? `идёт долгий крафт: ${Math.round(to * 100)}%` : "механизм свободен";
+  }
+
+  function hit(puff) {
+    const a = look();
+    if (a.motion) mechFxHit(previewArrow, a.motion);
+    else previewArrow.animate([
+      { transform: "none" }, { transform: "translateX(5px) scale(1.18)", filter: "brightness(1.7)", offset: 0.4 }, { transform: "none" },
+    ], { duration: 320, easing: "ease-out" });
+    if (puff && a.particles) {
+      const r = previewArrow.getBoundingClientRect();
+      mechFxEmit(null, r.left + r.width / 2, r.top + r.height / 2, a.particles, { scale: 0.4 });
+    }
+  }
+
+  function burst() {
+    const r = previewOutput.getBoundingClientRect();
+    previewOutput.animate([
+      { boxShadow: "inset 0 0 0 2px #ffe3a8, 0 0 48px 8px rgba(255,200,90,.85)" },
+      { boxShadow: "inset 0 0 0 2px rgba(240,160,48,.55), 0 0 22px -6px rgba(240,160,48,.6)" },
+    ], { duration: 550, easing: "ease-out" });
+    mechFxEmit(null, r.left + r.width / 2, r.top + r.height / 2, look().particles || null, { colors: ["#c69a6d", "#f0a030", "#ffd27a"] });
+  }
+
+  // ---- поля ----
+  const body = el("div");
+
+  function seedButtons(seeds, onPick, tileStyle) {
+    const box = el("div", { class: "mfx-seed-row" });
+    Object.values(seeds).forEach(seed => {
+      const btn = el("button", { class: "small mfx-seed", type: "button", title: `Взять за основу: ${seed.name}` });
+      if (tileStyle) {
+        const sw = el("span", { class: "mfx-swatch mini" });
+        Object.assign(sw.style, mechFxTextureStyle({ texture: seed.icon, texture_dim: 0 }));
+        btn.appendChild(sw);
+      } else {
+        btn.appendChild(pixelIcon(seed.icon.grid, seed.icon.palette, 22));
+      }
+      btn.appendChild(document.createTextNode(seed.name));
+      btn.addEventListener("click", () => onPick(cloneIcon(seed.icon)));
+      box.appendChild(btn);
+    });
+    return box;
+  }
+
+  function renderBody() {
+    body.innerHTML = "";
+    const a = look();
+
+    // Фон сцены
+    const texRow = el("div", { class: "field-row" });
+    texRow.appendChild(el("label", { text: "Фон-текстура" }));
+    const swatch = el("span", { class: "mfx-swatch" });
+    const texStyle = mechFxTextureStyle(a);
+    if (texStyle) Object.assign(swatch.style, texStyle);
+    else swatch.classList.add("empty");
+    texRow.appendChild(swatch);
+    texRow.appendChild(el("button", { class: "small", type: "button", text: "Нарисовать…", onclick: () => {
+      openIconEditor(`фон механизма «${loc.name}» (плитка, повторяется)`, a.texture || null, null, (icon) => setLook("texture", icon));
+    }}));
+    if (a.texture) texRow.appendChild(el("button", { class: "small", type: "button", text: "Убрать", onclick: () => setLook("texture", null) }));
+    texRow.appendChild(el("span", { class: "hint", text:
+      "плитка повторяется по всей сцене (1 пиксель = 3 точки экрана); края рисуй так, чтобы стыковались" }));
+    body.appendChild(texRow);
+    const texSeedRow = el("div", { class: "field-row" });
+    texSeedRow.appendChild(el("label", { text: "Заготовки фона" }));
+    texSeedRow.appendChild(seedButtons(MECHANISM_TEXTURE_SEEDS, (icon) => setLook("texture", icon), true));
+    body.appendChild(texSeedRow);
+
+    const dimRow = el("div", { class: "field-row" });
+    dimRow.appendChild(el("label", { text: "Затемнение фона" }));
+    const dimValue = typeof a.texture_dim === "number" ? a.texture_dim : MECH_FX_DEFAULT_DIM;
+    const dimInput = el("input", { type: "range", min: "0", max: "90", step: "5", value: String(Math.round(dimValue * 100)) });
+    const dimLabel = el("span", { class: "hint", text: `${Math.round(dimValue * 100)}%` });
+    dimInput.addEventListener("input", () => {
+      dimLabel.textContent = `${dimInput.value}%`;
+      if (!loc.appearance) loc.appearance = {};
+      loc.appearance.texture_dim = Number(dimInput.value) / 100;
+      buildPreviewStage();
+      const style = mechFxTextureStyle(look());
+      if (style) Object.assign(swatch.style, style);
+    });
+    dimRow.append(dimInput, dimLabel, el("span", { class: "hint", text: "чем темнее, тем лучше читаются предметы в ячейках" }));
+    body.appendChild(dimRow);
+
+    // Прогресс
+    const progRow = el("div", { class: "field-row" });
+    progRow.appendChild(el("label", { text: "Прогресс-бар" }));
+    if (a.progress_icon) progRow.appendChild(pixelIcon(a.progress_icon.grid, a.progress_icon.palette, 40));
+    else progRow.appendChild(mechanismPreviewArrowSvg("var(--accent)"));
+    progRow.appendChild(el("button", { class: "small", type: "button", text: "Нарисовать…", onclick: () => {
+      openIconEditor(`прогресс механизма «${loc.name}»`, a.progress_icon || null, null, (icon) => setLook("progress_icon", icon));
+    }}));
+    if (a.progress_icon) progRow.appendChild(el("button", { class: "small", type: "button", text: "Вернуть стрелку", onclick: () => setLook("progress_icon", null) }));
+    progRow.appendChild(el("span", { class: "hint", text:
+      "без своей картинки - обычная стрелка. Картинка заполняется яркой копией по мере долгого крафта; пустые поля вокруг рисунка обрезаются" }));
+    body.appendChild(progRow);
+    const progSeedRow = el("div", { class: "field-row" });
+    progSeedRow.appendChild(el("label", { text: "Заготовки прогресса" }));
+    progSeedRow.appendChild(seedButtons(MECHANISM_PROGRESS_SEEDS, (icon) => setLook("progress_icon", icon), false));
+    body.appendChild(progSeedRow);
+
+    const fillRow = el("div", { class: "field-row" });
+    fillRow.appendChild(el("label", { text: "Заливка прогресса" }));
+    const fillSelect = el("select");
+    Object.entries(MECH_FX_FILLS).forEach(([id, name]) => {
+      const opt = el("option", { value: id, text: name });
+      if ((a.progress_fill || "right") === id) opt.selected = true;
+      fillSelect.appendChild(opt);
+    });
+    fillSelect.disabled = !a.progress_icon;
+    fillSelect.addEventListener("change", () => setLook("progress_fill", fillSelect.value === "right" ? null : fillSelect.value));
+    fillRow.appendChild(fillSelect);
+    fillRow.appendChild(el("span", { class: "hint", text: "только у своей картинки: пламя - снизу вверх, молот - от рукояти к бойку" }));
+    body.appendChild(fillRow);
+
+    // Движение
+    const motionRow = el("div", { class: "field-row" });
+    motionRow.appendChild(el("label", { text: "Движение" }));
+    const motionSelect = el("select");
+    motionSelect.appendChild(el("option", { value: "", text: "— стрелка толкается вперёд" }));
+    Object.entries(MECH_FX_MOTIONS).forEach(([id, m]) => {
+      const opt = el("option", { value: id, text: m.name });
+      if (a.motion === id) opt.selected = true;
+      motionSelect.appendChild(opt);
+    });
+    motionSelect.addEventListener("change", () => setLook("motion", motionSelect.value || null));
+    motionRow.appendChild(motionSelect);
+    motionRow.appendChild(el("span", { class: "hint", text: a.motion && MECH_FX_MOTIONS[a.motion]
+      ? `${MECH_FX_MOTIONS[a.motion].hint}; удар - при крафте и на каждом ходу долгого крафта, пока он идёт - фоновое движение`
+      : "удар при крафте и на каждом ходу долгого крафта, фоновое движение - пока крафт идёт" }));
+    body.appendChild(motionRow);
+
+    // Частицы
+    const partRow = el("div", { class: "field-row" });
+    partRow.appendChild(el("label", { text: "Частицы" }));
+    const partSelect = el("select");
+    partSelect.appendChild(el("option", { value: "", text: "— стандартные искры цвета результата" }));
+    Object.entries(MECH_FX_PARTICLES).forEach(([id, p]) => {
+      const opt = el("option", { value: id, text: p.name });
+      if (a.particles === id) opt.selected = true;
+      partSelect.appendChild(opt);
+    });
+    partSelect.addEventListener("change", () => setLook("particles", partSelect.value || null));
+    partRow.appendChild(partSelect);
+    partRow.appendChild(el("span", { class: "hint", text:
+      "вылетают из слота результата при готовом крафте; на ходах долгого крафта - понемногу у прогресса" }));
+    body.appendChild(partRow);
+
+    // Звук
+    body.appendChild(soundRow(
+      `mechanism_${lid}`, "Звук механизма", "стандартный (по умолчанию)",
+      "играет у любого рецепта этого механизма без своего звука (сеточного, постройки, крафта за энергию и обычной карточки действия); свой звук рецепта главнее",
+      () => look().sound, (v) => setLook("sound", v || null),
+    ));
+
+    buildPreviewStage();
+  }
+
+  content.appendChild(preview);
+  content.appendChild(body);
+  renderBody();
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
 function patternToGrid(pattern, width, height) {
   const grid = [];
   for (let y = 0; y < height; y++) grid.push(new Array(width).fill(null));
@@ -3730,6 +4375,7 @@ function renderLocations() {
     card.appendChild(parentRow);
 
     card.appendChild(craftingGridRow(loc, lid));
+    card.appendChild(mechanismAppearanceRow(loc, lid));
 
     const hubRow = el("div", { class: "field-row" });
     hubRow.appendChild(el("label", { text: "Кнопки построек-механизмов" }));

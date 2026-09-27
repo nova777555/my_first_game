@@ -120,6 +120,12 @@ class ContentEditorHttpTests(unittest.TestCase):
         status, resp = self._get("/api/nope")
         self.assertEqual(status, 404)
 
+    def test_mechanism_fx_js_is_served(self):
+        # Превью «Оформление механизма» - тот же файл, что у игры (tools/mechanism_fx.js).
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/mechanism_fx.js", timeout=5) as r:
+            self.assertEqual(r.status, 200)
+            self.assertIn(b"MECH_FX_PARTICLES", r.read())
+
     def test_reset_save_deletes_existing_file(self):
         ce.SAVE_PATH.write_text("{}", encoding="utf-8")
         status, resp = self._post("/api/reset_save", {})

@@ -23,6 +23,8 @@ a = Analysis(
         # Path(__file__).with_name(...) - должен лежать рядом с самим
         # content_editor.py внутри сборки (корень бандла).
         (os.path.join(ROOT, "tools", "content_editor.html"), "."),
+        # Общий с игрой код оформления механизма (превью «Оформление»), тот же приём.
+        (os.path.join(ROOT, "tools", "mechanism_fx.js"), "."),
     ],
     hiddenimports=[],
     hookspath=[],

@@ -73,6 +73,9 @@ TEMPLATES_PATH = ROOT / "tools" / "content_editor_templates.json"
 # content_editor.spec), в отличие от путей выше, которые всегда смотрят на
 # реальный репозиторий.
 HTML_PATH = Path(__file__).with_name("content_editor.html")
+# Общий с игрой код оформления механизма (превью окна «Оформление») - bundle-relative,
+# как HTML_PATH (datas в content_editor.spec), см. докстринг tools/mechanism_fx.js.
+MECHANISM_FX_PATH = Path(__file__).with_name("mechanism_fx.js")
 # Кастомные звуки ручных действий (manual_actions.*.sound) - см. tools/web_ui.py:
 # SOUNDS_DIR, одна и та же папка обслуживает и превью в редакторе, и саму игру.
 # Это данные ПРОЕКТА (общие с игрой), поэтому путь считается от ROOT, как
@@ -136,6 +139,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
             self._send_html(HTML_PATH.read_text(encoding="utf-8"))
+        elif self.path == "/mechanism_fx.js":
+            body = MECHANISM_FX_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/api/content":
             self._send_json(200, load_content())
         elif self.path == "/api/templates":

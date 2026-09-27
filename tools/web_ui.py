@@ -74,6 +74,9 @@ SAVE_PATH = SAVES_DIR / "autosave.json"
 # тихо теряем прогресс, подсовывая вместо него новую пустую игру.
 _LEGACY_SAVE_PATH = _SAVE_ROOT / "save.json"
 HTML_PATH = Path(__file__).with_name("web_ui.html")
+# Оформление модалки механизма (locations.*.appearance) - общий JS с превью в
+# редакторе, content_editor.py отдаёт тот же файл (см. докстринг mechanism_fx.js).
+MECHANISM_FX_PATH = Path(__file__).with_name("mechanism_fx.js")
 # Кастомные звуки ручных действий, загруженные через content_editor.py
 # (см. manual_actions.*.sound в content.json) - живёт рядом с web_ui.py/
 # content_editor.py в tools/, не под _SAVE_ROOT (это контент, а не прогресс игрока).
@@ -1796,8 +1799,35 @@ def crafting_view(state: GameState) -> list[dict]:
                 {"busy": len(state.energy_jobs), "capacity": engine.energy_converter_capacity(state)}
                 if lid == engine.CONVERTER_LOCATION_ID else None
             ),
+            "appearance": mechanism_appearance_view(lid),
         })
     return result
+
+
+def mechanism_appearance_view(location_id: str) -> dict:
+    """Оформление модалки механизма (locations.*.appearance): фон-текстура сцены,
+    пиксельный прогресс и направление его заливки, варианты движения и частиц
+    (id - tools/mechanism_fx.js). Пустые поля - как раньше: без фона, стрелка,
+    стандартные искры. Звук сюда не входит - его подставляет сервер в лог хода
+    (mechanism_sound_url), как и звук рецепта."""
+    look = (LOCATIONS.get(location_id) or {}).get("appearance") or {}
+    return {
+        "texture": look.get("texture"),
+        "texture_dim": look.get("texture_dim"),
+        "progress_icon": look.get("progress_icon"),
+        "progress_fill": look.get("progress_fill") or "right",
+        "motion": look.get("motion"),
+        "particles": look.get("particles"),
+    }
+
+
+def mechanism_sound_url(location_id) -> str | None:
+    """Звук механизма (locations.*.appearance.sound) - играет у ЛЮБОГО рецепта
+    этой локации без своего звука (сеточного, крафта за энергию, постройки и
+    обычной карточки действия) - то же наследование от механизма, что у
+    постройки-механизма (engine.action_mechanism_building)."""
+    look = (LOCATIONS.get(location_id) or {}).get("appearance") or {}
+    return sound_url(look.get("sound"))
 
 
 def _energy_eta_turns(state: GameState, remaining: float, per_turn) -> int | None:
@@ -2806,7 +2836,9 @@ def run_turn(state: GameState, action_type: str, action_id, scale: int | None = 
         if action_type == "manual":
             # Резолвится сервером (а не клиентом по своей копии VIEW), чтобы
             # источником истины оставался content.json - см. manual_actions.*.sound.
-            log["sound_url"] = sound_url(MANUAL_ACTIONS.get(action_id, {}).get("sound"))
+            # Без своего звука - звук механизма его локации (appearance.sound).
+            action = MANUAL_ACTIONS.get(action_id, {})
+            log["sound_url"] = sound_url(action.get("sound")) or mechanism_sound_url(action.get("location"))
         if action_type == "start_ritual":
             # Тот же принцип, что у manual_actions.*.sound выше - звук проигрывается
             # СРАЗУ при клике (через общий doAction в web_ui.html), даже если сам
@@ -2962,6 +2994,10 @@ def craft_grid_view(state: GameState, location_id, placed, times) -> dict:
     waiting = False
     for _ in range(times_requested):
         log = run_turn(state, action_type, target_id)
+        # Постройка/крафт за энергию своего звука не имеют - звучит механизм
+        # (у ручного действия run_turn уже подставил его сам).
+        if not log["sound_url"]:
+            log["sound_url"] = mechanism_sound_url(location_id)
         logs.append(log)
         if not log["ok"]:
             break
@@ -3259,6 +3295,13 @@ class Handler(BaseHTTPRequestHandler):
             body = HTML_PATH.read_text(encoding="utf-8").encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/mechanism_fx.js":
+            body = MECHANISM_FX_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

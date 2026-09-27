@@ -22,6 +22,15 @@ _SOUND_FILENAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.(wav|mp3|ogg)$")
 # '#rrggbb', тот же формат, что отдаёт HTML <input type="color">.
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+# Оформление модалки механизма (locations.*.appearance). id вариантов держать в
+# паре с tools/mechanism_fx.js (MECH_FX_MOTIONS/MECH_FX_PARTICLES/MECH_FX_FILLS) -
+# JS не импортирует Python; совпадение проверяет tests/test_content_validation.py.
+MECHANISM_MOTIONS = ("strike", "saw", "press", "spin", "flicker", "pulse")
+MECHANISM_PARTICLES = ("sparks", "sawdust", "shards", "drops", "steam", "smoke", "magic", "electric")
+MECHANISM_PROGRESS_FILLS = ("right", "left", "up", "down")
+_APPEARANCE_KEYS = {"texture", "texture_dim", "progress_icon", "progress_fill", "motion", "particles", "sound"}
+MAX_TEXTURE_DIM = 0.9
+
 # Должен совпадать с game.engine.MINE_LOCATION_ID и const MINE_LOCATION_ID в
 # tools/content_editor.html. Не импортируется отсюда напрямую: этот модуль намеренно
 # не знает о game.* (валидирует произвольный словарь-кандидат, а не текущий диск),
@@ -480,27 +489,29 @@ def validate(data: dict) -> list[str]:
                 if not isinstance(t, int) or not (1 <= t <= tier_count):
                     errors.append(f"{where}.{tool_id}: тир {t} вне диапазона 1..{tier_count}")
 
-    def check_icon(icon, where: str) -> None:
+    # field - имя поля в сообщениях (у оформления механизма пиксельные картинки
+    # лежат в appearance.texture/progress_icon, а не в icon).
+    def check_icon(icon, where: str, field: str = "icon") -> None:
         if icon is None:
             return
         if not isinstance(icon, dict) or "grid" not in icon or "palette" not in icon:
-            errors.append(f"{where}.icon: должен быть объектом с полями grid и palette")
+            errors.append(f"{where}.{field}: должен быть объектом с полями grid и palette")
             return
         grid = icon["grid"]
         palette = icon["palette"]
         if not isinstance(grid, list) or not grid or not all(isinstance(row, str) for row in grid):
-            errors.append(f"{where}.icon.grid: должен быть непустым списком строк")
+            errors.append(f"{where}.{field}.grid: должен быть непустым списком строк")
             return
         width = len(grid[0])
         if width == 0 or any(len(row) != width for row in grid):
-            errors.append(f"{where}.icon.grid: все строки должны быть одной (ненулевой) длины")
+            errors.append(f"{where}.{field}.grid: все строки должны быть одной (ненулевой) длины")
         if not isinstance(palette, dict):
-            errors.append(f"{where}.icon.palette: должен быть словарём символ->цвет")
+            errors.append(f"{where}.{field}.palette: должен быть словарём символ->цвет")
             return
         used_chars = {ch for row in grid for ch in row if ch != "."}
         missing = used_chars - set(palette.keys())
         if missing:
-            errors.append(f"{where}.icon: символы {sorted(missing)} встречаются в grid, но нет в palette")
+            errors.append(f"{where}.{field}: символы {sorted(missing)} встречаются в grid, но нет в palette")
 
     # id общие на весь проект: постройка не может взять id, уже занятый ресурсом,
     # ручным действием или технологией (и наоборот) - иначе в рантайме или в GUI
@@ -753,6 +764,34 @@ def validate(data: dict) -> list[str]:
         # ритуальный круг, реактор), см. web_ui.html: buildingMechanismsAt.
         if "shows_building_mechanisms" in loc and not isinstance(loc["shows_building_mechanisms"], bool):
             errors.append(f"Локация '{lid}'.shows_building_mechanisms: должен быть true/false или отсутствовать")
+        # appearance - оформление модалки механизма (tools/mechanism_fx.js). Без
+        # crafting не ошибка: снятая галочка сетки в редакторе оставляет его лежать.
+        appearance = loc.get("appearance")
+        if appearance is not None:
+            where = f"Локация '{lid}'.appearance"
+            if not isinstance(appearance, dict):
+                errors.append(f"{where}: должен быть объектом или отсутствовать")
+            else:
+                unknown = sorted(set(appearance) - _APPEARANCE_KEYS)
+                if unknown:
+                    errors.append(f"{where}: неизвестные поля {unknown}")
+                check_icon(appearance.get("texture"), where, "texture")
+                check_icon(appearance.get("progress_icon"), where, "progress_icon")
+                dim = appearance.get("texture_dim")
+                if dim is not None and (
+                    not isinstance(dim, (int, float)) or isinstance(dim, bool) or not (0 <= dim <= MAX_TEXTURE_DIM)
+                ):
+                    errors.append(f"{where}.texture_dim: должен быть числом от 0 до {MAX_TEXTURE_DIM}")
+                fill = appearance.get("progress_fill")
+                if fill is not None and fill not in MECHANISM_PROGRESS_FILLS:
+                    errors.append(f"{where}.progress_fill: должен быть одним из {list(MECHANISM_PROGRESS_FILLS)}")
+                motion = appearance.get("motion")
+                if motion is not None and motion not in MECHANISM_MOTIONS:
+                    errors.append(f"{where}.motion: неизвестное движение '{motion}' (есть: {', '.join(MECHANISM_MOTIONS)})")
+                particles = appearance.get("particles")
+                if particles is not None and particles not in MECHANISM_PARTICLES:
+                    errors.append(f"{where}.particles: неизвестные частицы '{particles}' (есть: {', '.join(MECHANISM_PARTICLES)})")
+                check_sound(appearance.get("sound"), where)
     if _MINE_LOCATION_ID not in locations:
         errors.append(f"Локация '{_MINE_LOCATION_ID}' (Шахта) обязательна - к ней привязан поиск и добыча жил")
     if _CONVERTER_LOCATION_ID not in locations:

@@ -2874,6 +2874,9 @@
 
   .cg-stage { display: flex; align-items: center; gap: 22px; padding: 18px 26px; background: var(--bg); box-shadow: inset 0 0 0 1px rgba(240,160,48,.22); }
   .cg-grid { display: grid; gap: 6px; }
+  /* Сцена с фоном-текстурой механизма (appearance.texture): тёмная подложка под
+     сеткой, иначе полупрозрачные пустые ячейки тонут в яркой текстуре. */
+  .cg-stage-textured .cg-grid { padding: 6px; background: rgba(10,12,15,.6); box-shadow: 0 0 0 1px rgba(0,0,0,.55); }
   .cg-cell {
     position: relative; width: 78px; height: 78px; background: var(--panel); border: 0; border-radius: 0; padding: 0;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); background-color: rgba(0,0,0,.25);
@@ -2986,7 +2989,6 @@
   }
   .cg-fx-layer { position: fixed; inset: 0; pointer-events: none; z-index: 120; overflow: hidden; }
   .cg-fly { position: absolute; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 0 6px rgba(255,190,80,.8)); will-change: transform; }
-  .cg-spark { position: absolute; box-shadow: 0 0 6px currentColor; will-change: transform; } /* color = цвет искры, см. craftGridOutputBurst */
   .cg-burst-flash {
     position: absolute; width: 110px; height: 110px; margin: -55px 0 0 -55px;
     background: radial-gradient(circle, rgba(255,246,220,.95) 0%, rgba(255,200,90,.55) 35%, rgba(255,170,60,0) 70%);
@@ -3480,6 +3482,9 @@
   </div>
 </main>
 
+<!-- Оформление модалки механизма (фон, пиксельный прогресс, движения, частицы) -
+     общий с превью в редакторе, см. tools/mechanism_fx.js. -->
+<script src="/mechanism_fx.js"></script>
 <script>
 // ---------- базовые хелперы ----------
 
@@ -11896,26 +11901,9 @@ function craftGridOutputBurst(items) {
     return;
   }
   craftGridFxOnce(el("div", { class: "cg-burst-ring", style: `left:${cx}px;top:${cy}px;` }));
-  if (!prefersReducedMotion()) {
-    const colors = craftGridSparkColors(firstId);
-    const layer = craftGridFxLayer();
-    const count = 12;
-    for (let k = 0; k < count; k++) {
-      const angle = (k / count) * Math.PI * 2 + Math.random() * 0.45;
-      const dist = 50 + Math.random() * 34;
-      const size = 4 + Math.round(Math.random() * 3);
-      const spark = el("div", {
-        class: "cg-spark",
-        style: `left:${cx - size / 2}px;top:${cy - size / 2}px;width:${size}px;height:${size}px;background:${colors[k % colors.length]};color:${colors[k % colors.length]};`,
-      });
-      layer.appendChild(spark);
-      const anim = spark.animate([
-        { transform: "translate(0px, 0px) scale(1)", opacity: 1 },
-        { transform: `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px) scale(.3)`, opacity: 0 },
-      ], { duration: 420 + Math.random() * 200, easing: "cubic-bezier(.15,.8,.3,1)", fill: "forwards" });
-      anim.onfinish = () => spark.remove();
-    }
-  }
+  // Частицы механизма (appearance.particles, варианты - tools/mechanism_fx.js);
+  // без своих - искры цвета результата.
+  mechFxEmit(craftGridFxLayer(), cx, cy, craftGridLook().particles, { colors: craftGridSparkColors(firstId) });
   if (wrap && wrap.dataset.rid === firstId) {
     wrap.classList.remove("cg-await", "cg-output-pending");
     restartClassAnimation(wrap, "cg-pop");
@@ -11931,6 +11919,29 @@ function craftGridOutputBurst(items) {
   craftGridFxOnce(el("div", { class: "cg-float-text", text, style: `left:${cx}px;top:${r.top - 22}px;` }));
 }
 
+// Оформление открытого механизма (locations.*.appearance из crafting_view,
+// см. tools/mechanism_fx.js); {} - если механизма нет или он не оформлен.
+function craftGridLook() {
+  const entry = craftGridLocationId ? craftGridEntry(craftGridLocationId) : null;
+  return (entry && entry.appearance) || {};
+}
+
+// Удар прогресса механизма: свой вариант движения (appearance.motion) - на
+// внешнем узле .cg-arrow, фоновый цикл при этом крутится на внутреннем
+// .mfx-art и с ударом не спорит; без варианта - прежний толчок стрелки.
+// puff - маленький выброс частиц механизма у самого прогресса (удар по ходу
+// долгого крафта, когда результат ещё не выпрыгивает).
+function craftGridArrowHit(arrow, puff) {
+  if (!arrow) return;
+  const look = craftGridLook();
+  if (look.motion) mechFxHit(arrow, look.motion);
+  else restartClassAnimation(arrow, "cg-arrow-pulse");
+  if (puff && look.particles) {
+    const r = arrow.getBoundingClientRect();
+    mechFxEmit(craftGridFxLayer(), r.left + r.width / 2, r.top + r.height / 2, look.particles, { scale: 0.4 });
+  }
+}
+
 // Эффект удачного крафта поверх УЖЕ пересобранной модалки (origin - клетки до
 // пересборки, см. craftGridCaptureCells). Иконки в клетках гаснут на время
 // полёта и возвращаются после - раскладка-шаблон остаётся для следующего раза.
@@ -11942,7 +11953,6 @@ function craftGridPlayCraftFx(recipe, origin, payload) {
   const arrow = overlay.querySelector(".cg-arrow");
   const target = multiTurn ? arrow : overlay.querySelector(".cg-output");
   if (!target) return;
-  if (arrow) restartClassAnimation(arrow, "cg-arrow-pulse");
   let arrive = 0;
   if (!reduced) {
     arrive = craftGridFlyIngredients(origin, target, multiTurn);
@@ -11951,6 +11961,12 @@ function craftGridPlayCraftFx(recipe, origin, payload) {
       w.classList.add("cg-refill");
     });
   }
+  // Свой вариант движения бьёт, когда ингредиенты долетели (молот - по уже
+  // лежащей заготовке); стрелка по умолчанию толкается сразу, как раньше.
+  // Выброс частиц у прогресса - только у долгого: у мгновенного они и так
+  // вылетят из выходного слота.
+  setTimeout(() => craftGridArrowHit(document.querySelector("#craftGridOverlay .cg-arrow"), multiTurn),
+    craftGridLook().motion ? arrive : 0);
   // Долгий рецепт результат ещё не отдал - его покажут стрелка и строка
   // прогресса, а "хоп" в слоте сыграет по завершении (craftGridTakeCompletedJob).
   // Исключение - крафт за энергию, которому хватило одного хода: задача уже
@@ -12061,26 +12077,50 @@ function openCraftGridModal(locationId) {
   const matched = craftGridMatchRecipe(entry, craftGridPlaced);
   const initialHover = craftGridHoverInfo(entry);
 
+  // Оформление механизма (locations.*.appearance, tools/mechanism_fx.js): фон
+  // только у сцены - каркас модалки и колонки по бокам общие для всех механизмов.
+  const look = entry.appearance || {};
   const stage = el("div", { class: "cg-stage" });
+  const textureStyle = mechFxTextureStyle(look);
+  if (textureStyle) {
+    Object.assign(stage.style, textureStyle);
+    stage.classList.add("cg-stage-textured");
+  }
   const gridEl = el("div", { class: "cg-grid", style: `grid-template-columns: repeat(${entry.width}, minmax(0, 1fr));` });
   craftGridPlaced.forEach((rid, i) => gridEl.appendChild(craftGridCellEl(i, entry, initialHover)));
   stage.appendChild(gridEl);
   // Стрелка - она же полоса прогресса долгого job'а (заливается слева направо,
   // как стрелка печи в Minecraft); у мгновенного крафта - просто стрелка.
-  const arrow = el("div", { class: "cg-arrow" }, [craftGridArrowSvg()]);
+  // Своя пиксельная иконка механизма (appearance.progress_icon) заменяет
+  // стрелку и заливается по progress_fill; фоновое движение (appearance.motion)
+  // крутится на внутреннем .mfx-art, пока идёт job, удар - на самой .cg-arrow.
+  const arrow = el("div", { class: "cg-arrow" });
+  const pixelProgress = look.progress_icon ? mechFxProgressArt(look.progress_icon, look.motion) : null;
+  const art = pixelProgress ? pixelProgress.art : mechFxMotionWrap([craftGridArrowSvg()], look.motion);
+  arrow.appendChild(art);
   if (job || completedJob) {
     arrow.classList.add("cg-arrow-busy");
-    const fill = el("div", { class: "cg-arrow-fill" }, [craftGridArrowSvg()]);
-    arrow.appendChild(fill);
+    mechFxSetState(art, { active: true, running: !!job });
+    let setFill;
+    if (pixelProgress) {
+      setFill = (from, to) => mechFxSetFill(pixelProgress.fill, look.progress_fill, from, to);
+    } else {
+      const fill = el("div", { class: "cg-arrow-fill" }, [craftGridArrowSvg()]);
+      art.appendChild(fill);
+      setFill = (from, to) => craftGridAnimateWidth(fill, from, to);
+    }
     if (job) {
       arrow.title = job.kind === "energy_recipe"
         ? `${job.name}: ${formatAmount(job.progress)}/${formatAmount(job.threshold)} энергии`
         : `${job.name}: ${job.turns_done}/${job.turns_total} ход(ов)`;
-      craftGridAnimateWidth(fill, jobFromRatio, jobRatio);
+      setFill(jobFromRatio, jobRatio);
     } else {
       // Job только что завершился: доливаем стрелку до конца и гасим её.
-      craftGridAnimateWidth(fill, completedJob.ratio, 1);
-      setTimeout(() => arrow.classList.remove("cg-arrow-busy"), 320);
+      setFill(completedJob.ratio, 1);
+      setTimeout(() => {
+        arrow.classList.remove("cg-arrow-busy");
+        mechFxSetState(art, {});
+      }, 320);
     }
   }
   // Энергия в цене ручного рецепта - не в ячейках, а сверх узора (см.
@@ -12251,6 +12291,10 @@ function openCraftGridModal(locationId) {
   overlay.id = "craftGridOverlay";
   overlay.dataset.locationId = locationId;
   document.body.appendChild(overlay);
+  // Ход долгого крафта прошёл (тот же job продвинулся) или он завершился -
+  // механизм «бьёт»: 1 ход = 1 удар молота, с частицами у прогресса.
+  const ticked = !!(job && prevJob && prevJob.action_id === job.action_id && jobRatio > prevJob.ratio);
+  if (ticked || completedJob) craftGridArrowHit(arrow, true);
   if (savedScroll !== null) modal.scrollTop = savedScroll;
   // Модалка пересобирается целиком после каждого действия - без этого список/
   // карточка справа прыгали бы наверх на каждом клике. data-scroll-key - что

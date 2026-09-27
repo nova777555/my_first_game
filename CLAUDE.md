@@ -169,6 +169,18 @@ Generic-поля построек (есть у ЛЮБОЙ постройки, н
 job механизма (`crafting_view: job`), по завершении (`log.manual_completed_ids`)
 в слоте та же вспышка; пачкой не запускается (сервер режет `times` до 1).
 
+**Оформление механизма** (прямое пожелание, 2026-09-27) — `locations.*.appearance`:
+`texture` (пиксельная плитка фона сцены) + `texture_dim`, `progress_icon` (пиксельный
+прогресс вместо стрелки, заливка по `progress_fill`), `motion`/`particles` (id готовых
+вариантов), `sound` (звук любого рецепта локации без своего — подставляет сервер в
+лог, `web_ui.py: mechanism_sound_url`). Цвет и иконки у всех механизмов общие,
+оформляется только сцена (сетка → прогресс → выход), не колонки. Вся отрисовка —
+общий `tools/mechanism_fx.js` (оба сервера отдают `/mechanism_fx.js`, оба `.spec`
+его вшивают): игра и превью окна «Оформление» в редакторе не расходятся. Новый
+вариант движения/частиц = запись там + id в `content_validation.py: MECHANISM_*`
+(паритет проверяет тест). Удар — на `.cg-arrow` при крафте и на КАЖДОМ ходу долгого
+крафта («1 ход = 1 удар»), фоновый цикл — на внутреннем `.mfx-art`, пока идёт job.
+
 **Сетка преобразователя.** Если у `CONVERTER_LOCATION_ID` есть `crafting`
 (в реальном контенте 2×1), в той же модалке собираются `energy_recipes` —
 `energy_recipes.*.pattern`/`pattern_mirror` слоем над `consumes` (валидатор:
@@ -291,6 +303,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Отмена фоновой задачи / заказа | `engine.py`: `cancel_order`/`cancel_energy_job`/`cancel_manual_job`; `web_ui.html: jobCancelButton` |
 | Вложенные локации | контент `locations.*.parent_location`; `engine.py: location_children`; `web_ui.html: locationPath` |
 | Крафт на сетке (верстак, печь, любой механизм с `crafting`): узор, матчинг, перенос, пачка ×N, закреплённые, справочник источников | `engine.py`: `location_crafting`, `action_pattern`, `match_grid`, `_normalize_grid`, `toggle_pinned_recipe`; `state.pinned_recipes`; контент `locations.*.crafting` (+`batch`) + `manual_actions.*.pattern`/`pattern_mirror`; валидация - `content_validation.py`: `pattern_shape`, `mirror_shape`, `check_action_pattern`; редактор - `content_editor.html`: `craftingGridRow`, `actionPatternRow`, `openPatternModal`; HTTP - `tools/web_ui.py`: `crafting_view`, `craft_grid_view`, `resource_sources`, `sources_summary_view`, `/api/craft_grid`, `/api/pin_recipe`, `/api/sources`, `/api/sources_summary`; UI - `web_ui.html`: `openCraftGridModal`, `craftGridMatchRecipe`, `craftGridBuildPinnedCol`, `craftGridShowRecipe`, `craftGridSourceDetailView`, `craftGridLayButton`/`craftGridLayRecipe`, `craftGridApplyHoverToDom`, `craftGridBuildSourcesPanel` |
+| Оформление модалки механизма: фон-текстура, пиксельный прогресс, движения, частицы, звук | контент `locations.*.appearance`; `tools/mechanism_fx.js` (`MECH_FX_MOTIONS`/`MECH_FX_PARTICLES`/`MECH_FX_FILLS`, `mechFxProgressArt`, `mechFxSetFill`, `mechFxHit`, `mechFxEmit`, `mechFxTextureStyle`); валидация `content_validation.py: MECHANISM_*`; `web_ui.py`: `mechanism_appearance_view`, `mechanism_sound_url`; `web_ui.html`: `openCraftGridModal`, `craftGridLook`, `craftGridArrowHit`, `craftGridOutputBurst`; `content_editor.html`: `mechanismAppearanceRow`, `openMechanismAppearanceModal`, заготовки `MECHANISM_TEXTURE_SEEDS`/`MECHANISM_PROGRESS_SEEDS` |
 | Потолок ресурса (1e9) | `engine.py`: `MAX_RESOURCE_AMOUNT`, `_add_resource` (ЕДИНСТВЕННАЯ точка начисления) |
 | Вместимость склада | контент `resources.*.storage`; `engine.py`: `storage_capacity`, `state.storage_tier`, `upgrade_storage`; `web_ui.html: openStorage` |
 | Подтверждение автокрафта (модалка "спишется/докрафтится/не хватает"; `reason` - заказ не оформится, «Запустить» выключена; строка причины - только если нет красных строк `missing`; докрафтить нечего - модалки нет вовсе) | `engine.py`: `autocraft_preview` (→ `_preview_node` по дереву `_order_route`), `autocraft_failure` (→ `_order_failure`, общая с `_place_order`/`check_order`), `resolve_action_cost`; `web_ui.py: autocraft_preview_view`, `_preview_crafts_anything`; `web_ui.html: openAutocraftConfirmModal`, `autocraftAmountText` |

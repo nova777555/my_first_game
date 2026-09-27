@@ -2200,5 +2200,66 @@ class CraftingPatternValidationTests(unittest.TestCase):
         self.assertEqual(cv.mirror_shape(shape), (("raw_b", "raw_a"),))
 
 
+class MechanismAppearanceValidationTests(unittest.TestCase):
+    """locations.*.appearance - оформление модалки механизма (tools/mechanism_fx.js)."""
+
+    ICON = {"grid": ["AB", "BA"], "palette": {"A": "#111111", "B": "#eeeeee"}}
+
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    def _errors_with(self, appearance):
+        d = copy.deepcopy(self.data)
+        d["locations"]["grid_loc"]["appearance"] = appearance
+        return [e for e in cv.validate(d) if "appearance" in e]
+
+    def test_full_appearance_is_valid(self):
+        self.assertEqual(self._errors_with({
+            "texture": self.ICON, "texture_dim": 0.6, "progress_icon": self.ICON, "progress_fill": "up",
+            "motion": "strike", "particles": "sawdust", "sound": "mechanism_grid_loc.wav",
+        }), [])
+
+    def test_empty_appearance_is_valid(self):
+        self.assertEqual(self._errors_with({}), [])
+
+    def test_rejects_unknown_motion_particles_and_fill(self):
+        errors = self._errors_with({"motion": "wobble", "particles": "confetti", "progress_fill": "diagonal"})
+        self.assertTrue(any("motion" in e and "wobble" in e for e in errors))
+        self.assertTrue(any("particles" in e and "confetti" in e for e in errors))
+        self.assertTrue(any("progress_fill" in e for e in errors))
+
+    def test_rejects_broken_texture_under_its_own_field_name(self):
+        errors = self._errors_with({"texture": {"grid": ["AB"], "palette": {"A": "#000000"}}})
+        self.assertTrue(any("appearance.texture" in e and "'B'" in e for e in errors))
+
+    def test_rejects_texture_dim_out_of_range(self):
+        for dim in (-0.1, 0.95, True, "0.5"):
+            self.assertTrue(self._errors_with({"texture_dim": dim}), dim)
+
+    def test_rejects_unknown_key_and_bad_sound(self):
+        errors = self._errors_with({"colour": "#ff0000", "sound": "../evil.exe"})
+        self.assertTrue(any("colour" in e for e in errors))
+        self.assertTrue(any("sound" in e for e in errors))
+
+    def test_appearance_without_crafting_is_not_an_error(self):
+        # Снятая галочка «Крафт-сетка» в редакторе оставляет оформление лежать.
+        d = copy.deepcopy(self.data)
+        loc = next(l for l in d["locations"].values() if not l.get("crafting"))
+        loc["appearance"] = {"motion": "spin"}
+        self.assertEqual([e for e in cv.validate(d) if "appearance" in e], [])
+
+    def test_variant_ids_match_mechanism_fx_js(self):
+        # id вариантов продублированы руками (JS не импортирует Python) - держать в паре.
+        import re
+        js = (ROOT / "tools" / "mechanism_fx.js").read_text(encoding="utf-8")
+
+        def js_keys(const):
+            block = re.search(rf"const {const} = \{{(.*?)\n\}};", js, re.S).group(1)
+            return set(re.findall(r"^  ([a-z_]+):", block, re.M))
+        self.assertEqual(js_keys("MECH_FX_MOTIONS"), set(cv.MECHANISM_MOTIONS))
+        self.assertEqual(js_keys("MECH_FX_PARTICLES"), set(cv.MECHANISM_PARTICLES))
+        self.assertEqual(js_keys("MECH_FX_FILLS"), set(cv.MECHANISM_PROGRESS_FILLS))
+
+
 if __name__ == "__main__":
     unittest.main()
