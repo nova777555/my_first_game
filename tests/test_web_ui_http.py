@@ -907,7 +907,7 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertFalse(resp["ok"])
 
-    def test_purchase_farm_upgrade_does_not_advance_turn_and_is_isolated_per_instance(self):
+    def test_purchase_farm_upgrade_spends_a_turn_and_is_isolated_per_instance(self):
         web_ui.STATE.resources["raw_a"] = 100
         self._post("/api/action", {"type": "build", "id": "industrial_apiary"})
         self._post("/api/action", {"type": "build", "id": "industrial_apiary"})
@@ -916,10 +916,10 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(len(instances), 2)
         turn_before = web_ui.STATE.turn
 
-        status, resp = self._post("/api/purchase_farm_upgrade", {"instance_id": instances[0], "upgrade_id": "ia_output"})
+        status, resp = self._post("/api/action", {"type": "farm_instance_upgrade", "id": f"{instances[0]}:ia_output"})
         self.assertEqual(status, 200)
-        self.assertTrue(resp["ok"], resp["message"])
-        self.assertEqual(web_ui.STATE.turn, turn_before)
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before + 1)
 
         farm_1 = next(f for f in resp["state"]["farms"] if f["id"] == instances[0])
         farm_2 = next(f for f in resp["state"]["farms"] if f["id"] == instances[1])
@@ -956,7 +956,7 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertTrue(resp["ok"], resp["message"])
         self.assertEqual(web_ui.STATE.resources["test_soul"], 1)
 
-    def test_purchase_soul_upgrade_does_not_advance_turn_and_is_isolated_per_instance(self):
+    def test_purchase_soul_upgrade_spends_a_turn_and_is_isolated_per_instance(self):
         web_ui.STATE.resources["raw_a"] = 100
         self._post("/api/action", {"type": "build", "id": "soul_synth"})
         self._post("/api/action", {"type": "build", "id": "soul_synth"})
@@ -964,10 +964,10 @@ class WebUiHttpTests(unittest.TestCase):
         instances = [e["id"] for e in state["soul_collectors"] if e["building_id"] == "soul_synth"]
         turn_before = web_ui.STATE.turn
 
-        status, resp = self._post("/api/purchase_soul_upgrade", {"instance_id": instances[0], "upgrade_id": "soul_synth_slot"})
+        status, resp = self._post("/api/action", {"type": "soul_instance_upgrade", "id": f"{instances[0]}:soul_synth_slot"})
         self.assertEqual(status, 200)
-        self.assertTrue(resp["ok"], resp["message"])
-        self.assertEqual(web_ui.STATE.turn, turn_before)
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before + 1)
 
         entry_1 = next(e for e in resp["state"]["soul_collectors"] if e["id"] == instances[0])
         entry_2 = next(e for e in resp["state"]["soul_collectors"] if e["id"] == instances[1])
@@ -1023,7 +1023,7 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertEqual(entry["zones"][0]["control_rod_depth"], 40)
         self.assertEqual(entry["zones"][0]["coolant_flow"], 60)
 
-    def test_purchase_reactor_upgrade_does_not_advance_turn_and_is_isolated_per_instance(self):
+    def test_purchase_reactor_upgrade_spends_a_turn_and_is_isolated_per_instance(self):
         web_ui.STATE.resources["raw_a"] = 100
         self._post("/api/action", {"type": "build", "id": "test_reactor"})
         self._post("/api/action", {"type": "build", "id": "test_reactor"})
@@ -1031,10 +1031,10 @@ class WebUiHttpTests(unittest.TestCase):
         instances = [e["id"] for e in state["reactors"] if e["building_id"] == "test_reactor"]
         turn_before = web_ui.STATE.turn
 
-        status, resp = self._post("/api/purchase_reactor_upgrade", {"instance_id": instances[0], "upgrade_id": "test_reactor_zoning_2"})
+        status, resp = self._post("/api/action", {"type": "reactor_instance_upgrade", "id": f"{instances[0]}:test_reactor_zoning_2"})
         self.assertEqual(status, 200)
-        self.assertTrue(resp["ok"], resp["message"])
-        self.assertEqual(web_ui.STATE.turn, turn_before)
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
+        self.assertEqual(web_ui.STATE.turn, turn_before + 1)
 
         entry_1 = next(e for e in resp["state"]["reactors"] if e["id"] == instances[0])
         entry_2 = next(e for e in resp["state"]["reactors"] if e["id"] == instances[1])
@@ -1044,6 +1044,23 @@ class WebUiHttpTests(unittest.TestCase):
         purchased_2 = {u["id"] for u in entry_2["upgrades"]["upgrades"] if u["purchased"]}
         self.assertIn("test_reactor_zoning_2", purchased_1)
         self.assertNotIn("test_reactor_zoning_2", purchased_2)
+
+    def test_instance_upgrades_have_a_price_and_a_label_for_the_confirm_window(self):
+        # Окно подтверждения автокрафта (autocraft_preview_view) строится по цене и
+        # имени действия - у всех трёх видов экземпляров они должны быть.
+        web_ui.STATE.resources["raw_a"] = 100
+        for building_id in ("industrial_apiary", "soul_synth", "test_reactor"):
+            self._post("/api/action", {"type": "build", "id": building_id})
+        s = web_ui.STATE
+        cases = [
+            ("farm_instance_upgrade", s.farm_instances, "ia_output"),
+            ("soul_instance_upgrade", s.soul_collector_instances, "soul_synth_slot"),
+            ("reactor_instance_upgrade", s.reactor_instances, "test_reactor_zoning_2"),
+        ]
+        for kind, instances, upgrade_id in cases:
+            action_id = f"{next(iter(instances))}:{upgrade_id}"
+            self.assertIsNotNone(engine.resolve_action_cost(s, kind, action_id), kind)
+            self.assertTrue(web_ui._action_label(s, kind, action_id), kind)
 
     def test_purchase_reactor_grid_upgrade_with_dict_value_does_not_crash_view(self):
         # Регрессия: reactor_grid_size хранит value как dict ({"width","height"}),
@@ -1056,9 +1073,9 @@ class WebUiHttpTests(unittest.TestCase):
         status, state = self._get("/api/state")
         instance_id = next(e for e in state["reactors"] if e["building_id"] == "test_reactor")["id"]
 
-        status, resp = self._post("/api/purchase_reactor_upgrade", {"instance_id": instance_id, "upgrade_id": "test_reactor_grid_3x2"})
+        status, resp = self._post("/api/action", {"type": "reactor_instance_upgrade", "id": f"{instance_id}:test_reactor_grid_3x2"})
         self.assertEqual(status, 200)
-        self.assertTrue(resp["ok"], resp["message"])
+        self.assertTrue(resp["log"]["ok"], resp["log"]["message"])
 
         # build_view уже пересобран сервером внутри resp - убеждаемся, что
         # список апгрейдов вообще пришёл (а не свалился до ответа) и что

@@ -2831,6 +2831,14 @@ def resource_deltas(before: dict, after: dict) -> list[dict]:
     return out
 
 
+# тип действия -> (экземпляры этого вида в state, покупка улучшения экземпляра)
+_INSTANCE_UPGRADE_TYPES = {
+    "farm_instance_upgrade": (lambda s: s.farm_instances, engine.purchase_farm_instance_upgrade),
+    "soul_instance_upgrade": (lambda s: s.soul_collector_instances, engine.purchase_soul_collector_instance_upgrade),
+    "reactor_instance_upgrade": (lambda s: s.reactor_instances, engine.purchase_reactor_instance_upgrade),
+}
+
+
 def dispatch_action(state: GameState, action_type: str, action_id, scale: int | None = None, qte_hit: bool = False):
     if action_type == "manual":
         return engine.do_manual_action(state, action_id, scale=scale)
@@ -2889,6 +2897,12 @@ def dispatch_action(state: GameState, action_type: str, action_id, scale: int | 
         # недостаточно, чтобы адресовать конкретное.
         building_id, upgrade_id = action_id.split(":", 1)
         return engine.purchase_building_upgrade(state, building_id, upgrade_id)
+    if action_type in _INSTANCE_UPGRADE_TYPES:
+        # Улучшение ОДНОГО экземпляра пасеки/синтезатора/реактора - как улучшение
+        # обычной постройки: окно подтверждения автокрафта и ход. action_id -
+        # "instance_id:upgrade_id".
+        instance_id, _, upgrade_id = str(action_id).partition(":")
+        return _INSTANCE_UPGRADE_TYPES[action_type][1](state, instance_id, upgrade_id)
     if action_type in ("smelt_load", "smelt_alloy", "smelt_pour"):
         # action_id - составной "building_id:recipe_id" (модалка плавильни): у каждой
         # построенной плавильни свой тигель, рецепт без постройки не адресуем.
@@ -3240,16 +3254,9 @@ def _action_label(state: GameState, action_type: str, action_id: str) -> str | N
         building_id, _, upgrade_id = action_id.partition(":")
         upgrade = next((u for u in BUILDINGS[building_id].get("upgrades", []) if u["id"] == upgrade_id), None)
         return upgrade["name"] if upgrade else None
-    if action_type == "farm_instance_upgrade":
+    if action_type in _INSTANCE_UPGRADE_TYPES:
         instance_id, _, upgrade_id = action_id.partition(":")
-        instance = state.farm_instances.get(instance_id)
-        if instance is None:
-            return None
-        upgrade = next((u for u in BUILDINGS[instance["building_id"]].get("upgrades", []) if u["id"] == upgrade_id), None)
-        return upgrade["name"] if upgrade else None
-    if action_type == "soul_instance_upgrade":
-        instance_id, _, upgrade_id = action_id.partition(":")
-        instance = state.soul_collector_instances.get(instance_id)
+        instance = _INSTANCE_UPGRADE_TYPES[action_type][0](state).get(instance_id)
         if instance is None:
             return None
         upgrade = next((u for u in BUILDINGS[instance["building_id"]].get("upgrades", []) if u["id"] == upgrade_id), None)
@@ -3802,12 +3809,6 @@ class Handler(BaseHTTPRequestHandler):
             result = engine.set_reactor_zone_coolant(STATE, payload.get("instance_id"), zone_index, flow_pct)
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
-        elif self.path == "/api/purchase_reactor_upgrade":
-            # Покупка апгрейда ОДНОГО экземпляра реактора - зеркало
-            # /api/purchase_farm_upgrade (см. engine.purchase_reactor_instance_upgrade).
-            result = engine.purchase_reactor_instance_upgrade(STATE, payload.get("instance_id"), payload.get("upgrade_id"))
-            save_state(STATE)
-            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/enchant_tool":
             # Попытка зачарования - управление имуществом, как insert_soul/
             # remove_soul, НЕ тратит ход (см. engine.enchant_tool). result.enchant -
@@ -3857,19 +3858,6 @@ class Handler(BaseHTTPRequestHandler):
             result = engine.claim_quest_reward(STATE, payload.get("quest_id"))
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "prize": result.prize, "state": build_view(STATE)})
-        elif self.path == "/api/purchase_farm_upgrade":
-            # Покупка апгрейда ОДНОГО экземпляра пасеки - как house/release, НЕ
-            # тратит ход (управление имуществом, а не игровое действие с рандомом/
-            # шансом, см. engine.purchase_farm_instance_upgrade).
-            result = engine.purchase_farm_instance_upgrade(STATE, payload.get("instance_id"), payload.get("upgrade_id"))
-            save_state(STATE)
-            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
-        elif self.path == "/api/purchase_soul_upgrade":
-            # Покупка апгрейда ОДНОГО экземпляра синтезатора душ - зеркало
-            # /api/purchase_farm_upgrade (см. engine.purchase_soul_collector_instance_upgrade).
-            result = engine.purchase_soul_collector_instance_upgrade(STATE, payload.get("instance_id"), payload.get("upgrade_id"))
-            save_state(STATE)
-            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/analyze_creature":
             # Мгновенное опознание генома (генетическая лаборатория) - НЕ тратит
             # ход, тем же принципом, что house/release (см. engine.analyze_creature).

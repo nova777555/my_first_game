@@ -6190,8 +6190,8 @@ def purchase_farm_instance_upgrade(state: GameState, instance_id: str, upgrade_i
     для них не вызывается - все 6 в content.json одного типа, но друг другу не
     предки), а взаимоисключающие - покупка новой среды удаляет из upgrades
     экземпляра любую ранее купленную среду (замена, старая просто теряется,
-    цена новой платится полностью). Не тратит ход - управление имуществом, как
-    house_creature/release_creature."""
+    цена новой платится полностью). Ход тратит вызывающий - как у улучшения обычной
+    постройки (tools/web_ui.py: dispatch_action)."""
     _ensure_farm_instances(state)
     instance = state.farm_instances.get(instance_id)
     if instance is None:
@@ -6288,8 +6288,8 @@ def purchase_reactor_instance_upgrade(state: GameState, instance_id: str, upgrad
     прогрессия (как scale), prerequisite-цепочка работает как обычно. После
     успешной покупки СРАЗУ доращивает решётку/зоны (_ensure_reactor_grid/
     _ensure_reactor_zones) - новая ёмкость видна немедленно, не дожидаясь
-    следующего advance_turn. Не тратит ход - управление имуществом, как
-    house_creature/insert_soul."""
+    следующего advance_turn. Ход тратит вызывающий - как у улучшения обычной
+    постройки (tools/web_ui.py: dispatch_action)."""
     _ensure_reactor_instances(state)
     instance = state.reactor_instances.get(instance_id)
     if instance is None:
@@ -8285,6 +8285,15 @@ def resolve_action_cost(state: GameState, action_type: str, action_id: str, scal
         if upgrade is None:
             return None
         return repeatable_upgrade_cost(upgrade, soul_collector_instance_upgrade_purchase_count(state, instance_id, upgrade_id))
+    if action_type == "reactor_instance_upgrade":
+        instance_id, _, upgrade_id = action_id.partition(":")
+        instance = state.reactor_instances.get(instance_id)
+        if instance is None:
+            return None
+        upgrade = next((u for u in building_upgrade_defs(instance["building_id"]) if u["id"] == upgrade_id), None)
+        if upgrade is None:
+            return None
+        return repeatable_upgrade_cost(upgrade, reactor_instance_upgrade_purchase_count(state, instance_id, upgrade_id))
     if action_type == "storage_upgrade":
         next_info = next_storage_tier_info(state, action_id)
         return dict(next_info["cost"]) if next_info else None

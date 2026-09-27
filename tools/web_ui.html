@@ -5840,21 +5840,9 @@ async function houseCreature(creatureId, farmInstanceId) {
   }
 }
 
-async function purchaseFarmUpgrade(instanceId, upgradeId) {
-  if (busy) return;
-  busy = true;
-  try {
-    const res = await fetch("/api/purchase_farm_upgrade", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instance_id: instanceId, upgrade_id: upgradeId }),
-    });
-    const payload = await res.json();
-    VIEW = payload.state;
-    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
-    renderAll();
-  } finally {
-    busy = false;
-  }
+// Как улучшение обычной постройки: окно подтверждения автокрафта и ход.
+function purchaseFarmUpgrade(instanceId, upgradeId) {
+  return doAction("farm_instance_upgrade", `${instanceId}:${upgradeId}`);
 }
 
 async function analyzeCreature(creatureId) {
@@ -5917,21 +5905,9 @@ async function removeSoul(instanceId, index) {
   }
 }
 
-async function purchaseSoulUpgrade(instanceId, upgradeId) {
-  if (busy) return;
-  busy = true;
-  try {
-    const res = await fetch("/api/purchase_soul_upgrade", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instance_id: instanceId, upgrade_id: upgradeId }),
-    });
-    const payload = await res.json();
-    VIEW = payload.state;
-    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
-    renderAll();
-  } finally {
-    busy = false;
-  }
+// Как улучшение обычной постройки: окно подтверждения автокрафта и ход.
+function purchaseSoulUpgrade(instanceId, upgradeId) {
+  return doAction("soul_instance_upgrade", `${instanceId}:${upgradeId}`);
 }
 
 async function insertReactorComponent(instanceId, cellIndex, resourceId) {
@@ -6055,21 +6031,9 @@ async function setReactorZoneCoolant(instanceId, zoneIndex, flowPct) {
   }
 }
 
-async function purchaseReactorUpgrade(instanceId, upgradeId) {
-  if (busy) return;
-  busy = true;
-  try {
-    const res = await fetch("/api/purchase_reactor_upgrade", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instance_id: instanceId, upgrade_id: upgradeId }),
-    });
-    const payload = await res.json();
-    VIEW = payload.state;
-    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
-    renderAll();
-  } finally {
-    busy = false;
-  }
+// Как улучшение обычной постройки: окно подтверждения автокрафта и ход.
+function purchaseReactorUpgrade(instanceId, upgradeId) {
+  return doAction("reactor_instance_upgrade", `${instanceId}:${upgradeId}`);
 }
 
 // Улучшения ОДНОГО экземпляра синтезатора - буквальное зеркало renderFarmUpgrades/
