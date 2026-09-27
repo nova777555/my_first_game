@@ -1045,6 +1045,19 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertIn("test_reactor_zoning_2", purchased_1)
         self.assertNotIn("test_reactor_zoning_2", purchased_2)
 
+    def test_cancel_preview_reports_what_would_burn_without_cancelling(self):
+        order = {"id": 1, "kind": "recipe", "target_id": "craft_mid", "label": "x", "steps": [],
+                 "reserved": {"limited_res": 6, "raw_a": 2}, "energy_reserve": 0, "final_energy": 0,
+                 "status": None, "waits_energy": False}
+        web_ui.STATE = GameState(resources={"limited_res": 7}, orders=[order], next_order_id=2)
+        status, resp = self._post("/api/cancel_preview", {"kind": "order", "order_id": 1})
+        self.assertEqual(status, 200)
+        # вместимость 10: из 6 вернувшихся влезут 3
+        self.assertEqual([(r["id"], r["amount"]) for r in resp["burn"]], [("limited_res", 3)])
+        self.assertEqual({r["id"]: r["amount"] for r in resp["refund"]}, {"limited_res": 6, "raw_a": 2})
+        self.assertEqual(len(web_ui.STATE.orders), 1)
+        self.assertEqual(web_ui.STATE.resources, {"limited_res": 7})
+
     def test_instance_upgrades_have_a_price_and_a_label_for_the_confirm_window(self):
         # Окно подтверждения автокрафта (autocraft_preview_view) строится по цене и
         # имени действия - у всех трёх видов экземпляров они должны быть.

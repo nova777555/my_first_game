@@ -8931,7 +8931,19 @@ function renderEncounterBanner(locationId) {
   return banner;
 }
 
+// Отмена без окна - если только возвращённое влезает на склад. Иначе окно:
+// сколько вернётся и сколько сгорит в конце хода (/api/cancel_preview).
 async function cancelJob(kind, extra) {
+  if (busy) return;
+  const burn = await fetchCancelBurn(kind, extra);
+  if (burn.length) {
+    const lost = burn.map(r => `${r.name} ${fmtNum(r.amount)}`).join(", ");
+    const ok = await confirmModal(
+      `Склад переполнен: вернувшееся сверх вместимости сгорит в конце хода, если его не потратить. Сгорит: ${lost}.`,
+      { title: "Отменить?", confirmText: "Отменить всё равно", cancelText: "Не отменять", danger: true },
+    );
+    if (!ok) return;
+  }
   if (busy) return;
   busy = true;
   try {
@@ -8945,6 +8957,19 @@ async function cancelJob(kind, extra) {
     renderAll();
   } finally {
     busy = false;
+  }
+}
+
+async function fetchCancelBurn(kind, extra) {
+  try {
+    const res = await fetch("/api/cancel_preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, ...extra }),
+    });
+    if (!res.ok) return [];
+    return (await res.json()).burn || [];
+  } catch (e) {
+    return [];
   }
 }
 

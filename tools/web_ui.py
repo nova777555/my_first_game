@@ -2935,6 +2935,46 @@ def _smeltery_event_view(event: dict) -> dict:
     }
 
 
+def cancel_job(state: GameState, payload: dict):
+    """Отмена задачи/заказа по телу запроса /api/cancel_job (kind + id задачи)."""
+    kind = payload.get("kind")
+    if kind == "order":
+        try:
+            return engine.cancel_order(state, int(payload.get("order_id")))
+        except (TypeError, ValueError):
+            raise ValueError("order_id должен быть числом")
+    if kind == "energy":
+        return engine.cancel_energy_job(state, payload.get("index"))
+    if kind == "manual":
+        return engine.cancel_manual_job(state, payload.get("action_id"))
+    if kind == "research":
+        return engine.cancel_research(state)
+    if kind == "ritual":
+        return engine.cancel_ritual(state, payload.get("building_id"))
+    if kind == "replicator":
+        return engine.cancel_replicator_job(state, payload.get("job_id"))
+    raise ValueError("неизвестный тип задачи")
+
+
+def cancel_preview_view(state: GameState, payload: dict) -> dict:
+    """Что вернёт отмена (проигрывается на копии состояния - тем же кодом, что и
+    настоящая отмена) и что из возвращённого не влезет на склад: лишнее сгорит в
+    конце хода, как любое начисление сверх вместимости. burn пуст - окно не нужно."""
+    trial = GameState.from_dict(json.loads(json.dumps(state.to_dict())))
+    cancel_job(trial, payload)
+    refund, burn = [], []
+    for resource_id, amount in trial.resources.items():
+        before = state.resources.get(resource_id, 0)
+        if amount <= before:
+            continue
+        refund.append({"id": resource_id, "name": RESOURCE_NAMES.get(resource_id, resource_id), "amount": amount - before})
+        cap = engine.storage_capacity(state, resource_id)
+        if cap is not None and amount > max(cap, before):
+            lost = amount - max(cap, before)
+            burn.append({"id": resource_id, "name": RESOURCE_NAMES.get(resource_id, resource_id), "amount": lost})
+    return {"refund": refund, "burn": burn}
+
+
 def run_turn(state: GameState, action_type: str, action_id, scale: int | None = None, qte_hit: bool = False) -> dict:
     global _LAST_ENERGY_SHORTFALL
     log = {
@@ -3626,28 +3666,19 @@ class Handler(BaseHTTPRequestHandler):
             # toggle_pin/toggle_autocraft, НЕ тратит ход (см. game/engine.py:
             # cancel_autocraft_job/cancel_energy_job/cancel_manual_job) - игрок не должен
             # ждать advance_turn, чтобы освободить слот, который сам же занял.
-            kind = payload.get("kind")
-            if kind == "order":
-                try:
-                    result = engine.cancel_order(STATE, int(payload.get("order_id")))
-                except (TypeError, ValueError):
-                    self._json(400, {"error": "order_id должен быть числом"})
-                    return
-            elif kind == "energy":
-                result = engine.cancel_energy_job(STATE, payload.get("index"))
-            elif kind == "manual":
-                result = engine.cancel_manual_job(STATE, payload.get("action_id"))
-            elif kind == "research":
-                result = engine.cancel_research(STATE)
-            elif kind == "ritual":
-                result = engine.cancel_ritual(STATE, payload.get("building_id"))
-            elif kind == "replicator":
-                result = engine.cancel_replicator_job(STATE, payload.get("job_id"))
-            else:
-                self._json(400, {"error": "неизвестный тип задачи"})
+            try:
+                result = cancel_job(STATE, payload)
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
                 return
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/cancel_preview":
+            # Read-only: что вернёт отмена и что из этого не влезет на склад.
+            try:
+                self._json(200, cancel_preview_view(STATE, payload))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
         elif self.path == "/api/house_creature":
             # Поселение особи из банка в конкретный ЭКЗЕМПЛЯР фермы - как toggle_pin/
             # cancel_job, НЕ тратит ход (управление уже своим имуществом, см.
