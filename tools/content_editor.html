@@ -10645,6 +10645,22 @@ function renderSettings() {
   renderDictEditor(synthesisCostBox, DATA.genetics.synthesis_cost);
   geneticsCard.appendChild(synthesisCostBox);
 
+  // genetics.environment_mutation_chance - см. game/engine.py:_cross_genotype (валидатор: 0..1).
+  const envMutationRow = el("div", { class: "field-row" });
+  envMutationRow.appendChild(el("label", { text: "Шанс мутации среды при скрещивании" }));
+  const envMutationInput = el("input", {
+    type: "number", min: "0", max: "1", step: "0.01", value: DATA.genetics.environment_mutation_chance ?? 0,
+  });
+  envMutationInput.addEventListener("change", () => {
+    const value = Number(envMutationInput.value);
+    if (value > 0) DATA.genetics.environment_mutation_chance = value;
+    else delete DATA.genetics.environment_mutation_chance;
+  });
+  envMutationRow.appendChild(envMutationInput);
+  envMutationRow.appendChild(el("span", { class: "hint", text:
+    "0..1 - с этим шансом потомок получает среду обитания заново, по пулу генов своего вида, а не по наследству; 0 - никогда" }));
+  geneticsCard.appendChild(envMutationRow);
+
   root.appendChild(geneticsCard);
 
   if (!DATA.combat) DATA.combat = {};
