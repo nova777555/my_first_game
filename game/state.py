@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 
 # Максимум записей в history - см. поле ниже и engine.py:record_history_entry.
@@ -513,8 +514,13 @@ class GameState:
         )
 
     def save(self, path: str) -> None:
-        with open(path, "w", encoding="utf-8") as f:
+        # Через временный файл и os.replace: автосейв пишется после КАЖДОГО хода, и
+        # прямой open(path, "w") сначала обнулял файл - закрытое посреди записи окно
+        # оставляло пустой/обрезанный autosave.json, с которым игра уже не запускалась.
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
 
     @classmethod
     def load(cls, path: str) -> "GameState":

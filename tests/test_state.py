@@ -154,6 +154,17 @@ class StateRoundTripTests(unittest.TestCase):
             self.assertEqual(loaded.resources, {"wood": 5})
             self.assertEqual(loaded.tool_tiers, {"pickaxe": 2})
 
+    def test_failed_save_keeps_the_previous_file(self):
+        # Запись прервалась посреди (здесь - несериализуемое значение): прежний
+        # файл цел, а не обнулён - иначе с ним игра уже не запустилась бы.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "save.json"
+            GameState(turn=3).save(str(path))
+            broken = GameState(turn=4, resources={"wood": object()})
+            with self.assertRaises(TypeError):
+                broken.save(str(path))
+            self.assertEqual(GameState.load(str(path)).turn, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
