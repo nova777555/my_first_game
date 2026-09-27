@@ -9243,6 +9243,7 @@ _ORDER_RETRY = {
     "tech": lambda state, pending: research(state, pending["target_id"]),
     "repair": lambda state, pending: repair(state, pending["target_id"]),
     "upgrade_tool": lambda state, pending: upgrade_tool(state, pending["target_id"]),
+    "repair_tool": lambda state, pending: repair_tool(state, pending["target_id"]),
     "building_upgrade": lambda state, pending: purchase_building_upgrade(state, *pending["target_id"].split(":", 1)),
     "farm_instance_upgrade": lambda state, pending: purchase_farm_instance_upgrade(state, *pending["target_id"].split(":", 1)),
     "reactor_instance_upgrade": lambda state, pending: purchase_reactor_instance_upgrade(state, *pending["target_id"].split(":", 1)),

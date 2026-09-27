@@ -936,5 +936,46 @@ class FinishedReportTests(OrdersTestCase):
         self.assertEqual(len(s.orders), 1)
 
 
+class OrderRetryCoverageTests(unittest.TestCase):
+    """Каждый вид заказа, который оформляет _pay_or_defer, обязан уметь выполниться
+    по готовности (_ORDER_RETRY) - иначе _finalize_order падает KeyError на КАЖДОМ
+    ходу, пока заказ висит, и сохранение перестаёт ходить (так было с ремонтом
+    инструмента)."""
+
+    def test_every_deferred_kind_has_a_retry(self):
+        import ast
+        tree = ast.parse(Path(engine.__file__).read_text(encoding="utf-8"))
+        kinds = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_pay_or_defer":
+                self.assertGreaterEqual(len(node.args), 4, ast.unparse(node))
+                kind = node.args[3]
+                self.assertIsInstance(kind, ast.Constant, ast.unparse(node))
+                kinds.add(kind.value)
+        self.assertIn("repair_tool", kinds)
+        self.assertEqual(kinds - set(engine._ORDER_RETRY), set())
+
+    def test_tool_repair_waiting_for_energy_finishes(self):
+        with fixtures.patched_engine_content():
+            tool_id = next(
+                t for t, d in engine.TOOLS.items() if any(tier.get("max_durability") for tier in d["tiers"])
+            )
+            tiers = copy.deepcopy(engine.TOOLS[tool_id]["tiers"])
+            index = next(i for i, tier in enumerate(tiers) if tier.get("max_durability"))
+            tiers[index]["repair_cost"] = {"energy": 5}
+            engine.TOOLS = {**engine.TOOLS, tool_id: {**engine.TOOLS[tool_id], "tiers": tiers}}
+            engine.BUILDINGS = {
+                **engine.BUILDINGS, "e_gen": EXTRA_BUILDINGS["e_gen"], "e_bank": EXTRA_BUILDINGS["e_bank"],
+            }
+            s = GameState(buildings={"e_gen": 1, "e_bank": 1})
+            s.tool_tiers[tool_id] = index + 1
+            s.tool_durability[tool_id] = 0
+            self.assertTrue(engine.repair_tool(s, tool_id).pending)
+            for _ in range(3):
+                engine.advance_turn(s)
+            self.assertEqual(s.orders, [])
+            self.assertFalse(engine.tool_is_broken(s, tool_id))
+
+
 if __name__ == "__main__":
     unittest.main()
