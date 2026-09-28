@@ -297,6 +297,9 @@ def action_priority_view(state: GameState) -> list[dict]:
     # Репликатор основным путём (приоритет "replicator:<ресурс>" выше остальных) делает
     # запасными и обычный рецепт, и преобразователь этого ресурса.
     replicated = engine.replicator_preferred_resources(state, recipe)
+    # Рецепты, замкнутые в круг, автокрафт источником не берёт вовсе - ни основным,
+    # ни запасным путём (engine.autocraft_cyclic_recipes).
+    cyclic = engine.autocraft_cyclic_recipes()
     result = []
     for aid, a in MANUAL_ACTIONS.items():
         if not a["cost"]:
@@ -308,10 +311,12 @@ def action_priority_view(state: GameState) -> list[dict]:
             "priority": engine.action_priority(state, aid),
             "default_priority": default_priority,
             "overridden": aid in state.action_priority,
-            "is_active_recipe": any(
+            "is_active_recipe": aid not in cyclic and any(
                 recipe.get(r) == aid and r not in preferred and r not in replicated for r in a["gain"]
             ),
-            "is_fallback": any(recipe.get(r) == aid and (r in preferred or r in replicated) for r in a["gain"]),
+            "is_fallback": aid not in cyclic
+            and any(recipe.get(r) == aid and (r in preferred or r in replicated) for r in a["gain"]),
+            "cyclic": aid in cyclic,
         })
     for rid, r in ENERGY_RECIPES.items():
         key = engine.grid_recipe_key("energy_recipe", rid)
@@ -328,9 +333,13 @@ def action_priority_view(state: GameState) -> list[dict]:
             "priority": engine.action_priority(state, key),
             "default_priority": 0,
             "overridden": key in state.action_priority,
-            "is_active_recipe": any((res in preferred or res not in recipe) and res not in replicated for res in own),
-            "is_fallback": any((res in recipe and res not in preferred) or res in replicated for res in own)
-            or len(own) < len(r.get("produces", {})),
+            "is_active_recipe": key not in cyclic
+            and any((res in preferred or res not in recipe) and res not in replicated for res in own),
+            "is_fallback": key not in cyclic and (
+                any((res in recipe and res not in preferred) or res in replicated for res in own)
+                or len(own) < len(r.get("produces", {}))
+            ),
+            "cyclic": key in cyclic,
         })
     # Ритуалы - источник, только когда у ресурса нет ни обычного рецепта, ни
     # преобразователя; между несколькими ритуалами одного ресурса решает приоритет.
@@ -348,8 +357,9 @@ def action_priority_view(state: GameState) -> list[dict]:
             "priority": engine.action_priority(state, key),
             "default_priority": 0,
             "overridden": key in state.action_priority,
-            "is_active_recipe": bool(alone),
-            "is_fallback": len(alone) < len(gains),
+            "is_active_recipe": key not in cyclic and bool(alone),
+            "is_fallback": key not in cyclic and len(alone) < len(gains),
+            "cyclic": key in cyclic,
         })
     # Репликация (resources.*.replication_cost) - только если в игре есть репликатор.
     matters = {(b.get("replicator") or {}).get("matter") for b in BUILDINGS.values() if b.get("replicator")}

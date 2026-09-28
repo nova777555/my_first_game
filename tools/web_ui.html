@@ -10532,7 +10532,8 @@ function renderAutocraftPriorityTab(container) {
     if (a.kind === "energy_recipe") sub.unshift("⚡ преобразователь");
     if (a.kind === "ritual_recipe") sub.unshift("✦ ритуал");
     if (a.kind === "replicator") sub.unshift("⚗ репликатор");
-    if (a.is_active_recipe) sub.push("сейчас используется автокрафтом");
+    if (a.cyclic) sub.push("замкнут в круг - автокрафт его не берёт");
+    else if (a.is_active_recipe) sub.push("сейчас используется автокрафтом");
     else if (a.is_fallback) sub.push("запасной путь - если основной не сможет");
     list.appendChild(priorityRow(a, setActionPriority, [sub.join(" - ")]));
   });

@@ -883,6 +883,19 @@ class CyclicRecipeTests(OrdersTestCase):
         self.assertTrue({"m_pack", "m_unpack", "energy_recipe:dupe_raw"} <= cyclic)
         self.assertFalse({"m_quick", "use_block"} & cyclic)
 
+    def test_priorities_tab_marks_cyclic_recipes_as_never_used(self):
+        # Вкладка приоритетов не называет рецепт из круга ни основным, ни запасным.
+        import web_ui
+        from unittest import mock
+        with mock.patch.multiple(web_ui, MANUAL_ACTIONS=engine.MANUAL_ACTIONS, ENERGY_RECIPES=engine.ENERGY_RECIPES,
+                                 RESOURCE_NAMES=engine.RESOURCE_NAMES, RITUAL_RECIPES=engine.RITUAL_RECIPES,
+                                 BUILDINGS=engine.BUILDINGS):
+            rows = {r["id"]: r for r in web_ui.action_priority_view(self.mech_state())}
+        for key in ("m_unpack", "energy_recipe:dupe_raw"):
+            self.assertTrue(rows[key]["cyclic"], key)
+            self.assertFalse(rows[key]["is_active_recipe"] or rows[key]["is_fallback"], key)
+        self.assertFalse(rows["m_quick"]["cyclic"])
+
     def test_a_cyclic_recipe_is_never_a_source(self):
         # m_out делается «быстрым» из сырья, хотя «распаковать» приоритетнее.
         s = self.mech_state(resources={"raw_a": 5, "m_block": 3}, buildings={"m_asm_fast": 1})
