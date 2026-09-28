@@ -4203,6 +4203,17 @@ def enchantment_pool(tool_id: str) -> list[dict]:
     return pool
 
 
+def combat_gear_owned(state: GameState, tool_id: str) -> bool:
+    """Есть ли у игрока сам предмет линейки. У оружия и брони тир 1 - «предмета нет»
+    («Кулаки», «Не выковано», «Без брони»): предмет появляется со 2-го тира, поэтому
+    зачаровать его раньше нельзя и зачарования на нём не действуют. Остальные
+    инструменты (кирка) - настоящий инструмент уже с тира 1."""
+    tool = TOOLS.get(tool_id, {})
+    if not (tool.get("weapon") or tool.get("armor")) or len(tool.get("tiers", [])) <= 1:
+        return True
+    return tool_tier(state, tool_id) >= 2
+
+
 def enchantable_tools() -> list[str]:
     """Инструменты, у которых вообще есть enchant_kind (т.е. их можно понести на
     стол зачарований) - используется UI для списка выбора. Чистая функция от
@@ -4284,6 +4295,8 @@ def enchant_tool(state: GameState, tool_id: str) -> ActionResult:
     pool = enchantment_pool(tool_id)
     if not pool:
         return ActionResult(False, f"«{tool_name}» нельзя зачаровать.")
+    if not combat_gear_owned(state, tool_id):
+        return ActionResult(False, f"«{tool_name}»: сначала выкуй - пока зачаровывать нечего.")
     cost = config.get("cost", {})
     missing = _direct_shortfall(state, cost)
     if missing:
@@ -4428,9 +4441,11 @@ def _weapon_bonuses(state: GameState) -> dict:
         if not (0 <= index < len(tiers)):
             continue
         tier = tiers[index]
-        sharpness = _enchant_effect_value(state, tool_id, "damage_bonus", 0.0)
-        looting = _enchant_effect_value(state, tool_id, "drop_chance_multiplier", 1.0)
-        necromancy = _enchant_effect_value(state, tool_id, "soul_chance_multiplier", 1.0)
+        # Зачарования невыкованного оружия (тир 1) не действуют - combat_gear_owned.
+        owned = combat_gear_owned(state, tool_id)
+        sharpness = _enchant_effect_value(state, tool_id, "damage_bonus", 0.0) if owned else 0.0
+        looting = _enchant_effect_value(state, tool_id, "drop_chance_multiplier", 1.0) if owned else 1.0
+        necromancy = _enchant_effect_value(state, tool_id, "soul_chance_multiplier", 1.0) if owned else 1.0
         damage_multiplier = max(damage_multiplier, tier.get("damage_multiplier", 1.0) * (1 + sharpness))
         instant_kill_max_hp = max(instant_kill_max_hp, tier.get("instant_kill_max_hp", 0))
         loot_multiplier = max(loot_multiplier, tier.get("loot_multiplier", 1.0))
@@ -4467,8 +4482,9 @@ def _armor_bonuses(state: GameState) -> dict:
         if not (0 <= index < len(tiers)):
             continue
         tier = tiers[index]
-        protection = _enchant_effect_value(state, tool_id, "armor_defense_bonus", 0.0)
-        vitality = _enchant_effect_value(state, tool_id, "max_hp_bonus_add", 0.0)
+        owned = combat_gear_owned(state, tool_id)
+        protection = _enchant_effect_value(state, tool_id, "armor_defense_bonus", 0.0) if owned else 0.0
+        vitality = _enchant_effect_value(state, tool_id, "max_hp_bonus_add", 0.0) if owned else 0.0
         max_hp_bonus = max(max_hp_bonus, tier.get("max_hp_bonus", 0) + vitality)
         damage_reduction = max(damage_reduction, tier.get("damage_reduction", 0) + protection)
     return {"max_hp_bonus": max_hp_bonus, "damage_reduction": damage_reduction}

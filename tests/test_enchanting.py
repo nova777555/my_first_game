@@ -269,6 +269,29 @@ class MiningDurabilityAndLuckTests(FixtureTestCase):
 
 
 class WeaponAndArmorEnchantTests(FixtureTestCase):
+    def test_unforged_weapon_and_armor_cannot_be_enchanted(self):
+        # Тир 1 оружия и брони - «предмета нет» («Без меча», «Без брони»); у кирки
+        # тир 1 - настоящий инструмент.
+        s = GameState(buildings={"ench_table": 1}, resources={"raw_a": 5})
+        for tool_id in ("sword", "armor"):
+            self.assertFalse(engine.combat_gear_owned(s, tool_id))
+            result = engine.enchant_tool(s, tool_id)
+            self.assertFalse(result.ok)
+            self.assertIn("выкуй", result.message)
+        self.assertEqual(s.resources["raw_a"], 5)  # цена не списана
+        self.assertTrue(engine.combat_gear_owned(s, "pickaxe"))
+        self.assertTrue(engine.enchant_tool(s, "pickaxe").ok)
+        s.tool_tiers["sword"] = 2
+        self.assertTrue(engine.combat_gear_owned(s, "sword"))
+
+    def test_enchantments_of_unforged_gear_do_not_apply(self):
+        s = GameState(tool_enchantments={"sword": {"test_sharpness": 1}, "armor": {"test_protection": 1}})
+        self.assertEqual(engine._weapon_bonuses(s)["damage_multiplier"], 1.0)
+        self.assertEqual(engine.armor_damage_reduction(s), 0)
+        s.tool_tiers.update({"sword": 2, "armor": 2})
+        self.assertGreater(engine._weapon_bonuses(s)["damage_multiplier"], 2.0)
+        self.assertGreater(engine.armor_damage_reduction(s), engine.TOOLS["armor"]["tiers"][1].get("damage_reduction", 0))
+
     def test_sharpness_boosts_damage_multiplier_of_the_enchanted_weapon(self):
         # sword тир 2: damage_multiplier=2, skill 1: damage=3 -> база 6.
         # test_sharpness value=0.5 -> multiplier 2*(1+0.5)=3 -> 9.

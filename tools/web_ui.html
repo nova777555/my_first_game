@@ -7841,7 +7841,7 @@ function openEnchantingModal() {
   closeEnchantingModal();
   if (!data.tools.length) return; // в этом контенте ни один инструмент не зачаровываем (enchant_kind нигде не задан)
   if (!enchantingActiveTool || !data.tools.some(t => t.id === enchantingActiveTool)) {
-    enchantingActiveTool = data.tools[0].id;
+    enchantingActiveTool = (data.tools.find(t => t.owned) || data.tools[0]).id;
   }
 
   const overlay = el("div", { class: "modal-overlay" });
@@ -7912,7 +7912,7 @@ function renderEnchantingLeft(data, tool) {
 
   const select = el("select");
   data.tools.forEach(t => {
-    const opt = el("option", { value: t.id, text: t.name });
+    const opt = el("option", { value: t.id, text: t.owned ? t.name : `${t.name} (не выковано)` });
     if (t.id === tool.id) opt.setAttribute("selected", "selected");
     select.appendChild(opt);
   });
@@ -8015,7 +8015,8 @@ function renderEnchantingCenter(tool, data) {
 
   const rollRow = el("div", { class: "ench-roll-row" });
   const rollBtn = el("button", { class: "primary ench-roll-btn", id: "enchRollBtn", text: "Зачаровать" });
-  rollBtn.disabled = enchantingSpinning || !data.available || tool.pool.length === 0;
+  rollBtn.disabled = enchantingSpinning || !data.available || tool.pool.length === 0 || !tool.owned;
+  if (!tool.owned) rollBtn.title = `«${tool.name}» ещё не выкован - зачаровывать нечего`;
   rollBtn.addEventListener("click", () => rollEnchant(tool.id));
   rollRow.appendChild(rollBtn);
 

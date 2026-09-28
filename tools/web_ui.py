@@ -854,6 +854,8 @@ def enchanting_view(state: GameState) -> dict:
             "max_durability": max_durability,
             "durability_remaining": engine.tool_durability_remaining(state, tool_id),
             "is_broken": engine.tool_is_broken(state, tool_id),
+            # Оружие/броня на тире 1 («Не выковано») - стол его не зачаровывает.
+            "owned": engine.combat_gear_owned(state, tool_id),
             "applied": [
                 {"enchant_id": eid, "name": ENCHANTMENTS[eid]["name"], "level": lvl}
                 for eid, lvl in own_applied.items() if eid in ENCHANTMENTS
