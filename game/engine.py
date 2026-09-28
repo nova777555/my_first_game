@@ -3603,12 +3603,18 @@ def available_techs(state: GameState) -> list[str]:
     return [t for t in TECHS if is_tech_available(t, state)]
 
 
-def tech_unlocks(tech_id: str) -> dict[str, list[str]]:
-    """Что открывает технология - вычисляется на лету из существующих ссылок
-    requires_tech у построек/локаций/действий/добычи/тиров инструментов, а не
-    хранится отдельным полем (чтобы контент нельзя было рассинхронизировать)."""
+def tech_unlocks(tech_id: str) -> dict[str, list]:
+    """Что открывает технология - вычисляется на лету из ВСЕХ ссылок requires_tech в
+    контенте (постройки и их улучшения, локации, действия, добыча, тиры инструментов,
+    крафт за энергию, ритуалы, мутации, тиры склада, мобы, рецепты плавильни), а не
+    хранится отдельным полем (чтобы контент нельзя было рассинхронизировать).
+    Новый вид сущности с requires_tech - добавить сюда же."""
     return {
         "buildings": [b for b, d in BUILDINGS.items() if d.get("requires_tech") == tech_id],
+        "building_upgrades": [
+            {"building": b, "upgrade": u["id"]}
+            for b, d in BUILDINGS.items() for u in d.get("upgrades", []) if u.get("requires_tech") == tech_id
+        ],
         "locations": [l for l, d in LOCATIONS.items() if d.get("requires_tech") == tech_id],
         "manual_actions": [a for a, d in MANUAL_ACTIONS.items() if d.get("requires_tech") == tech_id],
         "mining": [r for r, d in MINING_INFO.items() if d.get("requires_tech") == tech_id],
@@ -3616,6 +3622,19 @@ def tech_unlocks(tech_id: str) -> dict[str, list[str]]:
             t["name"] for tool in TOOLS.values() for t in tool["tiers"] if t.get("requires_tech") == tech_id
         ],
         "energy_recipes": [r for r, d in ENERGY_RECIPES.items() if d.get("requires_tech") == tech_id],
+        "ritual_recipes": [r for r, d in RITUAL_RECIPES.items() if d.get("requires_tech") == tech_id],
+        "mutations": [i for i, m in enumerate(MUTATIONS) if m.get("requires_tech") == tech_id],
+        "storage_tiers": [
+            {"resource": r, "tier": i}
+            for r, storage in RESOURCE_STORAGE.items()
+            for i, tier in enumerate(storage.get("tiers", []), start=1) if tier.get("requires_tech") == tech_id
+        ],
+        "mobs": [m for m, d in MOBS.items() if d.get("requires_tech") == tech_id],
+        "smeltery_recipes": [
+            {"kind": kind, "id": r}
+            for kind, table in (("melt", MELT_RECIPES), ("alloy", ALLOY_RECIPES), ("cast", CAST_RECIPES))
+            for r, d in table.items() if d.get("requires_tech") == tech_id
+        ],
     }
 
 

@@ -1552,6 +1552,18 @@ class TechTreeTests(FixtureTestCase):
         self.assertIn("factory", unlocks["buildings"])
         self.assertIn("locked_action", unlocks["manual_actions"])
         self.assertIn("Тир 3", unlocks["tools"])
+        # и всё, что гейтится не только постройками/действиями
+        self.assertIn({"building": "upgradable_factory", "upgrade": "uf_gen_eff"}, unlocks["building_upgrades"])
+        self.assertIn("ritual_locked", unlocks["ritual_recipes"])
+        self.assertIn({"resource": "limited_res", "tier": 2}, unlocks["storage_tiers"])
+        self.assertIn({"kind": "melt", "id": "melt_locked"}, unlocks["smeltery_recipes"])
+
+    def test_tech_unlocks_include_mutations_and_mobs(self):
+        mutations = [{**engine.MUTATIONS[0], "requires_tech": "tech2"}]
+        mobs = {**engine.MOBS, "test_mob": {**engine.MOBS["test_mob"], "requires_tech": "tech2"}}
+        with mock.patch.object(engine, "MUTATIONS", mutations), mock.patch.object(engine, "MOBS", mobs):
+            unlocks = engine.tech_unlocks("tech2")
+        self.assertEqual((unlocks["mutations"], unlocks["mobs"]), ([0], ["test_mob"]))
 
 
 class LabTierTests(FixtureTestCase):

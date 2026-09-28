@@ -1045,6 +1045,15 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertIn("test_reactor_zoning_2", purchased_1)
         self.assertNotIn("test_reactor_zoning_2", purchased_2)
 
+    def test_tech_tree_lists_unlocks_by_kind_and_improvements(self):
+        status, view = self._get("/api/state")
+        tech1 = next(t for t in view["tech_tree"] if t["id"] == "tech1")
+        groups = {g["label"]: g["items"] for g in tech1["unlock_groups"]}
+        self.assertIn("Постройки", groups)
+        self.assertIn("Ритуалы", groups)
+        self.assertTrue(any("расширение 2" in item for item in groups["Склад"]))
+        self.assertIsInstance(tech1["improves"], list)
+
     def test_grid_modal_shows_and_charges_the_mechanism_scale(self):
         # Верстак - механизм с купленным «Масштабом ×2»: узор тот же (2 ячейки), а
         # модалка показывает и крафт списывает ×2.

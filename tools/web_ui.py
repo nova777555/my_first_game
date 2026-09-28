@@ -1811,6 +1811,58 @@ def grid_action_scale(action_id: str, state: GameState) -> int:
     return engine.mechanism_scale_cap(building_id, state) if building_id else 1
 
 
+def tech_unlock_groups(unlocks: dict) -> list[dict]:
+    """Что открывает технология (engine.tech_unlocks) - группами по виду, с именами:
+    [{"label", "items"}]; пустые группы не попадают."""
+    def upgrade_name(entry):
+        building = BUILDINGS[entry["building"]]
+        upgrade = next(u for u in building.get("upgrades", []) if u["id"] == entry["upgrade"])
+        return f"{upgrade['name']} ({building['name']})"
+
+    def mutation_name(index):
+        m = MUTATIONS[index]
+        results = ", ".join(RESOURCE_NAMES.get(o["species_id"], o["species_id"]) for o in m.get("outcomes", []))
+        parents = f"{RESOURCE_NAMES.get(m['parent_a'], m['parent_a'])} × {RESOURCE_NAMES.get(m['parent_b'], m['parent_b'])}"
+        return f"{parents} → {results}"
+
+    smeltery_tables = {"melt": MELT_RECIPES, "alloy": ALLOY_RECIPES, "cast": CAST_RECIPES}
+    groups = [
+        ("Постройки", [BUILDINGS[b]["name"] for b in unlocks["buildings"]]),
+        ("Улучшения", [upgrade_name(e) for e in unlocks["building_upgrades"]]),
+        ("Локации", [LOCATIONS[l]["name"] for l in unlocks["locations"]]),
+        ("Действия и рецепты", [MANUAL_ACTIONS[a]["name"] for a in unlocks["manual_actions"]]),
+        ("Добыча", [RESOURCE_NAMES[r] for r in unlocks["mining"]]),
+        ("Инструменты", list(unlocks["tools"])),
+        ("Крафт за энергию", [ENERGY_RECIPES[r]["name"] for r in unlocks["energy_recipes"]]),
+        ("Ритуалы", [RITUAL_RECIPES[r]["name"] for r in unlocks["ritual_recipes"]]),
+        ("Мутации", [mutation_name(i) for i in unlocks["mutations"]]),
+        ("Склад", [f"{RESOURCE_NAMES[e['resource']]}: расширение {e['tier']}" for e in unlocks["storage_tiers"]]),
+        ("Мобы", [MOBS[m]["name"] for m in unlocks["mobs"]]),
+        ("Плавильня", [smeltery_tables[e["kind"]][e["id"]]["name"] for e in unlocks["smeltery_recipes"]]),
+    ]
+    return [{"label": label, "items": items} for label, items in groups if items]
+
+
+def tech_improves(tech_id: str) -> list[str]:
+    """Что технология усиливает (techs.*.effects): «Лесопилка: +2 Доски»,
+    «все постройки: поломки −2%»."""
+    result = []
+    for effect in TECHS[tech_id].get("effects", []):
+        target = "все постройки" if effect.get("building") == "*" else BUILDINGS.get(effect.get("building"), {}).get("name")
+        if not target:
+            continue
+        parts = [f"+{engine._format_amount(engine._amount_estimate(a))} {RESOURCE_NAMES.get(r, r)}"
+                 for r, a in effect.get("produces", {}).items() if a]
+        parts += [f"{'−' if a < 0 else '+'}{engine._format_amount(abs(a))} {RESOURCE_NAMES.get(r, r)} расхода"
+                  for r, a in effect.get("consumes", {}).items() if a]
+        delta = effect.get("breakdown_delta") or 0
+        if delta:
+            parts.append(f"поломки {'−' if delta < 0 else '+'}{engine._format_amount(abs(delta) * 100)}%")
+        if parts:
+            result.append(f"{target}: {', '.join(parts)}")
+    return result
+
+
 def crafting_view(state: GameState) -> list[dict]:
     """Раздел на КАЖДУЮ открытую локацию-верстак (locations.*.crafting) - размер
     сетки, банк доступных ресурсов игрока и сами сеточные рецепты этой локации
@@ -2690,14 +2742,9 @@ def build_view(state: GameState) -> dict:
             "research_turns": engine.tech_research_turns(tid, state),
             "lab_built": t["tier"] <= lab_tier_capacity,
             "status": status,
-            "unlocks": {
-                "buildings": [{"id": b, "name": BUILDINGS[b]["name"]} for b in unlocks["buildings"]],
-                "locations": [{"id": l, "name": LOCATIONS[l]["name"]} for l in unlocks["locations"]],
-                "manual_actions": [{"id": a, "name": MANUAL_ACTIONS[a]["name"]} for a in unlocks["manual_actions"]],
-                "mining": [{"id": r, "name": RESOURCE_NAMES[r]} for r in unlocks["mining"]],
-                "tools": unlocks["tools"],
-                "energy_recipes": [{"id": r, "name": ENERGY_RECIPES[r]["name"]} for r in unlocks["energy_recipes"]],
-            },
+            # Постоянный блок «Открывает»/«Усиливает» в плашке технологии.
+            "unlock_groups": tech_unlock_groups(unlocks),
+            "improves": tech_improves(tid),
         })
 
     smelteries = smelteries_view(state)
