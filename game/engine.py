@@ -97,6 +97,8 @@ def set_action_priority(state: GameState, action_id: str, priority: int | None) 
     kind, target_id = parse_grid_recipe_key(action_id) if isinstance(action_id, str) else (None, None)
     if kind == "energy_recipe" and target_id in ENERGY_RECIPES:
         name = ENERGY_RECIPES[target_id]["name"]
+    elif kind == "ritual_recipe" and target_id in RITUAL_RECIPES:
+        name = RITUAL_RECIPES[target_id]["name"]
     elif kind == "replicator" and target_id in RESOURCE_REPLICATION_COST:
         name = f"Репликация: {RESOURCE_NAMES[target_id]}"
     elif kind == "manual_action" and target_id in MANUAL_ACTIONS:
@@ -309,12 +311,13 @@ def autocraft_cyclic_recipes() -> frozenset[str]:
         if not action["cost"] or action.get("excluded_from_autocraft") or not is_manual_action_deterministic(action_id):
             continue
         edges += [(ing, out, action_id) for ing in action["cost"] for out in action["gain"]]
-    for out, recipe_id in ENERGY_RECIPE_FOR_RESOURCE.items():
+    for recipe_id, energy_recipe in ENERGY_RECIPES.items():
         key = grid_recipe_key("energy_recipe", recipe_id)
-        edges += [(ing, out, key) for ing in ENERGY_RECIPES[recipe_id].get("consumes", {})]
-    for out, ritual_id in ritual_recipe_for_resource().items():
-        key = grid_recipe_key("ritual_recipe", ritual_id)
-        edges += [(ing, out, key) for ing in _ritual_full_cost(RITUAL_RECIPES[ritual_id])]
+        edges += [(ing, out, key) for ing in energy_recipe.get("consumes", {}) for out in energy_recipe.get("produces", {})]
+    for out, ritual_ids in ritual_recipe_for_resource().items():
+        for ritual_id in ritual_ids:
+            key = grid_recipe_key("ritual_recipe", ritual_id)
+            edges += [(ing, out, key) for ing in _ritual_full_cost(RITUAL_RECIPES[ritual_id])]
     for matter in {b["replicator"].get("matter") for b in BUILDINGS.values() if b.get("replicator")} - {None}:
         edges += [(matter, out, grid_recipe_key("replicator", out)) for out in RESOURCE_REPLICATION_COST if out != matter]
     edges = [edge for edge in edges if edge[0] != ENERGY_RESOURCE_ID]
@@ -343,12 +346,12 @@ def _cyclic_recipe_name(resource_id: str, cyclic: frozenset) -> str | None:
     for action_id, action in MANUAL_ACTIONS.items():
         if action_id in cyclic and resource_id in action["gain"]:
             return action["name"]
-    energy_id = ENERGY_RECIPE_FOR_RESOURCE.get(resource_id)
-    if energy_id is not None and grid_recipe_key("energy_recipe", energy_id) in cyclic:
-        return ENERGY_RECIPES[energy_id]["name"]
-    ritual_id = ritual_recipe_for_resource().get(resource_id)
-    if ritual_id is not None and grid_recipe_key("ritual_recipe", ritual_id) in cyclic:
-        return RITUAL_RECIPES[ritual_id]["name"]
+    for energy_id in energy_recipes_for_resource(resource_id):
+        if grid_recipe_key("energy_recipe", energy_id) in cyclic:
+            return ENERGY_RECIPES[energy_id]["name"]
+    for ritual_id in ritual_recipe_for_resource().get(resource_id, []):
+        if grid_recipe_key("ritual_recipe", ritual_id) in cyclic:
+            return RITUAL_RECIPES[ritual_id]["name"]
     return None
 
 
@@ -408,6 +411,34 @@ for _recipe_id, _recipe in ENERGY_RECIPES.items():
         ENERGY_RECIPE_FOR_RESOURCE.setdefault(_resource_id, _recipe_id)
 
 
+def energy_recipes_for_resource(resource_id: str) -> list[str]:
+    """ВСЕ рецепты преобразователя, дающие resource_id, в порядке content.json - между
+    ними автокрафт выбирает по приоритету игрока ("energy_recipe:<id>"), см.
+    _autocraft_source_options. ENERGY_RECIPE_FOR_RESOURCE - лишь первый из них."""
+    return [rid for rid, r in ENERGY_RECIPES.items() if resource_id in r.get("produces", {})]
+
+
+def preferred_recipe(state: GameState, candidates: list[str], kind: str) -> str | None:
+    """Кого из нескольких рецептов одного вида (kind - "energy_recipe"/"ritual_recipe")
+    автокрафт берёт первым: больший приоритет игрока, при равенстве - первый в content.json.
+    Для UI приоритетов; сам выбор пути - _autocraft_source_options (тот же порядок)."""
+    best = None
+    for recipe_id in candidates:
+        if best is None or action_priority(state, grid_recipe_key(kind, recipe_id)) > action_priority(
+            state, grid_recipe_key(kind, best)
+        ):
+            best = recipe_id
+    return best
+
+
+def best_energy_priority(state: GameState, resource_id: str) -> int | None:
+    """Наибольший приоритет среди рецептов преобразователя этого ресурса (None - их нет)."""
+    priorities = [
+        action_priority(state, grid_recipe_key("energy_recipe", rid)) for rid in energy_recipes_for_resource(resource_id)
+    ]
+    return max(priorities) if priorities else None
+
+
 def converter_preferred_resources(state: GameState, recipe: dict[str, str] | None = None) -> frozenset[str]:
     """Ресурсы, которые автокрафт делает на преобразователе В ПЕРВУЮ очередь, хотя у них
     есть и обычный рецепт (resource_recipe): игрок поставил рецепту преобразователя
@@ -416,9 +447,9 @@ def converter_preferred_resources(state: GameState, recipe: dict[str, str] | Non
     запасным становится обычный рецепт (см. _order_route)."""
     recipe = resource_recipe(state) if recipe is None else recipe
     return frozenset(
-        resource_id for resource_id, recipe_id in ENERGY_RECIPE_FOR_RESOURCE.items()
+        resource_id for resource_id in ENERGY_RECIPE_FOR_RESOURCE
         if resource_id in recipe
-        and action_priority(state, grid_recipe_key("energy_recipe", recipe_id)) > action_priority(state, recipe[resource_id])
+        and best_energy_priority(state, resource_id) > action_priority(state, recipe[resource_id])
     )
 
 # Мутации по НЕУПОРЯДОЧЕННОЙ паре видов (frozenset - {parent_a, parent_b} и
@@ -1483,7 +1514,7 @@ class _AutocraftGraph:
 
     __slots__ = (
         "ingredient_first", "preorder", "kind_of", "action_of", "stats_of", "ingredients_of", "ritual_of",
-        "replicator_of", "option_count",
+        "energy_of", "replicator_of", "option_count",
     )
 
     def __init__(self):
@@ -1498,6 +1529,7 @@ class _AutocraftGraph:
         self.stats_of: dict[str, tuple[dict[str, int], dict[str, int]]] = {}  # только для kind="action"/"long_action"
         self.ingredients_of: dict[str, list[str]] = {}  # рёбра дерева: из чего делается ресурс (см. _route_fallback)
         self.ritual_of: dict[str, str] = {}  # только для kind="ritual": id ритуала
+        self.energy_of: dict[str, str] = {}  # только для kind="energy": id выбранного рецепта преобразователя
         self.replicator_of: dict[str, str] = {}  # только для kind="replicate": тип репликатора
         # сколько вообще путей есть у ресурса (_autocraft_source_options) - запасные
         # пути ищет _route_fallback
@@ -1552,25 +1584,26 @@ def _autocraft_source_options(
     основной путь, остальные - запасные (_route_fallback). Порядок - по приоритету игрока
     (state.action_priority: id действия, "energy_recipe:<id>", "replicator:<ресурс>",
     по умолчанию 0): СТРОГО больший побеждает, при равенстве - обычный рецепт, потом
-    преобразователь, потом репликатор. Ритуал - только если нет ни обычного рецепта, ни
-    преобразователя, своего приоритета у него нет. Материю репликатор из себя не делает.
+    преобразователь, потом репликатор. Рецептов преобразователя на ресурс может быть
+    несколько - каждый отдельным путём со своим приоритетом, при равенстве по порядку
+    content.json. Ритуал - только если нет ни обычного рецепта, ни преобразователя;
+    между несколькими ритуалами - так же по приоритету ("ritual_recipe:<id>").
+    Материю репликатор из себя не делает.
     Рецепты из круга (cyclic, см. autocraft_cyclic_recipes) путями не бывают; recipe
     (resource_recipe(usable_only=True)) их уже не содержит."""
     options: list[tuple[int, int, str, str]] = []
     action_id = recipe.get(resource_id)
     if action_id is not None:
         options.append((action_priority(state, action_id), 0, "action", action_id))
-    energy_id = ENERGY_RECIPE_FOR_RESOURCE.get(resource_id)
-    if energy_id is not None and grid_recipe_key("energy_recipe", energy_id) in cyclic:
-        energy_id = None
-    if energy_id is not None and _autocraft_energy_recipe_usable(state, energy_id):
-        options.append((action_priority(state, grid_recipe_key("energy_recipe", energy_id)), 1, "energy", energy_id))
+    for energy_id in energy_recipes_for_resource(resource_id):
+        key = grid_recipe_key("energy_recipe", energy_id)
+        if key not in cyclic and _autocraft_energy_recipe_usable(state, energy_id):
+            options.append((action_priority(state, key), 1, "energy", energy_id))
     if not options:
-        ritual_id = rituals.get(resource_id)
-        if ritual_id is not None and grid_recipe_key("ritual_recipe", ritual_id) in cyclic:
-            ritual_id = None
-        if ritual_id is not None and _ritual_autocraft_failure(state, ritual_id, resource_id) is None:
-            options.append((0, 2, "ritual", ritual_id))
+        for ritual_id in rituals.get(resource_id, []):
+            key = grid_recipe_key("ritual_recipe", ritual_id)
+            if key not in cyclic and _ritual_autocraft_failure(state, ritual_id, resource_id) is None:
+                options.append((action_priority(state, key), 2, "ritual", ritual_id))
     if replicator is not None and grid_recipe_key("replicator", resource_id) in cyclic:
         replicator = None
     if replicator is not None and resource_id in RESOURCE_REPLICATION_COST and resource_id != replicator_matter(replicator):
@@ -1590,9 +1623,9 @@ def replicator_preferred_resources(state: GameState, recipe: dict[str, str] | No
         others = []
         if resource_id in recipe:
             others.append(action_priority(state, recipe[resource_id]))
-        energy_id = ENERGY_RECIPE_FOR_RESOURCE.get(resource_id)
-        if energy_id is not None:
-            others.append(action_priority(state, grid_recipe_key("energy_recipe", energy_id)))
+        energy_priority = best_energy_priority(state, resource_id)
+        if energy_priority is not None:
+            others.append(energy_priority)
         if others and action_priority(state, grid_recipe_key("replicator", resource_id)) > max(others):
             result.add(resource_id)
     return frozenset(result)
@@ -1645,6 +1678,7 @@ def _discover_autocraft_graph(
         ingredients: list[str] = []
         if kind == "energy":
             graph.kind_of[resource_id] = "energy"
+            graph.energy_of[resource_id] = target_id
             # Материальная цена крафта за энергию (consumes) - обычные ингредиенты
             # заказа: резервируются/докрафчиваются, как у любого рецепта.
             ingredients = list(ENERGY_RECIPES[target_id].get("consumes", {}))
@@ -1736,7 +1770,7 @@ def _aggregate_autocraft_demand(
             continue
 
         if kind == "energy":
-            energy_recipe = ENERGY_RECIPES[ENERGY_RECIPE_FOR_RESOURCE[resource_id]]
+            energy_recipe = ENERGY_RECIPES[graph.energy_of[resource_id]]
             assembled = location_assembler_capacity(state, CONVERTER_LOCATION_ID) != 0
             per_batch = _guaranteed_amount(energy_recipe["produces"][resource_id])
             batches = -(-(needed - have) // per_batch) if per_batch > 0 else 1
@@ -1960,7 +1994,7 @@ def _plan_order(
             needed = energy_units[resource_id]
             steps.append({
                 "resource_id": resource_id, "kind": "energy",
-                "recipe_id": ENERGY_RECIPE_FOR_RESOURCE[resource_id],
+                "recipe_id": graph.energy_of[resource_id],
                 # у крафта за энергию считаем ЕДИНИЦЫ ресурса, а не партии: выход партии
                 # бывает диапазоном, партий запускается столько, сколько нужно по факту
                 "fires_total": needed, "fires_done": 0,
@@ -2674,7 +2708,7 @@ def _preview_node(
         node.update(ritual_recipe_id=ritual_id, fires=fires, turns=ritual_eta_turns(state, ritual_id, fires))
         ingredients = [(i, a * fires) for i, a in _ritual_full_cost(RITUAL_RECIPES[ritual_id]).items()]
     elif kind == "energy":
-        recipe_id = ENERGY_RECIPE_FOR_RESOURCE[resource_id]
+        recipe_id = graph.energy_of[resource_id]
         energy_recipe = ENERGY_RECIPES[recipe_id]
         per_batch = _guaranteed_amount(energy_recipe["produces"][resource_id])
         batches = -(-deficit // per_batch) if per_batch > 0 else 1
@@ -5331,18 +5365,17 @@ def is_ritual_recipe_deterministic(recipe_id: str) -> bool:
     return all(c >= 1.0 for c in (recipe.get("produces_chance") or {}).values())
 
 
-def ritual_recipe_for_resource() -> dict[str, str]:
-    """resource_id -> ритуал, которым автокрафт делает этот ресурс, если у ресурса нет
-    ни обычного рецепта, ни крафта за энергию (см. _discover_autocraft_graph). Только
-    детерминированные ритуалы; при нескольких - первый по порядку в content.json.
-    Считается на каждый вызов (ритуалов единицы), а не один раз при импорте, как
-    ENERGY_RECIPE_FOR_RESOURCE."""
-    result: dict[str, str] = {}
+def ritual_recipe_for_resource() -> dict[str, list[str]]:
+    """resource_id -> ритуалы, которыми автокрафт может сделать этот ресурс, если у
+    ресурса нет ни обычного рецепта, ни крафта за энергию (см. _discover_autocraft_graph),
+    в порядке content.json; между ними выбирает приоритет игрока (_autocraft_source_options).
+    Только детерминированные ритуалы. Считается на каждый вызов (ритуалов единицы)."""
+    result: dict[str, list[str]] = {}
     for recipe_id, recipe in RITUAL_RECIPES.items():
         if not is_ritual_recipe_deterministic(recipe_id):
             continue
         for resource_id in recipe["produces"]:
-            result.setdefault(resource_id, recipe_id)
+            result.setdefault(resource_id, []).append(recipe_id)
     return result
 
 

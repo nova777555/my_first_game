@@ -315,7 +315,13 @@ def action_priority_view(state: GameState) -> list[dict]:
         })
     for rid, r in ENERGY_RECIPES.items():
         key = engine.grid_recipe_key("energy_recipe", rid)
-        own = [res for res in r.get("produces", {}) if engine.ENERGY_RECIPE_FOR_RESOURCE.get(res) == rid]
+        # Ресурсы, для которых ЭТОТ рецепт - первый среди рецептов преобразователя
+        # (приоритет, при равенстве - порядок контента); остальные его ресурсы он
+        # делает только запасным путём.
+        own = [
+            res for res in r.get("produces", {})
+            if engine.preferred_recipe(state, engine.energy_recipes_for_resource(res), "energy_recipe") == rid
+        ]
         result.append({
             "id": key, "name": r["name"], "kind": "energy_recipe",
             "gain": [{"id": res, "name": RESOURCE_NAMES[res]} for res in r.get("produces", {})],
@@ -323,7 +329,27 @@ def action_priority_view(state: GameState) -> list[dict]:
             "default_priority": 0,
             "overridden": key in state.action_priority,
             "is_active_recipe": any((res in preferred or res not in recipe) and res not in replicated for res in own),
-            "is_fallback": any((res in recipe and res not in preferred) or res in replicated for res in own),
+            "is_fallback": any((res in recipe and res not in preferred) or res in replicated for res in own)
+            or len(own) < len(r.get("produces", {})),
+        })
+    # Ритуалы - источник, только когда у ресурса нет ни обычного рецепта, ни
+    # преобразователя; между несколькими ритуалами одного ресурса решает приоритет.
+    rituals_for = engine.ritual_recipe_for_resource()
+    for rid, ritual in RITUAL_RECIPES.items():
+        if not engine.is_ritual_recipe_deterministic(rid):
+            continue
+        key = engine.grid_recipe_key("ritual_recipe", rid)
+        gains = list(ritual.get("produces", {}))
+        own = [res for res in gains if engine.preferred_recipe(state, rituals_for.get(res, []), "ritual_recipe") == rid]
+        alone = [res for res in own if res not in recipe and not engine.energy_recipes_for_resource(res)]
+        result.append({
+            "id": key, "name": ritual["name"], "kind": "ritual_recipe",
+            "gain": [{"id": res, "name": RESOURCE_NAMES[res]} for res in gains],
+            "priority": engine.action_priority(state, key),
+            "default_priority": 0,
+            "overridden": key in state.action_priority,
+            "is_active_recipe": bool(alone),
+            "is_fallback": len(alone) < len(gains),
         })
     # Репликация (resources.*.replication_cost) - только если в игре есть репликатор.
     matters = {(b.get("replicator") or {}).get("matter") for b in BUILDINGS.values() if b.get("replicator")}

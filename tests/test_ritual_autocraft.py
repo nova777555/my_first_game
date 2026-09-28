@@ -256,6 +256,18 @@ class RitualAsIngredientTests(RitualAutocraftTestCase):
         self.assertEqual(result.message, "Не хватает ресурсов на «Тест: из эссенции». Не хватает: Тест-эссенция 4.")
         self.assertEqual(s.orders, [])
 
+    def test_second_ritual_of_a_resource_wins_by_priority(self):
+        engine.RITUAL_RECIPES = {**engine.RITUAL_RECIPES, "r_essence_alt": _ritual(
+            "Тест: эссенция иначе", {"raw_b": 1}, "raw_a", {"essence": 3},
+        )}
+        s = self.state("r_asm_fast", resources={"raw_a": 10, "raw_b": 10})
+        failure, plan = engine._plan_order(s, {"essence": 3})
+        self.assertIsNone(failure)
+        self.assertEqual([st.get("recipe_id") for st in plan["steps"]], ["r_essence"])
+        self.assertTrue(engine.set_action_priority(s, rk("r_essence_alt"), 2).ok)
+        failure, plan = engine._plan_order(s, {"essence": 3})
+        self.assertEqual([st.get("recipe_id") for st in plan["steps"]], ["r_essence_alt"])
+
     def test_random_ritual_is_not_a_recipe(self):
         s = self.state("r_asm_fast", resources={"raw_a": 1, "raw_b": 1})
         engine.MANUAL_ACTIONS = {**engine.MANUAL_ACTIONS, "use_luck": {

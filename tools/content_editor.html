@@ -673,24 +673,19 @@ function editorCyclicRecipes() {
     if (chances.some((c) => c < 1) || Object.values(a.gain || {}).some(isRange)) continue;
     for (const ing of Object.keys(a.cost)) for (const out of Object.keys(a.gain || {})) edges.push([ing, out, aid]);
   }
-  const energyFor = {};
+  // Все рецепты преобразователя и все детерминированные ритуалы: автокрафт выбирает
+  // между ними по приоритету игрока, так что источником может стать любой.
   for (const [rid, r] of Object.entries(DATA.energy_recipes || {})) {
-    for (const out of Object.keys(r.produces || {})) if (!(out in energyFor)) energyFor[out] = rid;
+    for (const out of Object.keys(r.produces || {})) {
+      for (const ing of Object.keys(r.consumes || {})) edges.push([ing, out, "energy_recipe:" + rid]);
+    }
   }
-  for (const [out, rid] of Object.entries(energyFor)) {
-    for (const ing of Object.keys(DATA.energy_recipes[rid].consumes || {})) edges.push([ing, out, "energy_recipe:" + rid]);
-  }
-  const ritualFor = {};
   for (const [rid, r] of Object.entries(DATA.ritual_recipes || {})) {
     const produces = r.produces || {};
     if (!Object.keys(produces).length || Object.values(produces).some(isRange)) continue;
     if (Object.values(r.produces_chance || {}).some((c) => c < 1)) continue;
-    for (const out of Object.keys(produces)) if (!(out in ritualFor)) ritualFor[out] = rid;
-  }
-  for (const [out, rid] of Object.entries(ritualFor)) {
-    const r = DATA.ritual_recipes[rid];
     const ings = new Set([...Object.keys(r.ring_cost || {}), ...(r.center_cost ? [r.center_cost] : []), ...Object.keys(r.extra_cost || {})]);
-    for (const ing of ings) edges.push([ing, out, "ritual_recipe:" + rid]);
+    for (const out of Object.keys(produces)) for (const ing of ings) edges.push([ing, out, "ritual_recipe:" + rid]);
   }
   const replicable = (DATA.resources || []).filter((r) => r.replication_cost).map((r) => r.id);
   const matters = new Set(Object.values(DATA.buildings || {}).map((b) => b.replicator && b.replicator.matter).filter(Boolean));

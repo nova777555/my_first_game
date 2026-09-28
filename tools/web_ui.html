@@ -1086,11 +1086,13 @@
      чего вся модалка "прыгала" при поселении/выселении особи. Слоты внутри
      теперь ВСЕГДА одна строка на всю ширину (см. .hive-slots ниже) - сцена
      центрирует её по высоте и больше не меняет размер ни от числа особей в
-     ней, ни от банка под ней. */
+     ней, ни от банка под ней. 280, а не 340: слотам хватает (~200px), а
+     освободившееся место ушло досье под сценой - иначе модалка не влезала
+     целиком и нижний край банка/досье уезжал под прокрутку. */
   .hive-stage {
     position: relative; overflow: hidden; border: 1px solid rgba(232,178,61,.28);
     padding: 22px; margin-bottom: 14px; background: rgba(122,178,90,.035);
-    flex: 0 0 340px; height: 340px; display: flex; flex-direction: column; justify-content: center;
+    flex: 0 0 280px; height: 280px; display: flex; flex-direction: column; justify-content: center;
     box-shadow: inset 0 0 70px rgba(6,4,10,.5);
   }
   .hive-modal.family-flower .hive-stage { border-color: rgba(216,131,201,.3); background: rgba(111,214,168,.04); }
@@ -1212,11 +1214,11 @@
      что о ней известно. Высота ФИКСИРОВАНА (та же причина, что у .hive-stage:
      банк не должен "толкать" сцену и раскачивать модалку) - скроллятся сетка и
      досье по отдельности. Поиск и «Опознать всех» - в строке заголовка. */
-  .hive-bank-head { flex-wrap: nowrap; }
+  .hive-bank-head { flex-wrap: nowrap; margin-bottom: 8px; }
   .hive-bank-head h3 { white-space: nowrap; }
   .hive-bank-head .loc-search-bar { flex: 1; min-width: 0; padding: 0; }
   .hive-bank-head .loc-search-bar input { padding-top: 5px; padding-bottom: 5px; }
-  .hive-bank-split { display: flex; gap: 12px; height: 250px; }
+  .hive-bank-split { display: flex; gap: 12px; height: 264px; }
   .hive-bank-split > .empty-note { flex: 1; min-width: 0; }
   .hive-bank-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); grid-auto-rows: min-content; align-content: start; gap: 8px; overflow-y: auto; overflow-x: hidden; }
   .hive-bank-card { position: relative; border-color: rgba(232,178,61,.28); cursor: pointer; }
@@ -4920,13 +4922,12 @@ function appendHiveAtmosphere(stage, isFlower) {
 }
 
 // Сцена ОДНОГО экземпляра фермы (farm - элемент VIEW.farms). Занятый слот -
-// крупная картинка особи по центру (renderGeneHoverIcon - на ней же, по
-// наведению, всплывает генотип, если геном опознан), под ней имя/номер и
-// "прогресс бар смерти" (turns_alive/lifespan - чем полнее, тем ближе конец),
-// по прямому пожеланию, 2026-09-18 (раньше слот был построчной свёрнутой
-// карточкой с кнопкой-шевроном - см. историю renderFarmSection). Кнопки
-// анализа/выселения - мелкие значки в углу слота, не мешают картинке. Пустые
-// слоты - drop-цель для houseCreature, ровно до farm.slot_capacity.
+// крупная картинка особи по центру, под ней имя/номер и "прогресс бар смерти"
+// (turns_alive/lifespan - чем полнее, тем ближе конец), по прямому пожеланию,
+// 2026-09-18. Клик по слоту открывает досье особи под сценой. У неопознанной
+// особи под именем пусто (ни полоски, ни продукции) - на это место встаёт
+// кнопка анализа. Выселение - значок в углу. Пустые слоты - drop-цель для
+// houseCreature, ровно до farm.slot_capacity.
 function renderHiveSlots(farm) {
   const isFlower = hiveFamilyThemeClass(farm.accepts_family) === "family-flower";
   const stage = el("div", { class: `hive-stage ${hiveFamilyThemeClass(farm.accepts_family)}` });
@@ -4935,41 +4936,30 @@ function renderHiveSlots(farm) {
   const slots = el("div", { class: "hive-slots" });
   slots.style.setProperty("--hive-slot-count", String(Math.max(1, farm.slot_capacity)));
   farm.creatures.forEach(entry => {
-    const slot = el("div", { class: "hive-slot filled" });
+    const slot = el("div", { class: "hive-slot filled" + (entry.id === hiveSelectedCreatureId ? " selected" : "") });
+    slot.dataset.creatureId = entry.id;
+    slot.title = "Клик - досье особи";
+    slot.addEventListener("click", () => hiveSelectCreature(farm, entry.id));
 
     const actions = el("div", { class: "hive-slot-actions" });
-    if (!entry.identified && VIEW.genetics_lab_available) {
-      const analyzeBtn = el("button", { class: "hive-slot-action", text: "🔬", title: "Анализировать в генетической лаборатории" });
-      analyzeBtn.addEventListener("click", () => analyzeCreature(entry.id));
-      actions.appendChild(analyzeBtn);
-    }
     const releaseBtn = el("button", { class: "hive-slot-action danger", text: "×", title: "Выселить в банк" });
-    releaseBtn.addEventListener("click", () => releaseCreature(entry.id));
+    releaseBtn.addEventListener("click", (e) => { e.stopPropagation(); releaseCreature(entry.id); });
     actions.appendChild(releaseBtn);
     slot.appendChild(actions);
 
-    slot.appendChild(renderGeneHoverIcon(entry, creatureCardIcon(entry, 68)));
+    slot.appendChild(creatureIconWithBadge(entry, creatureCardIcon(entry, 68)));
 
     const nameLine = el("div", { class: "hive-slot-name" });
     nameLine.append(`${entry.name} `, el("span", { class: "creature-id-badge", text: `№${creatureShortId(entry)}` }));
     slot.appendChild(nameLine);
 
     if (entry.identified) {
-      const ratio = Math.min(1, entry.turns_alive / entry.lifespan);
-      const bar = el("div", { class: "hive-life-bar", title: `До конца жизни: ${entry.turns_alive}/${entry.lifespan} ход(ов)` });
-      bar.appendChild(el("div", { class: "hive-life-bar-fill", style: `width:${Math.round(ratio * 100)}%` }));
-      slot.appendChild(bar);
-    }
-    // ЧТО именно особь производит, без чисел (см. CLAUDE.md): иконка+название
-    // на каждый ресурс, плюс отдельный чип с % для бонусной продукции
-    // промышленной пасеки (entry.bonus_produce), если сейчас действует.
-    if (entry.identified && (entry.produces.length || entry.bonus_produce)) {
-      const producesRow = el("div", { class: "costs" });
-      entry.produces.forEach(c => producesRow.appendChild(produceLabelChip(c.id, c.name)));
-      if (entry.bonus_produce) {
-        producesRow.appendChild(produceChanceChip(entry.bonus_produce.resource_id, entry.bonus_produce.name, entry.bonus_produce.chance));
-      }
-      slot.appendChild(producesRow);
+      slot.appendChild(hiveLifeBar(entry));
+      const produces = hiveProducesRow(entry);
+      if (produces) slot.appendChild(produces);
+    } else {
+      slot.appendChild(el("span", { class: "hive-genes-hidden", text: "гены скрыты" }));
+      if (VIEW.genetics_lab_available) slot.appendChild(hiveAnalyzeButton(entry));
     }
     slot.addEventListener("dragover", (e) => e.preventDefault());
     slot.addEventListener("drop", (e) => e.preventDefault()); // слот занят - перетаскивание сюда ничего не делает
@@ -5004,41 +4994,60 @@ function renderHiveSlots(farm) {
 // был бы виден весь банк манацветов вперемешку с пчёлами, хотя поселить их
 // туда всё равно нельзя (движок отклонит house_creature). null/отсутствие
 // поля - старое поведение без ограничений, показываем банк целиком.
+// Справа от сетки - досье выбранной особи (renderHiveDossier): клик по
+// карточке выбирает, поселить - перетаскиванием или кнопкой в досье.
+// «Опознать всех» берёт неопознанных и из банка, и из текущего экземпляра.
 function renderHiveBankSection(farm) {
-  const bankEntries = farm.accepts_family ? VIEW.creature_bank.filter(e => e.family === farm.accepts_family) : VIEW.creature_bank;
+  const bankEntries = hiveBankEntries(farm);
   const section = el("div", { class: "farm-section" });
-  section.appendChild(el("h3", { text: `Банк особей (${bankEntries.length})` }));
-  if (!bankEntries.length) {
+  const head = el("div", { class: "farm-section-head hive-bank-head" });
+  head.appendChild(el("h3", { text: `Банк особей (${bankEntries.length})` }));
+  section.appendChild(head);
+
+  const split = el("div", { class: "hive-bank-split" });
+  if (bankEntries.length) {
+    const full = farm.slots_used >= farm.slot_capacity;
+    const grid = el("div", { class: "hive-bank-grid" });
+    bankEntries.forEach(entry => {
+      const card = el("div", {
+        class: "breed-card hive-bank-card" + (entry.identified ? "" : " unidentified") + (entry.id === hiveSelectedCreatureId ? " selected" : ""),
+      });
+      card.dataset.creatureId = entry.id;
+      card.dataset.resourceName = creatureSearchText(entry);
+      card.draggable = !full;
+      card.title = full ? "Клик - досье. Свободных слотов нет" : "Клик - досье, перетащи в свободный слот - поселить";
+      card.appendChild(creatureIconWithBadge(entry, creatureCardIcon(entry, 26)));
+      card.appendChild(el("div", { class: "breed-card-id", text: `№${creatureShortId(entry)}` }));
+      card.appendChild(el("div", { class: "breed-card-name", text: entry.name }));
+      card.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", entry.id));
+      card.addEventListener("click", () => hiveSelectCreature(farm, entry.id));
+      grid.appendChild(card);
+    });
+    head.appendChild(makeResourceSearchBar(grid, {
+      get: () => hiveBankSearchQuery,
+      set: (v) => { hiveBankSearchQuery = v; },
+    }, true));
+    split.appendChild(grid);
+  } else {
     const text = VIEW.creature_bank.length
       ? "В запасе нет особей подходящего для этой фермы вида."
       : "В запасе никого нет - поймай или выведи особь.";
-    section.appendChild(el("div", { class: "empty-note", text }));
-    return section;
+    split.appendChild(el("div", { class: "empty-note", text }));
   }
-  const grid = el("div", { class: "hive-bank-grid" });
-  bankEntries.forEach(entry => {
-    const full = farm.slots_used >= farm.slot_capacity;
-    const card = el("div", { class: "breed-card hive-bank-card" + (full ? " disabled" : "") });
-    card.draggable = !full;
-    card.dataset.resourceName = creatureSearchText(entry);
-    card.title = full ? "Слоты фермы заполнены" : "Перетащи в свободный слот сверху или кликни";
-    card.appendChild(renderGeneHoverIcon(entry, creatureCardIcon(entry, 26)));
-    card.appendChild(el("div", { class: "breed-card-id", text: `№${creatureShortId(entry)}` }));
-    card.appendChild(el("div", { class: "breed-card-name", text: entry.name }));
-    if (!entry.identified && VIEW.genetics_lab_available) {
-      const analyzeBtn = el("button", { class: "hive-bank-analyze", text: "🔬", title: "Анализировать в генетической лаборатории" });
-      analyzeBtn.addEventListener("click", (e) => { e.stopPropagation(); analyzeCreature(entry.id); });
-      card.appendChild(analyzeBtn);
-    }
-    card.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", entry.id));
-    card.addEventListener("click", () => { if (!full) houseCreature(entry.id, farm.id); });
-    grid.appendChild(card);
-  });
-  section.appendChild(makeResourceSearchBar(grid, {
-    get: () => hiveBankSearchQuery,
-    set: (v) => { hiveBankSearchQuery = v; },
-  }, true));
-  section.appendChild(grid);
+
+  const unknownIds = [...farm.creatures, ...bankEntries].filter(e => !e.identified).map(e => e.id);
+  if (unknownIds.length && VIEW.genetics_lab_available) {
+    const analyzeAllBtn = el("button", {
+      class: "hive-analyze-btn hive-analyze-all",
+      title: "Опознать всех неопознанных особей этой фермы и банка - мгновенно, ход не тратится",
+    });
+    analyzeAllBtn.append("🔬 Опознать всех ", el("span", { class: "count", text: String(unknownIds.length) }));
+    analyzeAllBtn.addEventListener("click", () => analyzeCreatures(unknownIds));
+    head.appendChild(analyzeAllBtn);
+  }
+
+  split.appendChild(renderHiveDossier(farm));
+  section.appendChild(split);
   return section;
 }
 
@@ -5735,6 +5744,7 @@ function openFarmTypeModal(buildingId) {
       openFarmTypeModal(buildingId);
     });
     stageHead.append(prevBtn, title, nextBtn);
+    hiveSelectedEntry(farm); // выбор досье - до сцены и банка, чтобы подсветка в них совпала
     if (farm.upgrades && farm.upgrades.upgrades.length) {
       const upgradesBtn = el("button", { class: "upgrade-open-btn hive-stage-gear", text: "⚙ Улучшения" });
       upgradesBtn.addEventListener("click", () => openFarmUpgradesModal(farm));
@@ -5918,6 +5928,24 @@ async function analyzeCreature(creatureId) {
     const res = await fetch("/api/analyze_creature", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ creature_id: creatureId }),
+    });
+    const payload = await res.json();
+    VIEW = payload.state;
+    pushLog({ message: payload.message, ok: payload.ok, action_deltas: [], production_deltas: [], idle: [], broken: [] });
+    renderAll();
+  } finally {
+    busy = false;
+  }
+}
+
+// «Опознать всех» в модалке фермы - один запрос на пачку (engine.analyze_creatures).
+async function analyzeCreatures(creatureIds) {
+  if (busy) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/analyze_creatures", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ creature_ids: creatureIds }),
     });
     const payload = await res.json();
     VIEW = payload.state;
@@ -10485,6 +10513,8 @@ function renderAutocraftPriorityTab(container) {
     + "(нет сырья, механизм не автоматизирован). Поставь ему приоритет выше - и запасным "
     + "станет уже обычный рецепт. Так же репликатор (⚗): при равном приоритете он запасной "
     + "путь, выше - основной (материю он тратит, только если куплена его «Автоматизация»). "
+    + "Если рецептов преобразователя (или ритуалов, ✦) на ресурс несколько - первым берётся "
+    + "тот, у кого приоритет больше; ритуал - только когда нет ни обычного рецепта, ни преобразователя. "
     + "Выбери ресурс, чтобы увидеть только рецепты, которые его "
     + "производят, и вписать в поле нужное число приоритета." }));
 
@@ -10500,6 +10530,7 @@ function renderAutocraftPriorityTab(container) {
   sorted.forEach((a) => {
     const sub = [`даёт: ${a.gain.map(g => g.name).join(", ")}`];
     if (a.kind === "energy_recipe") sub.unshift("⚡ преобразователь");
+    if (a.kind === "ritual_recipe") sub.unshift("✦ ритуал");
     if (a.kind === "replicator") sub.unshift("⚗ репликатор");
     if (a.is_active_recipe) sub.push("сейчас используется автокрафтом");
     else if (a.is_fallback) sub.push("запасной путь - если основной не сможет");

@@ -650,6 +650,19 @@ class ConverterPriorityTests(_ConverterRoutesCase):
         (node,) = engine.autocraft_preview(s, {"raw_b": 2})["nodes"]
         self.assertEqual((node["energy_recipe_id"], node["action_id"]), ("make_raw_b", None))
 
+    def test_second_converter_recipe_of_a_resource_wins_by_priority(self):
+        # Два рецепта преобразователя на один ресурс: по умолчанию - первый в контенте,
+        # приоритет выше - второй (раньше второй не использовался никогда).
+        engine.ENERGY_RECIPES = {**engine.ENERGY_RECIPES, "make_raw_b_alt": {
+            **engine.ENERGY_RECIPES["make_raw_b"], "name": "Тест: B другим способом",
+        }}
+        s = self.state(mech_auto=False)
+        self.assertEqual(self.step_kinds(s, {"raw_b": 2}), [("energy", "make_raw_b")])
+        engine.set_action_priority(s, "energy_recipe:make_raw_b_alt", 1)
+        self.assertEqual(self.step_kinds(s, {"raw_b": 2}), [("energy", "make_raw_b_alt")])
+        (node,) = engine.autocraft_preview(s, {"raw_b": 2})["nodes"]
+        self.assertEqual(node["energy_recipe_id"], "make_raw_b_alt")
+
     def test_setting_the_priority(self):
         s = GameState()
         self.assertEqual(engine.action_priority(s, "energy_recipe:make_raw_b"), 0)
