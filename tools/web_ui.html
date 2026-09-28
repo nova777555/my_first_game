@@ -5879,6 +5879,24 @@ function jobPausedBadge(reason) {
   return el("span", { class: "job-eta bad", text: "пауза", title: reason });
 }
 
+// Строка «Ремонт: цена [кнопка]» инструмента (repair_tool: в любой момент, как
+// только потрачена прочность, за полную цену ремонта тира).
+function toolRepairRow(tool, buttonText) {
+  const wrap = el("div", { class: "req" });
+  const reqText = el("div", { class: "req-text" });
+  const repairCostText = tool.repair_cost.map(c => `${c.amount} ${c.name}`).join(", ") || "бесплатно";
+  reqText.append("Ремонт: ", el("b", { text: repairCostText }));
+  wrap.appendChild(reqText);
+  const repairBtn = el("div", { class: "btn-sm", text: buttonText });
+  const rKey = `repair_tool:${tool.id}`;
+  const rDelay = VIEW.default_action_delay_ms;
+  const rRemaining = cooldownRemainingMs(rKey);
+  if (rRemaining > 0) applyCooldownVisual(repairBtn, rRemaining, rDelay);
+  repairBtn.addEventListener("click", () => tryRunAction(rKey, rDelay, repairBtn, () => doAction("repair_tool", tool.id)));
+  wrap.appendChild(repairBtn);
+  return wrap;
+}
+
 function jobCancelButton(onClick) {
   const btn = el("button", { class: "job-cancel", text: "✕", title: "Отменить" });
   btn.addEventListener("click", onClick);
@@ -9420,20 +9438,14 @@ function openToolsModal() {
         text: `Прочность: ${tool.durability_remaining}/${tool.max_durability}`,
       }));
     }
+    // Изношенный (но не сломанный) инструмент можно подлечить заранее - за полную
+    // цену ремонта; у сломанного ремонт - основная строка ниже.
+    if (tool.can_repair && !tool.is_broken) body.appendChild(toolRepairRow(tool, "Подлатать"));
 
     const req = el("div", { class: "req" });
     const reqText = el("div", { class: "req-text" });
     if (tool.is_broken) {
-      const repairCostText = tool.repair_cost.map(c => `${c.amount} ${c.name}`).join(", ") || "бесплатно";
-      reqText.append("Ремонт: ", el("b", { text: repairCostText }));
-      req.appendChild(reqText);
-      const repairBtn = el("div", { class: "btn-sm", text: "Почин." });
-      const rKey = `repair_tool:${tool.id}`;
-      const rDelay = VIEW.default_action_delay_ms;
-      const rRemaining = cooldownRemainingMs(rKey);
-      if (rRemaining > 0) applyCooldownVisual(repairBtn, rRemaining, rDelay);
-      repairBtn.addEventListener("click", () => tryRunAction(rKey, rDelay, repairBtn, () => doAction("repair_tool", tool.id)));
-      req.appendChild(repairBtn);
+      req.append(...toolRepairRow(tool, "Почин.").childNodes);
     } else if (tool.next_tier_name) {
       const costText = tool.next_cost.map(c => `${c.amount} ${c.name}`).join(", ") || "бесплатно";
       if (tool.can_upgrade) {
@@ -9936,6 +9948,21 @@ function openMineFieldModal() {
     document.createTextNode(" · Щуп "),
     el("b", { text: `Т${mf.scanner_tier}` }),
   ]));
+  // Прочность кирки и «Подлатать» заранее, перед долгой вылазкой (repair_tool
+  // доступен, как только прочность потрачена; сломанную чинит баннер ниже).
+  const pickView = VIEW.tools.find(t => t.id === mf.pickaxe.tool_id);
+  if (pickView && pickView.max_durability != null) {
+    topline.appendChild(el("span", { text: `прочность ${pickView.durability_remaining}/${pickView.max_durability}` }));
+    if (pickView.can_repair && !pickView.is_broken && pickView.repair_cost) {
+      const costText = pickView.repair_cost.map(c => `${c.amount} ${c.name}`).join(", ") || "бесплатно";
+      const patchBtn = el("button", { class: "small", text: "Подлатать", title: `Вернуть полную прочность за ${costText}` });
+      const pKey = `repair_tool:${pickView.id}`;
+      const pRemaining = cooldownRemainingMs(pKey);
+      if (pRemaining > 0) applyCooldownVisual(patchBtn, pRemaining, VIEW.default_action_delay_ms);
+      patchBtn.addEventListener("click", () => tryRunAction(pKey, VIEW.default_action_delay_ms, patchBtn, () => doAction("repair_tool", pickView.id)));
+      topline.appendChild(patchBtn);
+    }
+  }
   // primary - тот же акцентный стиль, что у главных CTA-кнопок в игре (см.
   // button.primary в CSS), по прямому пожеланию, 2026-09-16 - "Обновить шахту"
   // должна бросаться в глаза рядом с приглушённой строкой статуса кирки/щупа.

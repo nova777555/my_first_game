@@ -2476,6 +2476,40 @@ class MiningFieldHitTests(FixtureTestCase):
         rock_cell = s.active_mine_field["cells"][engine._mine_field_idx(4, 2, 1)]
         self.assertTrue(rock_cell["broken"])
 
+    def test_swing_at_only_locked_ore_costs_neither_durability_nor_turn(self):
+        # Под ударом только руда выше тира кирки: кирка породы не коснулась - отказ
+        # (хода нет), прочность цела; руда при этом видна.
+        tools = copy.deepcopy(engine.TOOLS)
+        tools["pickaxe"]["tiers"][0].update({"max_durability": 25, "repair_cost": {"raw_a": 1}})
+        with mock.patch.object(engine, "TOOLS", tools):
+            s = GameState()  # тир 1, rare_mineral требует тир 2
+            s.active_mine_field = _blank_mine_field(3, {
+                (1, 0): {"broken": True, "revealed": True},
+                (1, 1): {"resource": "rare_mineral", "hp": 6, "hp_max": 6},
+            })
+            result = engine.hit_mine_field(s, 1, 1)
+            self.assertFalse(result.ok)
+            self.assertIn("не по зубам", result.message)
+            self.assertEqual(engine.tool_durability_remaining(s, "pickaxe"), 25)
+            self.assertTrue(s.active_mine_field["cells"][engine._mine_field_idx(3, 1, 1)]["revealed"])
+            # обычный удар по породе прочность тратит
+            self.assertTrue(engine.hit_mine_field(s, 0, 0).ok)
+            self.assertEqual(engine.tool_durability_remaining(s, "pickaxe"), 24)
+
+    def test_worn_tool_can_be_repaired_before_it_breaks(self):
+        tools = copy.deepcopy(engine.TOOLS)
+        tools["pickaxe"]["tiers"][0].update({"max_durability": 25, "repair_cost": {"raw_a": 2}})
+        with mock.patch.object(engine, "TOOLS", tools):
+            s = GameState(resources={"raw_a": 5})
+            self.assertFalse(engine.tool_needs_repair(s, "pickaxe"))
+            self.assertFalse(engine.repair_tool(s, "pickaxe").ok)  # целая - чинить нечего
+            s.tool_durability["pickaxe"] = 20
+            self.assertTrue(engine.tool_needs_repair(s, "pickaxe"))
+            self.assertEqual(engine.resolve_action_cost(s, "repair_tool", "pickaxe"), {"raw_a": 2})
+            self.assertTrue(engine.repair_tool(s, "pickaxe").ok)
+            self.assertEqual(engine.tool_durability_remaining(s, "pickaxe"), 25)
+            self.assertEqual(s.resources["raw_a"], 3)  # полная цена ремонта
+
     def test_toughness_requires_multiple_hits(self):
         s = GameState(tool_tiers={"pickaxe": 2})  # area=1, power=5; тир 2 открывает rare_mineral (required_tier=2)
         s.active_mine_field = _blank_mine_field(3, {
@@ -3376,6 +3410,35 @@ class GeneticsTests(FixtureTestCase):
         engine.analyze_creature(s, cid)
         self.assertFalse(engine.analyze_creature(s, cid).ok)
         self.assertFalse(engine.analyze_creature(s, "nope").ok)
+
+    def test_analyze_creatures_identifies_the_batch_and_skips_known_or_missing(self):
+        s = GameState()
+        a = self._spawn(s, "critter_a")
+        b = self._spawn(s, "critter_b", lifespan="short")
+        known = self._spawn(s, "critter_a")
+        self.assertFalse(engine.analyze_creatures(s, [a, b]).ok)  # нет лаборатории
+        self.assertFalse(s.creatures[a]["identified"])
+
+        s.buildings["genetics_lab_building"] = 1
+        engine.analyze_creature(s, known)
+        result = engine.analyze_creatures(s, [a, "nope", known, b])
+        self.assertTrue(result.ok, result.message)
+        self.assertIn("2", result.message)
+        self.assertTrue(s.creatures[a]["identified"])
+        self.assertTrue(s.creatures[b]["identified"])
+        self.assertIn("short", s.known_alleles["lifespan"])
+        self.assertFalse(engine.analyze_creatures(s, [a, b]).ok)  # опознавать уже некого
+
+    def test_creature_view_marks_the_expressed_allele(self):
+        s = GameState(buildings={"genetics_lab_building": 1})
+        cid = self._spawn(s, "critter_a")
+        s.creatures[cid]["genotype"]["lifespan"] = ["short", "normal"]  # normal доминантна
+        s.creatures[cid]["genotype"]["active_period"] = ["night", "always"]  # обе рецессивны - первая
+        engine.analyze_creature(s, cid)
+        genotype = engine.creature_view(s, cid)["genotype"]
+        self.assertEqual([a["expressed"] for a in genotype["lifespan"]], [False, True])
+        self.assertEqual([a["expressed"] for a in genotype["active_period"]], [True, False])
+        self.assertEqual([a["expressed"] for a in genotype["species"]], [True, False])  # одинаковая пара
 
     def test_synthesize_creature_requires_a_known_allele_for_every_trait(self):
         s = GameState(buildings={"genetics_lab_building": 1}, resources={"species_output": 100})

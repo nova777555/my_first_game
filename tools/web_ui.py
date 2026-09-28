@@ -810,9 +810,12 @@ def tools_view(state: GameState) -> list[dict]:
             "next_cost": cost_list(next_info["cost"], state) if next_info else None,
             "next_tech_name": TECHS[tech_missing]["name"] if tech_missing else None,
             "can_upgrade": tool_id in upgradable,
-            "max_durability": max_durability,
+            # Полная прочность с зачарованием «Прочность» - та же, до которой чинит ремонт.
+            "max_durability": engine.tool_max_durability(state, tool_id),
             "durability_remaining": engine.tool_durability_remaining(state, tool_id),
             "is_broken": engine.tool_is_broken(state, tool_id),
+            # Чинить можно в любой момент, как только прочность потрачена.
+            "can_repair": engine.tool_needs_repair(state, tool_id),
             "repair_cost": cost_list(current_tier.get("repair_cost", {}), state) if max_durability else None,
         })
     return items
@@ -3909,6 +3912,15 @@ class Handler(BaseHTTPRequestHandler):
             # Мгновенное опознание генома (генетическая лаборатория) - НЕ тратит
             # ход, тем же принципом, что house/release (см. engine.analyze_creature).
             result = engine.analyze_creature(STATE, payload.get("creature_id"))
+            save_state(STATE)
+            self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
+        elif self.path == "/api/analyze_creatures":
+            # "Опознать всех" в модалке фермы - то же, что analyze_creature, пачкой.
+            creature_ids = payload.get("creature_ids")
+            if not isinstance(creature_ids, list):
+                self._json(400, {"error": "creature_ids должен быть списком"})
+                return
+            result = engine.analyze_creatures(STATE, [str(cid) for cid in creature_ids])
             save_state(STATE)
             self._json(200, {"ok": result.ok, "message": result.message, "state": build_view(STATE)})
         elif self.path == "/api/reset":

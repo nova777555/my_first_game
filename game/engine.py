@@ -3837,7 +3837,8 @@ def hit_mine_field(state: GameState, r: int, c: int) -> ActionResult:
     ещё не открытую редкую руду впустую.
 
     Прочность кирки (см. tool_is_broken/_consume_tool_durability) тратится
-    РОВНО ОДИН РАЗ ЗА УДАР (за сам клик), а не за каждый сломанный этим ударом
+    РОВНО ОДИН РАЗ ЗА УДАР (за сам клик; холостой удар - только по руде выше тира
+    кирки или по выбитым клеткам - отказ без прочности и хода), а не за каждый сломанный этим ударом
     блок - кирка с площадью N x N (pickaxe_area) изнашивается МЕДЛЕННЕЕ в
     пересчёте на блок, чем кирка с площадью 1x1, это и есть часть награды за
     её прокачку (прямое пожелание, 2026-09-16). Сломанная кирка не бьёт вовсе -
@@ -3868,11 +3869,11 @@ def hit_mine_field(state: GameState, r: int, c: int) -> ActionResult:
     if not reachable:
         return ActionResult(False, "Слишком глубоко в тумане - нужно сначала прорубиться ближе.")
 
-    _consume_tool_durability(state, dig_tool_id)
     luck = _enchant_effect_value(state, dig_tool_id, "yield_multiplier", 1.0)
     power = pickaxe_power(state)
     gained: dict[str, int] = {}
     any_locked = False
+    struck = False  # удар пришёлся хоть по одной клетке (иначе - холостой)
     for rr, cc in coords:
         cell = field["cells"][_mine_field_idx(size, rr, cc)]
         if cell["broken"]:
@@ -3886,6 +3887,7 @@ def hit_mine_field(state: GameState, r: int, c: int) -> ActionResult:
                 continue
         cell["revealed"] = True
         cell["hp"] -= power
+        struck = True
         if cell["hp"] <= 0:
             cell["broken"] = True
             _reveal_around(field, rr, cc)
@@ -3904,11 +3906,19 @@ def hit_mine_field(state: GameState, r: int, c: int) -> ActionResult:
                 rock_id = MINE_FIELD["rock_resource"]
                 gained[rock_id] = gained.get(rock_id, 0) + MINE_FIELD["rock_yield"]
 
+    if not struck:
+        # Под ударом только руда выше тира кирки (или уже выбитые клетки): кирка не
+        # коснулась породы - ни прочности, ни хода (отказ). Руда при этом видна.
+        if any_locked:
+            return ActionResult(False, "Тут пока не по зубам этой кирке - нужна кирка выше тиром.")
+        return ActionResult(False, "Тут уже всё выбито.")
+    _consume_tool_durability(state, dig_tool_id)
+
     for resource_id, amount in gained.items():
         _add_resource(state.resources, resource_id, amount)
 
     if not gained:
-        message = "Тут пока не по зубам этой кирке." if any_locked else "Порода устояла."
+        message = "Порода устояла."
     else:
         parts = ", ".join(f"+{amount} {RESOURCE_NAMES[rid]}" for rid, amount in gained.items())
         message = f"Добыто: {parts}."
@@ -4113,6 +4123,21 @@ def tool_durability_remaining(state: GameState, tool_id: str) -> int | None:
     return state.tool_durability.get(tool_id, effective_max)
 
 
+def tool_max_durability(state: GameState, tool_id: str) -> int | None:
+    """Полная прочность ТЕКУЩЕГО тира с зачарованием «Прочность» (None - не изнашивается)."""
+    max_durability = _current_tool_tier_def(state, tool_id).get("max_durability")
+    if max_durability is None:
+        return None
+    return math.ceil(max_durability * _enchant_effect_value(state, tool_id, "durability_multiplier", 1.0))
+
+
+def tool_needs_repair(state: GameState, tool_id: str) -> bool:
+    """Потрачена ли хоть часть прочности - тогда инструмент можно чинить (в любой
+    момент, за полную цену ремонта тира), не дожидаясь, пока он сломается."""
+    remaining = tool_durability_remaining(state, tool_id)
+    return remaining is not None and remaining < tool_max_durability(state, tool_id)
+
+
 def tool_is_broken(state: GameState, tool_id: str) -> bool:
     """Инструмент исчерпал прочность (нужен repair_tool, прежде чем его снова
     можно использовать для ремонта поломки, требующей этот инструмент) -
@@ -4136,13 +4161,13 @@ def _consume_tool_durability(state: GameState, tool_id: str) -> None:
 
 
 def repair_tool(state: GameState, tool_id: str) -> ActionResult:
-    """Платный ремонт инструмента, исчерпавшего прочность (см. tool_is_broken) -
-    тир НЕ теряется (в отличие от построек, тут нечего "разбирать" - см.
-    CLAUDE.md/договорённость с игроком), прочность просто сбрасывается на
+    """Платный ремонт инструмента - в любой момент, как только потрачена хоть часть
+    прочности (tool_needs_repair), за полную цену ремонта тира: перед долгой вылазкой
+    не нужно доламывать кирку до нуля. Тир НЕ теряется, прочность сбрасывается на
     максимум текущего тира. Цена - tiers[тир-1]["repair_cost"] (обязателен в
     контенте, если у тира задан max_durability - см. content_validation.py)."""
     tool_name = TOOLS[tool_id]["name"]
-    if not tool_is_broken(state, tool_id):
+    if not tool_needs_repair(state, tool_id):
         return ActionResult(False, f"«{tool_name}» не нуждается в ремонте.")
     cost = _current_tool_tier_def(state, tool_id).get("repair_cost", {})
     deferred = _pay_or_defer(state, cost, f"ремонт инструмента «{tool_name}»", "repair_tool", tool_id)
@@ -7384,6 +7409,23 @@ def analyze_creature(state: GameState, creature_id: str) -> ActionResult:
     return ActionResult(True, "Геном опознан.")
 
 
+def analyze_creatures(state: GameState, creature_ids: list[str]) -> ActionResult:
+    """"Опознать всех" в модалке фермы - analyze_creature по каждой особи списка
+    (его собирает клиент по своему последнему VIEW). Уже опознанные и
+    исчезнувшие особи молча пропускаются, а не валят весь пакет. Ход не тратит,
+    как и одиночный анализ."""
+    if not genetics_lab_available(state):
+        return ActionResult(False, "Нужна работающая генетическая лаборатория.")
+    count = sum(
+        1 for cid in creature_ids
+        if cid in state.creatures and not state.creatures[cid]["identified"]
+        and analyze_creature(state, cid).ok
+    )
+    if not count:
+        return ActionResult(False, "Опознавать некого - все особи уже опознаны.")
+    return ActionResult(True, f"Опознано особей: {count}.")
+
+
 def synthesize_creature(state: GameState, chosen_alleles: dict[str, str]) -> ActionResult:
     """Генетический шаблон (Gendustry) - штампует ГОМОЗИГОТНУЮ (чистокровную по
     всем 4 признакам) особь с ВЫБРАННЫМ игроком геномом, минуя RNG. Каждая
@@ -7458,18 +7500,26 @@ def creature_view(state: GameState, creature_id: str) -> dict:
             resource = species.get("bonus_resource")
             if resource:
                 entry["bonus_produce"] = {"resource_id": resource, "chance": species.get("bonus_chance", 0)}
-    entry["genotype"] = {
-        trait_id: [
-            {
-                "id": aid,
-                "name": trait_alleles(trait_id).get(aid, {}).get("name", aid),
-                "dominant": trait_alleles(trait_id).get(aid, {}).get("dominant", False),
-            }
-            for aid in _genotype_pair(creature["genotype"], trait_id)
-        ]
-        for trait_id in GENOTYPE_TRAIT_IDS
-    }
+    entry["genotype"] = {trait_id: _allele_pair_view(creature, trait_id) for trait_id in GENOTYPE_TRAIT_IDS}
     return entry
+
+
+def _allele_pair_view(creature: dict, trait_id: str) -> list[dict]:
+    """Пара аллелей признака для UI. expressed - какая из двух проявлена (тот же
+    _phenotype_allele, что у фенотипа), чтобы клиент не повторял правило
+    доминантности; у одинаковой пары помечена первая."""
+    pair = _genotype_pair(creature["genotype"], trait_id)
+    expressed_index = pair.index(_phenotype_allele(trait_id, pair))
+    alleles = trait_alleles(trait_id)
+    return [
+        {
+            "id": aid,
+            "name": alleles.get(aid, {}).get("name", aid),
+            "dominant": alleles.get(aid, {}).get("dominant", False),
+            "expressed": index == expressed_index,
+        }
+        for index, aid in enumerate(pair)
+    ]
 
 
 def creatures_view(state: GameState, *, farm_instance_id: str | None = None, unhoused_only: bool = False) -> list[dict]:
@@ -8315,7 +8365,7 @@ def resolve_action_cost(state: GameState, action_type: str, action_id: str, scal
         next_info = next_tool_tier_info(state, action_id) if action_id in TOOLS else None
         return dict(next_info["cost"]) if next_info else None
     if action_type == "repair_tool":
-        if action_id not in TOOLS or not tool_is_broken(state, action_id):
+        if action_id not in TOOLS or not tool_needs_repair(state, action_id):
             return None
         return dict(_current_tool_tier_def(state, action_id).get("repair_cost", {}))
     if action_type == "building_upgrade":

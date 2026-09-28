@@ -1172,6 +1172,26 @@ class WebUiHttpTests(unittest.TestCase):
         self.assertTrue(web_ui.STATE.creatures["creature_a"]["identified"])
         self.assertEqual(web_ui.STATE.turn, turn_before)
 
+    def test_analyze_creatures_identifies_the_batch_without_advancing_the_turn(self):
+        web_ui.STATE.resources["raw_a"] = 5
+        for cid in ("creature_a", "creature_b"):
+            web_ui.STATE.creatures[cid] = {
+                "species_id": "critter_a", "genotype": fixtures.make_genotype("critter_a"),
+                "farm_instance_id": None, "turns_alive": 0, "identified": False,
+            }
+        self._post("/api/action", {"type": "build", "id": "genetics_lab_building"})
+        turn_before = web_ui.STATE.turn
+
+        status, resp = self._post("/api/analyze_creatures", {"creature_ids": ["creature_a", "creature_b"]})
+        self.assertEqual(status, 200)
+        self.assertTrue(resp["ok"], resp["message"])
+        self.assertTrue(web_ui.STATE.creatures["creature_a"]["identified"])
+        self.assertTrue(web_ui.STATE.creatures["creature_b"]["identified"])
+        self.assertEqual(web_ui.STATE.turn, turn_before)
+
+        status, resp = self._post("/api/analyze_creatures", {"creature_ids": "creature_a"})
+        self.assertEqual(status, 400)
+
     def test_get_root_serves_html(self):
         with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=5) as r:
             body = r.read().decode("utf-8")
