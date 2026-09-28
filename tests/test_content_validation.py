@@ -1787,6 +1787,14 @@ class CombatMovesValidationTests(unittest.TestCase):
         errors = cv.validate(copy.deepcopy(self.data))
         self.assertEqual(errors, [])
 
+    def test_zero_hp_regen_is_rejected(self):
+        # Другого лечения нет - при 0 охота после первого поражения закрылась бы навсегда.
+        d = copy.deepcopy(self.data)
+        d.setdefault("combat", {})["hp_regen_per_turn"] = 0
+        self.assertTrue(any("hp_regen_per_turn" in e for e in cv.validate(d)))
+        d["combat"]["hp_regen_per_turn"] = 1
+        self.assertFalse(any("hp_regen_per_turn" in e for e in cv.validate(d)))
+
     def test_move_missing_name_or_description_rejected(self):
         d = copy.deepcopy(self.data)
         del d["combat_moves"]["power_strike"]["name"]

@@ -1926,6 +1926,12 @@ def validate(data: dict) -> list[str]:
             value = combat_settings.get(field_name)
             if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0):
                 errors.append(f"combat.{field_name}: должен быть неотрицательным числом, если указан")
+        # Другого лечения в игре нет: при 0 после первого поражения HP так и остаётся 0,
+        # и охота закрыта навсегда.
+        regen = combat_settings.get("hp_regen_per_turn")
+        if isinstance(regen, (int, float)) and not isinstance(regen, bool) and regen == 0:
+            errors.append("combat.hp_regen_per_turn: должен быть больше 0 - другого лечения нет, "
+                          "после первого поражения охота закрылась бы навсегда")
         wound_mult = combat_settings.get("wounded_damage_multiplier")
         if wound_mult is not None and (
             not isinstance(wound_mult, (int, float)) or isinstance(wound_mult, bool) or not (0 < wound_mult <= 1)
