@@ -419,12 +419,19 @@ def validate(data: dict) -> list[str]:
         crafting = locations.get(loc_id, {}).get("crafting") if loc_id in locations else None
         return isinstance(crafting, dict) and crafting.get("stacks") is True
 
+    def is_off_grid(rid) -> bool:
+        """Фоновый ресурс: в ячейку крафт-сетки не кладётся, в цене сеточного рецепта
+        идёт сверх узора/стопок. Энергия - всегда, прочие - по resources.*.off_grid
+        (off_grid_ids заполняется ниже, в проходе по ресурсам). Держать в паре с
+        game/engine.py: is_off_grid_resource и content_editor.html: isOffGrid."""
+        return rid == _ENERGY_RESOURCE_ID or rid in off_grid_ids
+
     def check_stacks_recipe(label: str, entity: dict, costs: list, loc_id) -> None:
         """Рецепт сборщика (crafting.stacks): форма не важна, рецептом служит цена -
-        узор лишний, а цена без энергии обязана быть непустой (энергию, как и в узоре,
-        в ячейку не положить - разложить было бы нечего) и влезать в ячейки механизма
-        (одна стопка - один ресурс). costs - [(где, cost)], у многоэтапной постройки
-        по одной на этап."""
+        узор лишний, а цена без фоновых ресурсов обязана быть непустой (их, как и в
+        узоре, в ячейку не положить - разложить было бы нечего) и влезать в ячейки
+        механизма (одна стопка - один ресурс). costs - [(где, cost)], у многоэтапной
+        постройки по одной на этап."""
         if entity.get("pattern") is not None or entity.get("pattern_mirror"):
             errors.append(f"{label}: в сборщике форма не важна - узор (pattern) не нужен, рецептом служит сама цена")
         crafting = locations[loc_id]["crafting"]
@@ -433,9 +440,12 @@ def validate(data: dict) -> list[str]:
         for where, cost in costs:
             if not isinstance(cost, dict):
                 continue
-            stacks = [rid for rid in cost if rid != _ENERGY_RESOURCE_ID]
+            stacks = [rid for rid in cost if not is_off_grid(rid)]
             if not stacks:
-                errors.append(f"{where}: в сборщике рецепт узнаётся по стопкам цены, а кроме энергии в ней ничего нет")
+                errors.append(
+                    f"{where}: в сборщике рецепт узнаётся по стопкам цены, а кроме фоновых ресурсов "
+                    f"(энергия и т.п.) в ней ничего нет"
+                )
             elif cells is not None and len(stacks) > cells:
                 errors.append(
                     f"{where}: {len(stacks)} разных ресурсов не разложить в {cells} ячеек сборщика '{loc_id}' "
@@ -518,6 +528,11 @@ def validate(data: dict) -> list[str]:
                     f"{where}.key['{ch}']: энергию нельзя положить в ячейку - "
                     f"укажи её в {cost_field} сверх узора, она спишется при крафте"
                 )
+            elif is_off_grid(rid):
+                errors.append(
+                    f"{where}.key['{ch}']: '{rid}' - фоновый ресурс (off_grid), в ячейку его не положить - "
+                    f"укажи его в {cost_field} сверх узора, он спишется при крафте"
+                )
 
         used: set[str] = set()
         for row in rows:
@@ -538,9 +553,9 @@ def validate(data: dict) -> list[str]:
         # Одна ячейка = одна единица ресурса, поэтому cost сеточного действия -
         # это ровно подсчёт занятых ячеек. Два источника истины тут были бы
         # источником тихого расхождения: игрок видит узор, а движок списывает cost.
-        # Единственное исключение - энергия: в ячейку её не положить, она идёт в
-        # cost СВЕРХ узора и списывается при крафте (держать в паре с
-        # content_editor.html: patternCostOf/itemCostOf).
+        # Единственное исключение - фоновые ресурсы (энергия, off_grid): в ячейку их
+        # не положить, они идут в cost СВЕРХ узора и списываются при крафте (держать
+        # в паре с content_editor.html: patternCostOf/itemCostOf).
         from_pattern: dict[str, int] = {}
         for row in rows:
             for ch in row:
@@ -549,7 +564,7 @@ def validate(data: dict) -> list[str]:
                     from_pattern[rid] = from_pattern.get(rid, 0) + 1
         cost = action.get(cost_field) or {}
         if isinstance(cost, dict):
-            cost = {rid: n for rid, n in cost.items() if rid != _ENERGY_RESOURCE_ID}
+            cost = {rid: n for rid, n in cost.items() if not is_off_grid(rid)}
         if isinstance(cost, dict) and from_pattern != cost:
             shown = ", ".join(f"{rid}×{n}" for rid, n in sorted(from_pattern.items())) or "пусто"
             current = ", ".join(f"{rid}×{n}" for rid, n in sorted(cost.items())) or "пусто"
@@ -628,6 +643,8 @@ def validate(data: dict) -> list[str]:
         id_owners.setdefault(id_, []).append(category)
 
     resource_ids: set[str] = set()
+    # Фоновые ресурсы по флагу (см. is_off_grid выше; энергия - без флага, всегда).
+    off_grid_ids: set[str] = set()
     for r in resources:
         rid = r.get("id", "")
         check_id("Ресурс", rid)
@@ -640,6 +657,11 @@ def validate(data: dict) -> list[str]:
         fractional = r.get("fractional", False)
         if not isinstance(fractional, bool):
             errors.append(f"Ресурс '{rid}': fractional должен быть true или false")
+        off_grid = r.get("off_grid", False)
+        if not isinstance(off_grid, bool):
+            errors.append(f"Ресурс '{rid}': off_grid должен быть true или false")
+        elif off_grid:
+            off_grid_ids.add(rid)
         soul_kind = r.get("soul_kind")
         if soul_kind is not None and (not isinstance(soul_kind, str) or not soul_kind):
             errors.append(f"Ресурс '{rid}': soul_kind должен быть null или непустой строкой (тег вида души, например 'моб'/'босс')")
@@ -988,13 +1010,13 @@ def validate(data: dict) -> list[str]:
             taken.setdefault(variant, label)
 
     # То же для сборщика: форма там не важна, рецепт узнаётся по набору стопок (цена
-    # без энергии, game/engine.py: _stacks_match) - одинаковые цены не различить.
+    # без фоновых ресурсов, game/engine.py: _stacks_match) - одинаковые цены не различить.
     stacks_by_location: dict[str, dict[tuple, str]] = {}
 
     def register_stacks(label: str, loc_id, cost) -> None:
         if not isinstance(cost, dict):
             return
-        items = [(rid, n) for rid, n in cost.items() if rid != _ENERGY_RESOURCE_ID]
+        items = [(rid, n) for rid, n in cost.items() if not is_off_grid(rid)]
         if not items or not all(isinstance(n, (int, float)) and not isinstance(n, bool) for _, n in items):
             return
         need = tuple(sorted(items))

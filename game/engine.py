@@ -12,7 +12,7 @@ from .content import (
     ALLOY_RECIPES, BREAKDOWN_TYPES, BUILDINGS, CAST_RECIPES, COMBAT_MOVES, COMBAT_SETTINGS, ENCHANTMENTS,
     ENERGY_RECIPES, GENETIC_TRAITS, GENETICS_SETTINGS, LOCATIONS, LOOT_CASES, MANUAL_ACTIONS,
     MELT_RECIPES, MINE_FIELD, MINING_INFO, MOBS, MUTATIONS, QUESTS, REACTOR_ACCIDENTS, RESOURCE_FRACTIONAL,
-    RESOURCE_MOLTEN, RESOURCE_NAMES, RESOURCE_REACTOR_CATALYST, RESOURCE_REACTOR_COOLANT_FLUID,
+    RESOURCE_MOLTEN, RESOURCE_NAMES, RESOURCE_OFF_GRID, RESOURCE_REACTOR_CATALYST, RESOURCE_REACTOR_COOLANT_FLUID,
     RESOURCE_REACTOR_COMPONENT, RESOURCE_REPLICATION_COST, RESOURCE_SOUL_KIND,
     RESOURCE_STORAGE, RITUAL_RECIPES, SKILLS, SOUL_RECIPES, SPECIES, TECHS, TIME, TOOLS,
 )
@@ -3546,10 +3546,21 @@ def _normalize_stacks(cells: list) -> dict[str, float]:
     return total
 
 
+def is_off_grid_resource(resource_id: str) -> bool:
+    """Фоновый ресурс: в ячейку крафт-сетки не кладётся, в цене сеточного рецепта
+    (узор или стопки сборщика) списывается СВЕРХ раскладки. Энергия - всегда, прочие -
+    по флагу resources.*.off_grid (мана). Кроме сетки флаг ничего не меняет: при нехватке
+    такого ресурса - обычный докрафт или отказ; ждут, а не отказывают, только энергию.
+    Копии правила - tools/content_validation.py: is_off_grid и tools/content_editor.html:
+    isOffGrid (держать в паре)."""
+    return resource_id == ENERGY_RESOURCE_ID or resource_id in RESOURCE_OFF_GRID
+
+
 def stack_recipe_cost(cost: dict) -> dict:
-    """Какие стопки нужно разложить в сборщике под эту цену: всё, кроме энергии - она,
-    как и в узоре, в ячейку не кладётся и списывается сверх (см. check_grid_pattern)."""
-    return {rid: amount for rid, amount in cost.items() if rid != ENERGY_RESOURCE_ID}
+    """Какие стопки нужно разложить в сборщике под эту цену: всё, кроме фоновых ресурсов
+    (энергия, мана) - они, как и в узоре, в ячейку не кладутся и списываются сверх
+    (см. is_off_grid_resource, check_grid_pattern)."""
+    return {rid: amount for rid, amount in cost.items() if not is_off_grid_resource(rid)}
 
 
 def _stacks_match(cost: dict, laid: dict[str, float]) -> bool:
@@ -3571,7 +3582,7 @@ def match_grid_target(state: GameState, location_id: str, placed: list) -> tuple
 
     Сборщик (location_stacks): ячейка - стопка {"id", "amount"}, форма не важна,
     набор стопок обязан РОВНО совпасть с ценой рецепта из контента (у постройки -
-    с ценой текущего этапа) без энергии; иначе одинаковые по составу рецепты
+    с ценой текущего этапа) без фоновых ресурсов; иначе одинаковые по составу рецепты
     (дерево + камень у половины построек) было бы не различить."""
     crafting = location_crafting(location_id) if location_id in LOCATIONS else None
     if crafting is None or len(placed) != crafting["width"] * crafting["height"]:

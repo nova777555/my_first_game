@@ -660,6 +660,15 @@ const CONVERTER_LOCATION_ID = "converter";
 // упадёт в первом же месте, которое к нему обращается.
 const ENERGY_RESOURCE_ID = "energy";
 
+// Фоновый ресурс (энергия - всегда, прочие - флаг resources.*.off_grid, например мана):
+// в ячейку крафт-сетки не кладётся, в цене сеточного рецепта идёт сверх узора/стопок.
+// ДЕРЖАТЬ В ПАРЕ с game/engine.py: is_off_grid_resource и tools/content_validation.py: is_off_grid.
+function isOffGrid(rid) {
+  if (rid === ENERGY_RESOURCE_ID) return true;
+  const r = DATA.resources.find(x => x.id === rid);
+  return !!(r && r.off_grid);
+}
+
 // Рецепты, замкнутые в круг («9 слитков -> блок -> 9 слитков», «1 руда -> 2 руды»):
 // автокрафт не берёт их источником для других заказов. ДЕРЖАТЬ В ПАРЕ с
 // game/engine.py: autocraft_cyclic_recipes (редактор не импортирует game/*). Ключи - как
@@ -2788,6 +2797,7 @@ function renderResources() {
   table.appendChild(el("tr", {}, [
     el("th", { text: "ID" }), el("th", { text: "Название" }), el("th", { text: "Иконка" }),
     el("th", { text: "Дробный" }),
+    el("th", { text: "Фоновый", title: "Не кладётся в ячейку крафт-сетки: в цене сеточного рецепта списывается сверх узора, как энергия" }),
     el("th", { text: "Репликация", title: "Сколько материи репликатора стоит 1 шт. (может быть дробной, 0.05). Пусто - репликатор этот ресурс не делает" }),
     el("th", { text: "Порядок" }), el("th", { text: "" }),
   ]));
@@ -2836,6 +2846,16 @@ function renderResources() {
     fractionalCb.addEventListener("change", () => {
       if (fractionalCb.checked) r.fractional = true; else delete r.fractional;
     });
+    // resources.*.off_grid (см. isOffGrid): в узоре такого ресурса нет - он в цене
+    // сверх узора (поле «… за крафт» в окне узора). Энергия фоновая всегда.
+    const offGridCb = el("input", { type: "checkbox", title: r.id === ENERGY_RESOURCE_ID
+      ? "Энергия всегда фоновая"
+      : "Фоновый: в ячейку крафт-сетки не кладётся, в рецепте списывается сверх узора (как энергия)" });
+    offGridCb.checked = isOffGrid(r.id);
+    offGridCb.disabled = r.id === ENERGY_RESOURCE_ID;
+    offGridCb.addEventListener("change", () => {
+      if (offGridCb.checked) r.off_grid = true; else delete r.off_grid;
+    });
     // Цена репликации (resources.*.replication_cost, см. game/engine.py: replicate) -
     // материи за ОДНУ единицу; у энергии её быть не может (валидатор).
     const replicationInput = el("input", {
@@ -2854,6 +2874,7 @@ function renderResources() {
       el("td", {}, [nameInput]),
       el("td", {}, [iconBtn]),
       el("td", { style: "text-align:center" }, [fractionalCb]),
+      el("td", { style: "text-align:center" }, [offGridCb]),
       el("td", {}, [replicationInput]),
       el("td", {}, [order]),
       el("td", {}, [lastCell]),
@@ -3812,13 +3833,19 @@ function sameCost(a, b) {
   return ka.every(k => b[k] === a[k]);
 }
 
-// Цена БЕЗ энергии - именно её обязан повторять узор: энергию в ячейку не положить,
-// она идёт в cost сверх узора и списывается при крафте (держать в паре с
-// tools/content_validation.py: check_grid_pattern).
+// Цена БЕЗ фоновых ресурсов (энергия, мана - isOffGrid) - именно её обязан повторять
+// узор: фоновый ресурс в ячейку не положить, он идёт в cost сверх узора и списывается
+// при крафте (держать в паре с tools/content_validation.py: check_grid_pattern).
 function itemCostOf(cost) {
   const out = {};
-  Object.entries(cost || {}).forEach(([rid, n]) => { if (rid !== ENERGY_RESOURCE_ID) out[rid] = n; });
+  Object.entries(cost || {}).forEach(([rid, n]) => { if (!isOffGrid(rid)) out[rid] = n; });
   return out;
+}
+
+// Фоновые ресурсы, которые можно указать в цене рецепта сверх узора: энергия (кроме
+// рецепта преобразователя - у него энергия это порог, а не цена) и все off_grid.
+function offGridCostResources(opts) {
+  return DATA.resources.filter(r => isOffGrid(r.id) && !(opts.isEnergy && r.id === ENERGY_RESOURCE_ID));
 }
 
 // Узор рисуется и у ручного действия (сетка его локации, сверяется с cost), и у
@@ -3859,9 +3886,10 @@ function patternSummaryText(action, opts) {
   const cells = Object.values(cost).reduce((s, n) => s + n, 0);
   const mirror = action.pattern_mirror ? ", зеркальный" : "";
   const mismatch = sameCost(cost, itemCostOf(action[opts.costField])) ? "" : `, РАСХОДИТСЯ С ${opts.costField.toUpperCase()}`;
-  const energy = (action[opts.costField] || {})[ENERGY_RESOURCE_ID];
-  const energyText = energy ? `, +${energy} энергии` : "";
-  return `${loc.crafting.width}×${loc.crafting.height}, занято ${cells}${energyText}${mirror}${mismatch}`;
+  const fullCost = action[opts.costField] || {};
+  const extraText = Object.keys(fullCost).filter(isOffGrid)
+    .map(rid => `, +${fullCost[rid]} ${rid === ENERGY_RESOURCE_ID ? "энергии" : patternResourceName(rid)}`).join("");
+  return `${loc.crafting.width}×${loc.crafting.height}, занято ${cells}${extraText}${mirror}${mismatch}`;
 }
 
 function actionPatternRow(action, aid, opts, onChange) {
@@ -3976,7 +4004,7 @@ function openPatternModal(action, aid, onChange, opts) {
   function renderPalette() {
     paletteBox.innerHTML = "";
     DATA.resources
-      .filter(r => r.id !== ENERGY_RESOURCE_ID) // в ячейку не кладётся - см. поле «Энергия за крафт»
+      .filter(r => !isOffGrid(r.id)) // в ячейку не кладётся - см. поля «… за крафт» справа
       .filter(r => !query || r.name.toLowerCase().includes(query) || r.id.includes(query))
       .forEach(r => {
         const swatch = el("button", { class: "pattern-swatch" + (selected === r.id ? " selected" : ""), title: r.id });
@@ -4041,9 +4069,9 @@ function openPatternModal(action, aid, onChange, opts) {
       const syncBtn = el("button", { class: "small", text: `Записать узор в ${costField}` });
       syncBtn.addEventListener("click", () => {
         // На месте, а не новым объектом: редактор словаря в карточке держит
-        // ссылку на этот же объект. Энергия - не из узора, её не трогаем.
+        // ссылку на этот же объект. Фоновые ресурсы - не из узора, их не трогаем.
         const target = action[costField] || (action[costField] = {});
-        Object.keys(target).forEach(k => { if (k !== ENERGY_RESOURCE_ID) delete target[k]; });
+        Object.keys(target).forEach(k => { if (!isOffGrid(k)) delete target[k]; });
         Object.assign(target, cost);
         renderAllPattern();
       });
@@ -4051,24 +4079,29 @@ function openPatternModal(action, aid, onChange, opts) {
     }
     costBox.appendChild(note);
 
-    if (!opts.isEnergy) {
-      // Энергия в цене рецепта - СВЕРХ узора (в ячейку её не положить). Списывается
-      // при крафте; апгрейд механизма energy_efficiency её уменьшает; при нехватке
-      // крафт ждёт притока энергии, а не отказывает.
-      const energyRow = el("div", { class: "field-row" });
-      energyRow.appendChild(el("label", { text: "Энергия за крафт" }));
+    // Фоновые ресурсы в цене рецепта - СВЕРХ узора (в ячейку их не положить),
+    // списываются при каждом крафте. Энергию ещё и уменьшает апгрейд механизма
+    // energy_efficiency, а при её нехватке крафт ждёт притока, а не отказывает.
+    const extras = offGridCostResources(opts);
+    extras.forEach(r => {
+      const isEnergyRes = r.id === ENERGY_RESOURCE_ID;
+      const extraRow = el("div", { class: "field-row" });
+      extraRow.appendChild(el("label", { text: isEnergyRes ? "Энергия за крафт" : `${r.name} за крафт` }));
       const target = action[costField] || (action[costField] = {});
-      const energyInput = el("input", { type: "number", min: "0", step: "any", style: "width:80px",
-        value: target[ENERGY_RESOURCE_ID] || "", placeholder: "0" });
-      energyInput.addEventListener("change", () => {
-        const v = Number(energyInput.value);
-        if (v > 0) target[ENERGY_RESOURCE_ID] = v; else delete target[ENERGY_RESOURCE_ID];
+      const extraInput = el("input", { type: "number", min: "0", step: "any", style: "width:80px",
+        value: target[r.id] || "", placeholder: "0" });
+      extraInput.addEventListener("change", () => {
+        const v = Number(extraInput.value);
+        if (v > 0) target[r.id] = v; else delete target[r.id];
       });
-      energyRow.appendChild(energyInput);
-      costBox.appendChild(energyRow);
+      extraRow.appendChild(extraInput);
+      costBox.appendChild(extraRow);
+    });
+    if (extras.length) {
       costBox.appendChild(el("p", { class: "hint", text:
-        "не кладётся в ячейку - списывается при каждом крафте сверх узора. Улучшение механизма «энергоэффективность» "
-        + "её уменьшает. Если энергии не хватает, крафт встаёт в очередь и выполнится сам, когда она накопится" }));
+        "фоновые ресурсы (галочка «Фоновый» на вкладке «Ресурсы») не кладутся в ячейку - списываются при каждом крафте "
+        + "сверх узора. Энергию уменьшает улучшение механизма «энергоэффективность», и если её не хватает, крафт встаёт "
+        + "в очередь до притока. Нехватка остальных - как у обычного сырья: докрафт или отказ" }));
     }
 
     const mirrorRow = el("div", { class: "field-row" });

@@ -237,6 +237,7 @@ RESOURCE_NAMES = {r["id"]: r["name"] for r in RESOURCES}
 RESOURCE_ORDER = [r["id"] for r in RESOURCES]
 RESOURCE_ICONS: dict = {}
 RESOURCE_FRACTIONAL = {r["id"]: bool(r.get("fractional", False)) for r in RESOURCES}
+RESOURCE_OFF_GRID = frozenset(r["id"] for r in RESOURCES if r.get("off_grid"))
 RESOURCE_STORAGE = {r["id"]: r["storage"] for r in RESOURCES if r.get("storage")}
 RESOURCE_REPLICATION_COST = {r["id"]: r["replication_cost"] for r in RESOURCES if r.get("replication_cost")}
 RESOURCE_SOUL_KIND = {r["id"]: r["soul_kind"] for r in RESOURCES if r.get("soul_kind")}
@@ -1634,7 +1635,7 @@ def build_mutations_by_pair(mutations: list) -> dict:
 _ENGINE_NAMES = ["BUILDINGS", "ENERGY_RECIPES", "GENETIC_TRAITS", "GENETICS_SETTINGS", "COMBAT_SETTINGS",
                  "LOCATIONS", "MANUAL_ACTIONS", "MINING_INFO", "MINE_FIELD", "MUTATIONS", "SPECIES", "TOOLS",
                  "RESOURCE_NAMES", "TECHS", "TIME", "ENERGY_RECIPE_FOR_RESOURCE", "MUTATIONS_BY_PAIR",
-                 "RESOURCE_FRACTIONAL", "RESOURCE_STORAGE", "RESOURCE_REPLICATION_COST", "RESOURCE_SOUL_KIND", "RESOURCE_REACTOR_COMPONENT",
+                 "RESOURCE_FRACTIONAL", "RESOURCE_OFF_GRID", "RESOURCE_STORAGE", "RESOURCE_REPLICATION_COST", "RESOURCE_SOUL_KIND", "RESOURCE_REACTOR_COMPONENT",
                  "RESOURCE_REACTOR_CATALYST", "RESOURCE_REACTOR_COOLANT_FLUID", "RESOURCE_MOLTEN",
                  "REACTOR_ACCIDENTS", "MOBS", "SKILLS", "SOUL_RECIPES",
                  "RITUAL_RECIPES", "MELT_RECIPES", "ALLOY_RECIPES", "CAST_RECIPES",
@@ -1669,6 +1670,7 @@ def _fixture_values() -> dict:
         "ENERGY_RECIPE_FOR_RESOURCE": build_energy_recipe_for_resource(ENERGY_RECIPES),
         "MUTATIONS_BY_PAIR": build_mutations_by_pair(MUTATIONS),
         "RESOURCE_FRACTIONAL": RESOURCE_FRACTIONAL,
+        "RESOURCE_OFF_GRID": RESOURCE_OFF_GRID,
         "RESOURCE_STORAGE": RESOURCE_STORAGE,
         "RESOURCE_REPLICATION_COST": RESOURCE_REPLICATION_COST,
         "RESOURCE_SOUL_KIND": RESOURCE_SOUL_KIND,

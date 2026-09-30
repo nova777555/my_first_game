@@ -1918,7 +1918,8 @@ def crafting_view(state: GameState) -> list[dict]:
     докрафт" в плане."""
     bank = []
     for rid in RESOURCE_ORDER:
-        if rid == engine.ENERGY_RESOURCE_ID or rid in SPECIES:
+        # Фоновые ресурсы (энергия, мана) в ячейку не кладутся - в банке сетки им не место.
+        if engine.is_off_grid_resource(rid) or rid in SPECIES:
             continue
         amount = state.resources.get(rid, 0)
         if amount <= 0:
@@ -1946,7 +1947,7 @@ def crafting_view(state: GameState) -> list[dict]:
                 "name": action["name"],
                 "pattern": action.get("pattern"),
                 # Сборщик (crafting.stacks): что разложить стопками - цена из контента
-                # без энергии, её же ровно сверяет engine.match_grid_target.
+                # без фоновых ресурсов, её же ровно сверяет engine.match_grid_target.
                 "stack_cost": _stack_cost_list(action.get("cost") or {}) if stacks else None,
                 "pattern_mirror": bool(action.get("pattern_mirror")),
                 # Реальные цена и выход одного крафта - с масштабом механизма (узор
@@ -2825,6 +2826,9 @@ def build_view(state: GameState) -> dict:
         # id энергии для клиента (энергия в цене сеточного рецепта сверх узора) -
         # чтобы web_ui.html не держал ещё одну ручную копию хардкод-id.
         "energy_resource_id": engine.ENERGY_RESOURCE_ID,
+        # Все фоновые ресурсы (engine.is_off_grid_resource: энергия + resources.*.off_grid) -
+        # модалка механизма пишет их у стрелки, сверх узора.
+        "off_grid_resources": [rid for rid in RESOURCE_ORDER if engine.is_off_grid_resource(rid)],
         "compute_capacity": engine.compute_capacity(state),
         "autocraft": autocraft_view(state),
         "action_priorities": action_priority_view(state),

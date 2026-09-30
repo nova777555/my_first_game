@@ -2909,12 +2909,13 @@
   .order-step { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); margin-top: 4px; }
   .order-reserved { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .job-eta.bad { color: var(--danger); }
-  /* Энергия в цене сеточного рецепта (сверх узора) - подпись под стрелкой. */
+  /* Фоновые ресурсы в цене сеточного рецепта (энергия, мана - сверх узора) - подпись под стрелкой. */
   .cg-arrow-energy {
     position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
-    white-space: nowrap; font-size: 12px; color: var(--accent);
+    display: flex; gap: 6px; white-space: nowrap; font-size: 12px; color: var(--accent);
   }
-  .cg-arrow-energy.short { color: var(--danger, #e05050); }
+  .cg-arrow-extra { display: inline-flex; align-items: center; gap: 2px; }
+  .cg-arrow-extra.short { color: var(--danger, #e05050); }
   /* Масштаб механизма (scale-улучшение): узор - на один раз, спишется ×N - над стрелкой. */
   .cg-arrow-scale {
     position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
@@ -12377,20 +12378,34 @@ function openCraftGridModal(locationId) {
       }, 320);
     }
   }
-  // Энергия в цене ручного рецепта - не в ячейках, а сверх узора (см.
-  // content_validation.check_grid_pattern): показываем её прямо под стрелкой.
-  const energyCost = matched && matched.kind !== "energy_recipe"
-    ? (matched.cost || []).find(c => c.id === VIEW.energy_resource_id) : null;
-  if (energyCost) {
-    const have = VIEW.energy.stock || 0;
-    const short = have < energyCost.amount;
-    arrow.appendChild(el("span", {
-      class: "cg-arrow-energy" + (short ? " short" : ""),
-      text: `⚡${formatAmount(energyCost.amount)}`,
-      title: short
-        ? `Энергия за крафт: ${formatAmount(energyCost.amount)}, есть ${formatAmount(have)} - крафт подождёт, пока накопится`
-        : `Энергия за крафт: ${formatAmount(energyCost.amount)}`,
-    }));
+  // Фоновые ресурсы в цене рецепта (энергия и resources.*.off_grid, например мана) -
+  // не в ячейках, а сверх узора (см. content_validation.check_grid_pattern):
+  // показываем их прямо под стрелкой. У рецепта преобразователя cost - это consumes.
+  const offGridIds = VIEW.off_grid_resources || [];
+  const offGridCost = matched ? (matched.cost || []).filter(c => offGridIds.includes(c.id)) : [];
+  if (offGridCost.length) {
+    const line = el("span", { class: "cg-arrow-energy" });
+    offGridCost.forEach(c => {
+      const isEnergy = c.id === VIEW.energy_resource_id;
+      const have = isEnergy ? (VIEW.energy.stock || 0) : ((VIEW.resources && VIEW.resources[c.id]) || 0);
+      const short = have < c.amount;
+      const item = el("span", {
+        class: "cg-arrow-extra" + (short ? " short" : ""),
+        title: `${c.name} за крафт: ${formatAmount(c.amount)}, есть ${formatAmount(have)}`
+          + (short ? (isEnergy ? " - крафт подождёт, пока накопится" : " - не хватает") : "")
+          + (isEnergy ? "" : ". В ячейку не кладётся - спишется сверх узора"),
+      });
+      if (isEnergy) {
+        item.appendChild(document.createTextNode("⚡"));
+      } else {
+        const iconDef = resourceIcon(c.id);
+        if (iconDef) item.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 12));
+        else item.appendChild(document.createTextNode(`${c.name} `));
+      }
+      item.appendChild(document.createTextNode(formatAmount(c.amount)));
+      line.appendChild(item);
+    });
+    arrow.appendChild(line);
   }
   // Масштаб механизма: на сетке - узор одного раза, а спишется и выйдет ×N
   // (tools/web_ui.py: crafting_view cost/gain уже с масштабом).

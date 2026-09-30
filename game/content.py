@@ -26,6 +26,10 @@ RESOURCE_ICONS: dict[str, dict] = {r["id"]: r["icon"] for r in _DATA["resources"
 # ВСЕГДА округляются в большую сторону при расчёте эффективных produces/consumes
 # (после умножения на множитель улучшения постройки), дробные не трогаются.
 RESOURCE_FRACTIONAL: dict[str, bool] = {r["id"]: bool(r.get("fractional", False)) for r in _DATA["resources"]}
+# Фоновые ресурсы (resources.*.off_grid, например мана): в ячейку крафт-сетки не
+# кладутся - в цене сеточного рецепта списываются СВЕРХ узора, как энергия (она
+# фоновая всегда, без флага). См. game/engine.py: is_off_grid_resource.
+RESOURCE_OFF_GRID: frozenset[str] = frozenset(r["id"] for r in _DATA["resources"] if r.get("off_grid"))
 # Тег "вида" души (resources.*.soul_kind, например "моб"/"босс") - тот же
 # generic-принцип, что у species.*.family (см. game/engine.py:soul_kind/
 # soul_collector_accepts_kind): группирует души независимо от их числа, так
