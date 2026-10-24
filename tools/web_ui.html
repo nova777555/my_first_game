@@ -1861,10 +1861,6 @@
      (см. .tech-graph), а компактная плашка деталей внизу (.tech-detail) -
      фиксированной высоты, как в канвасе. */
   .tech-tree-wrap { display: flex; flex-direction: column; gap: 16px; padding: 20px; flex: 1; min-height: 0; }
-  /* Обёртка вкладок эры в модалке "Квесты" - тоже flex:1 (заполняет всё, что
-     осталось под вкладками эр в фиксированной модалке 700x820), сама модалка
-     никогда не меняет размер при переключении эры - см. CLAUDE.md. */
-  .quest-era-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .tech-graph {
     /* overflow: hidden, не auto - панорамирование и зум теперь чистый CSS-transform
        (translate+scale) на .tech-cols, см. enableGraphPanning/enableGraphZoom, а не
@@ -1967,7 +1963,7 @@
 
   .lab-warn-line { color: var(--warn); font-size: 12px; margin: 4px 0 8px; }
   .tech-edges { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; }
-  /* pathLength="1" (см. drawTechEdges/drawQuestEdges) нормализует длину кривой к
+  /* pathLength="1" (см. drawTechEdges) нормализует длину кривой к
      0..1 - stroke-dasharray:1 значит "один сплошной штрих на всю длину", а
      анимация просто едет dashoffset 1 -> 0, т.е. "дочерчивает" ребро при
      каждой перерисовке графа (открытие модалки, исследование технологии). */
@@ -1978,106 +1974,128 @@
   .tech-edge.edge-done { stroke: var(--blueprint); }
   @keyframes tech-edge-draw { to { stroke-dashoffset: 0; } }
 
-  /* Узел квестового графа (openQuestsModal/renderQuestGraph) - НАМЕРЕННО не
-     .tech-node: отдельный класс, чтобы декоративная обводка не задела дерево
-     технологий. Квадрат с большой пиксель-иконкой квеста (q.icon, своя
-     картинка на каждый квест - рисуется/загружается в редакторе контента
-     точно так же, как у ресурсов/построек/мобов, дефолт - questIcon()) в
-     центре + значок-жетон статуса в углу (QUEST_STATUS_ICON) - имя квеста НЕ
-     печатается прямо на узле,
-     только во всплывающей подсказке при наведении (.quest-node-tip) и в
-     постоянной панели деталей снизу (renderQuestDetail). Locked-квест
-     рисуется на графе ВСЕГДА (не скрывается), просто приглушённым цветом и
-     БЕЗ клика (см. renderQuestGraph - click-листенер вешается только на
-     status !== "locked") - подсказка с именем при наведении при этом всё
-     равно работает (осознанный "тизер" следующего квеста без подробностей).
-     Статусная палитра НЕ повторяет --ok/--danger: claimed/completed
-     тонируются голубым (--blueprint - "уже часть схемы"), available -
-     янтарным (--accent - "требует действия"), а не зелёным. */
-  .quest-node {
-    position: relative;
-    width: 64px; height: 64px;
-    display: flex; align-items: center; justify-content: center;
-    background: #14191f; border: 1px solid #2b333b; border-radius: 6px;
-    font-family: Consolas, "Courier New", monospace; font-size: 11px; color: #4d5762;
-    cursor: pointer;
-    transition: border-color .12s ease, background .12s ease;
+  /* ---------- Квестбук (openQuestsModal) ----------
+     Макет «Новый квестбук» (прямое пожелание, 2026-09-30): эры | шапка эры + граф |
+     панель квеста. Узлы, связи, фон эры и карточки эр - tools/quest_fx.js (общий с
+     редактором), здесь только каркас окна. */
+  .modal.quest-modal { width: min(1280px, 96vw); height: min(820px, 94vh); max-width: none; max-height: none; overflow: hidden; }
+  .quest-modal .modal-head .qb-sum { margin-left: auto; display: flex; gap: 14px; align-items: center; font-family: Consolas, monospace; font-size: 12px; color: #7f97a1; }
+  .quest-modal .modal-head .qb-sum b { color: #dbe7ec; font-variant-numeric: tabular-nums; }
+  .quest-modal .modal-head > button { margin-left: 14px; }
+  .qb-gift {
+    display: inline-flex; gap: 7px; align-items: center; padding: 4px 10px 4px 6px; cursor: pointer;
+    border: 1px solid rgba(244,196,48,.5); background: rgba(244,196,48,.08); color: #f4c430;
   }
-  .quest-node.locked { cursor: default; }
-  .quest-node:not(.locked):hover { border-color: var(--blueprint); }
-  .quest-node.selected { box-shadow: 0 0 0 1px var(--accent); border-color: var(--accent); }
-  .quest-node.locked { background: #14191f; border-color: #2b333b; color: #4d5762; }
-  .quest-node.available { background: rgba(240,160,48,.08); border-color: var(--accent); color: var(--accent); animation: node-flicker 6s infinite; }
-  .quest-node.completed { background: rgba(95,208,232,.05); border-color: rgba(95,208,232,.5); color: #7f97a1; }
-  .quest-node.claimed { background: rgba(95,208,232,.1); border-color: var(--blueprint); color: #a9e8f5; }
-  .quest-node-icon { display: flex; }
-  .quest-node.locked .quest-node-icon { filter: grayscale(1) opacity(.5); }
-  /* Подсказка с именем квеста при наведении - CUSTOM (не нативный title),
-     ИМЕННО потому что цвет текста в ней настраивается ПЕР-КВЕСТОВО из
-     редактора контента (quests.*.tooltip_color, см. content_editor.html:
-     вкладка "Квесты" - тот же принцип, что q.icon/q.bg/q.border) - у
-     нативного title цвет текста браузер не отдаёт на откуп странице. Цвет
-     выставляется инлайн-стилем НА КОНКРЕТНОМ узле в buildQuestNode (нет
-     override - остаётся дефолт из этого правила, QUEST_DEFAULT_TOOLTIP_COLOR).
-     Шрифт НАМЕРЕННО не моноширинный (в отличие от самого узла/остального
-     графа, см. CLAUDE.md "стиль чертежа") - подсказка читается на глаз бегло
-     и мельком, засечки/моноширинность тут только мешают. */
-  .quest-node-tip {
-    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-    background: #10151bf0; border: 1px solid #2b333b; border-radius: 4px; padding: 5px 9px;
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 13px; font-weight: 600; line-height: 1.3; letter-spacing: .01em;
-    white-space: nowrap; pointer-events: none; z-index: 20;
-    display: none;
-    color: #dbe7ec;
+  .qb-gift:hover { background: rgba(244,196,48,.14); }
+  .qb-gift:focus-visible { outline: 1px solid var(--blueprint); }
+  .qb-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 224px minmax(0, 1fr) 344px; }
+  .qb-col-label { flex-shrink: 0; font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: #6f858f; padding: 14px 16px 10px; }
+  .qb-eras-col { border-right: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; min-height: 0; }
+  .qb-eras { display: flex; flex-direction: column; gap: 4px; padding: 0 10px 12px; overflow-y: auto; }
+  .qb-eras .qfx-era:focus-visible { outline: 1px solid var(--blueprint); }
+  .qb-mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .qb-banner {
+    flex-shrink: 0; height: 70px; display: flex; align-items: center; gap: 14px; padding: 0 20px;
+    border-bottom: 1px solid color-mix(in srgb, var(--qfx-era) 30%, transparent);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--qfx-era) 15%, #161d24) 0%, #161d24 72%);
   }
-  .quest-node:hover .quest-node-tip { display: block; }
-  /* Колонки/ряд графа квестов ПЕРЕОПРЕДЕЛЯЮТ общую ширину .tech-col (160px в
-     дереве технологий, рассчитана на текстовые карточки) под компактный
-     квадрат 64x64 - без этого каждая колонка держала кучу пустого места
-     справа от узла (см. комментарий у renderQuestGraph про убранную band). */
-  .quest-graph .tech-col { width: 64px; }
-  .quest-graph .tech-col-row { gap: 20px; }
-  /* .tech-graph скроллится (overflow:auto) - подсказка (.quest-node-tip)
-     всплывает НАД узлом абсолютным позиционированием и обрезается краем
-     контейнера, если узел в самом верхнем ряду и обычного padding (18px, см.
-     .tech-cols) не хватает под её высоту. Увеличенный верхний паддинг ТОЛЬКО
-     для графа квестов даёт место под подсказку у любого узла, не трогая
-     дерево технологий (там подсказок такого рода нет). */
-  .quest-graph .tech-cols { padding-top: 44px; }
-  .quest-node-badge {
-    position: absolute; top: -7px; right: -7px; width: 19px; height: 19px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1;
-    background: #161d24; border: 1px solid #2b333b; color: inherit;
+  .qb-banner-emb {
+    flex-shrink: 0; width: 44px; height: 44px; display: grid; place-items: center; background: #0f1419;
+    border: 1px solid color-mix(in srgb, var(--qfx-era) 55%, transparent);
+    box-shadow: 0 0 16px -4px color-mix(in srgb, var(--qfx-era) 60%, transparent);
   }
-  .quest-node.locked .quest-node-badge { border-color: #2b333b; color: #4d5762; }
-  .quest-node.available .quest-node-badge { border-color: var(--accent); color: var(--accent); }
-  .quest-node.completed .quest-node-badge { border-color: #7f97a1; color: #7f97a1; }
-  .quest-node.claimed .quest-node-badge { border-color: var(--blueprint); color: var(--blueprint); }
-  .quest-node.claimed .quest-node-badge::after {
-    content: ""; position: absolute; inset: -1px; border-radius: 50%; border: 1px solid var(--blueprint);
-    animation: claim-ping 3s ease-out infinite;
+  .qb-banner-titles { min-width: 0; }
+  .qb-banner-name { font-family: Consolas, monospace; font-size: 18px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--qfx-era); line-height: 1.1; }
+  .qb-banner-sub { font-size: 13px; color: #b3c0c6; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qb-banner-prog { margin-left: auto; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+  .qb-banner-num { font-family: Consolas, monospace; font-size: 12px; color: #7f97a1; }
+  .qb-banner-num b { font-size: 17px; color: #dbe7ec; font-variant-numeric: tabular-nums; }
+  .qb-banner-pips { width: 220px; }
+  .qb-banner-pips .qfx-pip { height: 6px; }
+  /* Панорама/зум - transform на .qb-layer (enableGraphPanning/enableGraphZoom), фон
+     эры (.qfx-bg на самом окне графа) сдвигается вслед через questFxBackdropView. */
+  .qb-graph { flex: 1; min-height: 0; overflow: hidden; cursor: grab; }
+  .qb-graph.panning { cursor: grabbing; }
+  .qb-layer { position: absolute; left: 0; top: 0; z-index: 1; transform-origin: 0 0; }
+  .qb-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  .qb-legend { position: absolute; left: 16px; bottom: 12px; z-index: 3; display: flex; gap: 14px; font: 11px Consolas, monospace; color: #6f858f; pointer-events: none; }
+  .qb-legend i { display: inline-block; width: 12px; height: 6px; margin-right: 6px; vertical-align: 1px; }
+  .qb-fit {
+    position: absolute; right: 12px; bottom: 9px; z-index: 3; padding: 4px 10px; cursor: pointer;
+    background: #10161bd9; border: 1px solid rgba(255,255,255,.12); color: #7f97a1; font: 11px Consolas, monospace;
   }
-  @keyframes claim-ping {
-    0% { transform: scale(1); opacity: .8; }
-    70%, 100% { transform: scale(2.4); opacity: 0; }
+  .qb-fit:hover { color: #dbe7ec; border-color: var(--blueprint); }
+  .qb-detail-col { border-left: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; min-height: 0; }
+  .qb-detail { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .qb-detail-scroll { flex: 1; overflow-y: auto; padding: 0 20px 16px; }
+  .qb-hero { display: flex; gap: 14px; align-items: center; padding: 2px 0 14px; }
+  .qb-hero-ic {
+    flex-shrink: 0; width: 76px; height: 76px; display: grid; place-items: center;
+    background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--qfx-acc) 24%, transparent), #0e1317 70%);
+    border: 1px solid color-mix(in srgb, var(--qfx-acc) 55%, transparent);
   }
-
-  .quest-era-tabs button.active { color: var(--era-accent, var(--accent)); border-color: var(--era-accent, var(--accent-dim)); }
+  .qb-hero-name { font-size: 19px; font-weight: 650; line-height: 1.2; color: #eef0ea; text-wrap: balance; }
+  .qb-status { display: inline-block; margin-top: 8px; padding: 2px 8px; border: 1px solid; font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+  .qb-status.available { color: var(--qfx-acc); border-color: color-mix(in srgb, var(--qfx-acc) 55%, transparent); }
+  .qb-status.completed { color: #f4c430; border-color: rgba(244,196,48,.6); background: rgba(244,196,48,.08); }
+  .qb-status.claimed { color: #8fb6c2; border-color: rgba(143,182,194,.35); }
+  .qb-status.locked { color: #6d7a83; border-color: #2e3740; }
+  .qb-hero-era { font-size: 12px; color: #7f97a1; margin-top: 6px; }
+  .qb-desc { font-size: 13.5px; line-height: 1.55; color: #b3c0c6; margin: 0; }
+  .qb-sec { border-top: 1px solid rgba(255,255,255,.07); padding-top: 12px; margin-top: 14px; }
+  .qb-sec-h { display: flex; justify-content: space-between; gap: 10px; font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: #6f858f; margin-bottom: 10px; }
+  .qb-task { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 5px 10px; align-items: center; margin-bottom: 11px; }
+  .qb-task-box { width: 15px; height: 15px; border: 1px solid #3a4550; display: grid; place-items: center; font: 700 11px Consolas, monospace; color: #10151b; }
+  .qb-task.done .qb-task-box { background: var(--ok); border-color: var(--ok); }
+  .qb-task-t { font-size: 13px; color: #dbe2e5; }
+  .qb-task.done .qb-task-t { color: #8a9ba3; }
+  .qb-task-n { font-family: Consolas, monospace; font-size: 12px; color: #c9d4d9; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .qb-task-bar { grid-column: 2 / 4; height: 4px; background: rgba(255,255,255,.07); }
+  .qb-task-bar i { display: block; height: 100%; background: var(--qfx-acc); }
+  .qb-task.done .qb-task-bar i { background: var(--ok); }
+  .qb-reqs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .qb-req {
+    display: inline-flex; gap: 7px; align-items: center; padding: 4px 9px 4px 5px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.02); color: #c9d4d9; font-size: 12px; border-radius: 0;
+  }
+  .qb-req:hover { border-color: rgba(255,255,255,.25); }
+  .qb-req-era { font-family: Consolas, monospace; font-size: 10px; }
+  .qb-req-ok { color: var(--ok); font-family: Consolas, monospace; }
+  .qb-req-no { color: #6d7a83; font-family: Consolas, monospace; }
+  .qb-case { display: flex; gap: 12px; align-items: flex-start; padding: 12px; background: #11171d; border: 1px solid rgba(255,255,255,.07); }
+  .qb-case-ic { flex-shrink: 0; width: 44px; height: 44px; display: grid; place-items: center; background: #0d1216; border: 1px solid rgba(244,196,48,.35); }
+  .qb-case-name { font-weight: 600; font-size: 14px; color: #eef0ea; }
+  .qb-case-desc { font-size: 12px; color: #7f97a1; line-height: 1.45; margin-top: 3px; }
+  .qb-prizes { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
+  .qb-prize {
+    display: grid; grid-template-columns: 24px minmax(0, 1fr) 56px 44px; align-items: center; gap: 10px; padding: 6px 8px;
+    background: color-mix(in srgb, var(--qb-r) 9%, transparent); border-left: 2px solid var(--qb-r);
+  }
+  .qb-prize-ic { display: flex; justify-content: center; }
+  .qb-prize-n { font-size: 13px; color: #dbe2e5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qb-prize-n b { font-family: Consolas, monospace; color: #fff; }
+  .qb-prize-bar { height: 4px; background: rgba(255,255,255,.07); }
+  .qb-prize-bar i { display: block; height: 100%; background: var(--qb-r); }
+  .qb-prize-p { font-family: Consolas, monospace; font-size: 12px; color: var(--qb-r); text-align: right; font-variant-numeric: tabular-nums; }
+  .qb-foot { flex-shrink: 0; padding: 14px 20px 20px; border-top: 1px solid rgba(255,255,255,.08); }
+  .qb-claim {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer;
+    background: var(--accent); color: #10151b; border: 0; border-radius: 0; padding: 12px 16px;
+    font: 700 13px Consolas, monospace; letter-spacing: 1px; text-transform: uppercase;
+    clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px); animation: qb-claim-pulse 2.2s ease-in-out infinite;
+  }
+  .qb-claim:hover { filter: brightness(1.08); }
+  .qb-claim:disabled { opacity: .6; cursor: default; animation: none; }
+  @keyframes qb-claim-pulse { 50% { filter: brightness(1.15); } }
+  .qb-foot-wait { text-align: center; font: 12px Consolas, monospace; color: #7f97a1; padding: 11px; border: 1px dashed rgba(255,255,255,.14); }
+  .qb-foot-done { text-align: center; font: 12px Consolas, monospace; color: #8fb6c2; padding: 11px; border: 1px solid rgba(143,182,194,.25); }
   /* Компактная плашка деталей - 1:1 из канваса (B_TechTree.dc.html/B_Quests.dc.html:
      .detail/.detail-name/.detail-cost/.btn): невысокий флекс-ряд (инфо-блок
      слева, кнопка справа), а НЕ карточка с заголовком/описанием/списком
      "открывает"/бейджем тира друг под другом, как было раньше - см. CLAUDE.md.
      У технологии полное описание/"открывает"/предупреждение про лабораторию -
      по-прежнему только title-подсказка на имени (иначе плашка растянулась бы
-     на пол-экрана). У квеста описание, условие выполнения И награда
-     (renderQuestDetail: quest.description/quest.conditions/reward_case) -
-     ПОСТОЯННЫЙ текст в info-блоке (не только подсказка) - без этого при клике
-     на квест было физически не понять, что делать и какая награда. "Нужно: .."
-     и "Награда: .." дополнительно выделены цветом/жирным (.quest-detail-goal/
-     .quest-detail-reward) поверх обычного тусклого .tech-detail-cost -
-     прямая жалоба "текст снизу незаметен"; в подсказке у квеста остаётся
-     только пояснение про требования из другой эры. */
+     на пол-экрана). У квестов своя панель справа (renderQuestDetail, .qb-*). */
   .tech-detail {
     flex-shrink: 0; background: transparent; border: 1px solid rgba(255,255,255,.1); border-radius: 0;
     padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -2096,20 +2114,6 @@
   .tech-unlocks .tu-more {
     background: none; border: none; padding: 0 0 0 6px; font-size: 11px; color: var(--blueprint);
     cursor: pointer; text-decoration: underline dotted;
-  }
-  /* "Что сделать"/"какая награда" у квеста (renderQuestDetail) - осознанно
-     ярче и крупнее соседних tech-detail-cost строк (флейвор-описание/эра),
-     это ответ на прямую жалобу "текст снизу незаметен, непонятно что делать".
-     Амбер (--accent) для цели - тот же цвет, что у .quest-node.available
-     ("требует действия"); циан (--blueprint) для награды - тот же цвет, что
-     у .quest-node.claimed ("уже часть добычи"). */
-  .quest-detail-goal {
-    font-size: 12px; font-weight: 700; color: var(--accent); font-family: Consolas, monospace;
-    margin-top: 6px;
-  }
-  .quest-detail-reward {
-    font-size: 12px; font-weight: 700; color: var(--blueprint); font-family: Consolas, monospace;
-    margin-top: 4px;
   }
   .tech-detail button {
     flex-shrink: 0; background: var(--accent); color: #10151b; border: 1px solid var(--accent);
@@ -2847,6 +2851,23 @@
   /* Сцена с фоном-текстурой механизма (appearance.texture): тёмная подложка под
      сеткой, иначе полупрозрачные пустые ячейки тонут в яркой текстуре. */
   .cg-stage-textured .cg-grid { padding: 6px; background: rgba(10,12,15,.6); box-shadow: 0 0 0 1px rgba(0,0,0,.55); }
+  /* Свободная расстановка (appearance.layout, tools/mechanism_fx.js: mechFxLayoutGeometry):
+     сцена - занятая область, ячейки/результат/прогресс стоят по своим координатам.
+     .cg-grid не рисуется (display: contents) - ячейки остаются её детьми по порядку
+     индекса узора, на это опираются перекраска призрака и полёт ингредиентов. */
+  .cg-stage.cg-stage-free { display: block; position: relative; padding: 0; flex-shrink: 0; }
+  .cg-stage-free .cg-grid { display: contents; }
+  .cg-stage-free .cg-cell, .cg-stage-free .cg-output, .cg-stage-free .cg-arrow-ring, .cg-stage-free .cg-progress-box { position: absolute; }
+  .cg-stage-free .cg-progress-box { display: flex; align-items: center; justify-content: center; }
+  .cg-stage-free .cg-progress-rot { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .cg-stage-free .cg-arrow-ring { display: block; }
+  .cg-stage-free .cg-arrow-ring .cg-arrow-energy { top: calc(100% + 2px); }
+  /* На текстуре тёмной подложки-сетки нет - темнее сами ячейки. */
+  .cg-stage-free.cg-stage-textured .cg-cell { background-color: rgba(10,12,15,.66); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 0 0 1px rgba(0,0,0,.55); }
+  .cg-stage-free.cg-stage-textured .cg-cell.filled { background-color: rgba(44,31,12,.72); box-shadow: inset 0 0 0 1px rgba(240,160,48,.5), 0 0 0 1px rgba(0,0,0,.55); }
+  .cg-stage-free.cg-stage-textured .cg-cell.ghost-ok { background-color: rgba(18,58,46,.75); box-shadow: inset 0 0 0 2px var(--ok); }
+  .cg-stage-free.cg-stage-textured .cg-cell.ghost-missing { background-color: rgba(70,24,20,.75); box-shadow: inset 0 0 0 2px var(--danger); }
+  .cg-stage-free.cg-stage-textured .cg-cell.ghost-out { background-color: rgba(0,0,0,.55); }
   .cg-cell {
     position: relative; width: 78px; height: 78px; background: var(--panel); border: 0; border-radius: 0; padding: 0;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); background-color: rgba(0,0,0,.25);
@@ -2964,7 +2985,6 @@
     60% { transform: translateX(-4px); } 80% { transform: translateX(2px); }
   }
   .cg-fx-layer { position: fixed; inset: 0; pointer-events: none; z-index: 120; overflow: hidden; }
-  .cg-fly { position: absolute; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 0 6px rgba(255,190,80,.8)); will-change: transform; }
   .cg-burst-flash {
     position: absolute; width: 110px; height: 110px; margin: -55px 0 0 -55px;
     background: radial-gradient(circle, rgba(255,246,220,.95) 0%, rgba(255,200,90,.55) 35%, rgba(255,170,60,0) 70%);
@@ -2977,6 +2997,7 @@
     box-shadow: 0 0 0 3px rgba(255,210,120,.9); animation: cg-ring .5s ease-out forwards;
   }
   @keyframes cg-ring { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(1.7); opacity: 0; } }
+  .cg-burst-ring.round { border-radius: 50%; }
   .cg-pop-transient {
     position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px;
     filter: drop-shadow(0 0 8px rgba(255,200,90,.9)); animation: cg-pop-fade .95s ease-out forwards;
@@ -3074,6 +3095,11 @@
   .cg-src-cell .cg-icon-wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   .cg-src-cell-count { position: absolute; right: 2px; bottom: 0; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; color: var(--accent); text-shadow: 0 0 2px #000; }
   .cg-src-arrow-icon { color: var(--accent); display: flex; align-items: center; flex-shrink: 0; }
+  /* Миниатюра свободной расстановки механизма (sourcesLayoutVisual). */
+  .cg-src-free { position: relative; flex-shrink: 0; }
+  .cg-src-free .cg-src-cell, .cg-src-free .cg-src-output, .cg-src-free .cg-src-free-arrow, .cg-src-free .cg-src-ring { position: absolute; }
+  .cg-src-free .cg-src-output .cg-icon-wrap { inset: 0; }
+  .cg-src-ring { border-radius: 50%; box-shadow: 0 0 0 2px rgba(240,160,48,.4); pointer-events: none; }
   .cg-src-output { position: relative; width: 64px; height: 64px; flex-shrink: 0; background: var(--bg); box-shadow: inset 0 0 0 2px rgba(240,160,48,.55); }
   .cg-src-output .cg-icon-wrap { position: absolute; left: 12px; right: 12px; top: 9px; bottom: 15px; display: flex; align-items: center; justify-content: center; }
   .cg-src-output-count { position: absolute; right: 4px; bottom: 2px; font-family: Consolas, monospace; font-size: 11.5px; font-weight: 700; color: var(--accent); }
@@ -3463,6 +3489,8 @@
 <script src="/mechanism_fx.js"></script>
 <!-- Сцена схватки (модалка «Охота») - общий с превью в редакторе, см. tools/hunt_fx.js. -->
 <script src="/hunt_fx.js"></script>
+<!-- Граф квестбука (модалка «Квесты») - общий с вкладкой «Квесты» в редакторе, см. tools/quest_fx.js. -->
+<script src="/quest_fx.js"></script>
 <script>
 // ---------- базовые хелперы ----------
 
@@ -3643,12 +3671,8 @@ const ICONS = {
     "AAAAAAAAAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
   ], palette: { A: "#6b6f7a", B: "#1f2226" } },
 
-  // Generic-заглушка для quests.*.icon без своей кастомной иконки - ДЕРЖАТЬ В
-  // ПАРЕ с DEFAULT_ICONS.quest в tools/content_editor.html (см. questIcon).
-  quest: { grid: [
-    "..AAAAAA..", ".AAAAAAAA.", "AABBBBBBAA", "AABBBBBBAA",
-    "AABAAAABAA", "AABBBBBBAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
-  ], palette: { A: "#e3c98a", B: "#8a5a34" } },
+  // Значок квеста без своего quests.*.icon - общий с редактором (tools/quest_fx.js).
+  quest: QUEST_FX_DEFAULT_ICON,
 
   // Generic-заглушка для enchantments.*.icon без своей кастомной иконки - тот
   // же принцип, что monster/quest выше (см. enchantIcon).
@@ -10682,9 +10706,6 @@ let craftGridShownJob = null;
 // сервера (log.manual_completed_ids) - заполняют doAction/craftGridSubmit,
 // разбирает craftGridCheckJobCompletion (тот же приём, что lastRitualCompleted).
 let lastManualCompletedIds = [];
-// Длительность полёта ингредиентов в выходной слот (craftGridPlayCraftFx) -
-// вспышка результата стартует ровно по прилёту.
-const CG_FLY_MS = 280;
 
 function craftGridEntry(locationId) {
   return (VIEW.crafting || []).find(c => c.location_id === locationId) || null;
@@ -10784,6 +10805,12 @@ function craftGridShapesEqual(a, b) {
   return true;
 }
 function craftGridMirrorShape(shape) { return shape.map(row => row.slice().reverse()); }
+// Плоский список ячеек -> строки по width (без обрезки - для crafting.fixed).
+function craftGridFullGrid(flat, width) {
+  const out = [];
+  for (let i = 0; i < flat.length; i += width) out.push(flat.slice(i, i + width));
+  return out;
+}
 
 // Ячейка раскладки: у сетки с узором - id ресурса, у сборщика - стопка {id, amount}.
 function craftGridCellId(cell) {
@@ -10818,10 +10845,16 @@ function craftGridMatchRecipe(entry, placed) {
     if (!Object.keys(totals).length) return null;
     return entry.recipes.find(r => craftGridStacksMatch(r, totals)) || null;
   }
-  const normalized = craftGridNormalize(placed, entry.width, entry.height);
-  if (!normalized.length) return null;
+  // crafting.fixed - узор привязан к ячейкам: сравниваем раскладку целиком, без
+  // обрезки краёв (game/engine.py: match_grid_target, держать в паре).
+  const normalized = entry.fixed
+    ? craftGridFullGrid(placed.map(c => c || null), entry.width)
+    : craftGridNormalize(placed, entry.width, entry.height);
+  if (!normalized.length || !placed.some(Boolean)) return null;
   for (const recipe of entry.recipes) {
-    const shape = craftGridPatternShape(recipe.pattern);
+    const shape = entry.fixed
+      ? craftGridFullGrid(craftGridFlattenPattern(recipe.pattern), entry.width)
+      : craftGridPatternShape(recipe.pattern);
     if (craftGridShapesEqual(shape, normalized)) return recipe;
     if (recipe.pattern_mirror && craftGridShapesEqual(craftGridMirrorShape(shape), normalized)) return recipe;
   }
@@ -11119,6 +11152,13 @@ function craftGridRenderCellContent(cell, i, hover, entry) {
       }
     }
   }
+  // Моделька ячейки свободной расстановки (appearance.layout.cells[i].shape): чаша,
+  // бак с жидкостью цвета предмета - рисуется ДО иконки, под ней.
+  const shape = craftGridSlotShape(entry, i);
+  if (shape) {
+    const iconDef = icon ? resourceIcon(icon) : null;
+    mechFxDecorateSlot(cell, shape, { color: mechFxIconMainColor(iconDef), level: icon ? (mark ? 0.3 : 1) : 0 });
+  }
   if (icon) {
     const iconDef = resourceIcon(icon);
     const wrap = el("div", { class: "cg-icon-wrap" });
@@ -11132,6 +11172,15 @@ function craftGridRenderCellContent(cell, i, hover, entry) {
     const tip = "ЛКМ +1 · Shift +10 · Ctrl — всё со склада · ПКМ −1 (Shift −10) · пустой рукой — очистить";
     cell.title = cell.title ? `${cell.title}\n${tip}` : tip;
   }
+}
+
+// Моделька ячейки i механизма со свободной расстановкой (appearance.layout), иначе
+// null - обычная сетка без модельки.
+function craftGridSlotShape(entry, i) {
+  const layout = entry && entry.appearance && entry.appearance.layout;
+  if (!layout) return null;
+  const slot = (layout.cells || [])[i];
+  return (slot && slot.shape) || "square";
 }
 
 function craftGridCellEl(i, entry, hover) {
@@ -11444,6 +11493,7 @@ function sourcesPatternVisual(src, host) {
   const rows = src.pattern.rows || [];
   const w = rows.reduce((m, r) => Math.max(m, Array.from(r).length), 0) || 1;
   const flat = craftGridFlattenPattern(src.pattern);
+  if (src.layout) return sourcesLayoutVisual(src, host, flat.map(rid => (rid ? { id: rid } : null)));
   const vertical = w > 4;
   const gap = w > 5 ? 3 : 4;
   const avail = vertical ? 250 : 142;
@@ -11472,6 +11522,11 @@ function sourcesPatternVisual(src, host) {
 // важна, порядок как в цене, количество в углу. Клик по стопке - к её источникам.
 function sourcesStacksVisual(src, host) {
   const w = src.grid_width || 3, h = src.grid_height || 2;
+  if (src.layout) {
+    const items = [];
+    for (let i = 0; i < w * h; i++) items.push((src.stack_cost || [])[i] || null);
+    return sourcesLayoutVisual(src, host, items);
+  }
   const gap = 4;
   const cell = Math.max(24, Math.min(48, Math.floor((142 - (w - 1) * gap) / w)));
   const visual = el("div", { class: "cg-src-visual" });
@@ -11495,6 +11550,64 @@ function sourcesStacksVisual(src, host) {
   visual.appendChild(sourcesArrowIcon());
   visual.appendChild(sourcesOutputBox(sourcesDetailResourceId, src.amount));
   return visual;
+}
+
+// Узор (или стопки сборщика) в свободной расстановке механизма (appearance.layout) -
+// та же геометрия, что у сцены модалки (mechFxLayoutGeometry), ужатая под колонку
+// справочника: игрок видит ячейки там же, где будет раскладывать. items - по ячейке
+// узора: null или {id, amount?} (amount - у стопки сборщика).
+function sourcesLayoutVisual(src, host, items) {
+  const geo = mechFxLayoutGeometry(src.layout, items.length);
+  const b = geo.bounds;
+  const k = Math.min(1, 270 / b.width, 220 / b.height);
+  const box = el("div", { class: "cg-src-free", style: `width:${Math.round(b.width * k)}px;height:${Math.round(b.height * k)}px;` });
+  if (geo.links) box.appendChild(mechFxLinksSvg(geo, b.left, b.top, k));
+  geo.cells.forEach((c, i) => {
+    const item = items[i];
+    let node;
+    if (item) {
+      const label = item.amount != null
+        ? `${RESOURCE_NAME_LOOKUP(item.id)} ×${formatAmount(item.amount)}. Откуда берётся?`
+        : `Откуда берётся: ${RESOURCE_NAME_LOOKUP(item.id)}`;
+      node = el("button", { type: "button", class: "cg-src-cell filled", title: label });
+      node.setAttribute("aria-label", label);
+      node.addEventListener("click", () => craftGridOpenSourceDetail(item.id, true, host));
+    } else {
+      node = el("div", { class: "cg-src-cell" });
+    }
+    mechFxPlace(node, c, b.left, b.top, k);
+    mechFxDecorateSlot(node, c.shape, {
+      color: item ? mechFxIconMainColor(resourceIcon(item.id)) : null, level: item ? 1 : 0, mini: true,
+    });
+    if (item) {
+      node.appendChild(sourcesIconWrap(item.id, Math.max(10, Math.round(Math.min(c.w, c.h) * k * 0.62))));
+      if (item.amount != null) node.appendChild(el("span", { class: "cg-src-cell-count", text: formatAmount(item.amount) }));
+    }
+    box.appendChild(node);
+  });
+  const p = geo.progress;
+  if (!p.ring) {
+    // Стрелка в своей точке и со своим поворотом, как прогресс в модалке.
+    const arrow = sourcesArrowIcon();
+    arrow.classList.add("cg-src-free-arrow");
+    arrow.style.left = `${Math.round((p.x - b.left) * k)}px`;
+    arrow.style.top = `${Math.round((p.y - b.top) * k)}px`;
+    arrow.style.transform = `translate(-50%, -50%) rotate(${p.angle || 0}deg)`;
+    box.appendChild(arrow);
+  }
+  const outRid = sourcesDetailResourceId;
+  const out = el("div", { class: "cg-src-output", title: RESOURCE_NAME_LOOKUP(outRid) });
+  mechFxPlace(out, geo.output, b.left, b.top, k);
+  mechFxDecorateSlot(out, geo.output.shape, { color: mechFxIconMainColor(resourceIcon(outRid)), level: 1, mini: true });
+  out.appendChild(sourcesIconWrap(outRid, Math.max(14, Math.round(Math.min(geo.output.w, geo.output.h) * k * 0.5))));
+  out.appendChild(el("span", { class: "cg-src-output-count", text: `×${formatAmount(src.amount)}` }));
+  box.appendChild(out);
+  if (p.ring) {
+    const ring = el("div", { class: "cg-src-ring" });
+    mechFxPlace(ring, { x: p.x, y: p.y, w: p.d, h: p.d }, b.left, b.top, k);
+    box.appendChild(ring);
+  }
+  return el("div", { class: "cg-src-visual" }, [box]);
 }
 
 // Не-сеточный источник: особь/душа (если есть своя иконка) -> выход.
@@ -12073,7 +12186,7 @@ function craftGridCaptureCells() {
     const rid = craftGridCellId(craftGridPlaced[i]);
     if (!rid) return;
     const wrap = cell.querySelector(".cg-icon-wrap") || cell;
-    out.push({ rid, rect: wrap.getBoundingClientRect() });
+    out.push({ rid, index: i, rect: wrap.getBoundingClientRect() });
   });
   return out;
 }
@@ -12107,33 +12220,26 @@ function craftGridSparkColors(rid) {
   return colors.length ? colors : ["#f0a030", "#ffd27a"];
 }
 
-// Ингредиенты из клеток "резко" летят в цель: короткий замах назад и
-// ускорение к выходному слоту (мгновенный крафт) или в стрелку механизма
-// (долгий - там они исчезают внутри). Возвращает, через сколько мс долетит
-// последний.
+// Ингредиенты из клеток летят в цель - выходной слот (мгновенный крафт) или
+// прогресс механизма (долгий - там они исчезают внутри). Как именно - вариант
+// appearance.gather (рывок/воронка/дуга, tools/mechanism_fx.js: mechFxGather);
+// у свободной расстановки с каналами подсвечивается канал летящего ингредиента.
+// Возвращает, через сколько мс долетит последний.
 function craftGridFlyIngredients(origin, target, intoMachine) {
-  const tr = target.getBoundingClientRect();
-  const tx = tr.left + tr.width / 2, ty = tr.top + tr.height / 2;
-  const layer = craftGridFxLayer();
-  let arrive = 0;
-  origin.forEach((o, n) => {
-    const r = o.rect;
-    const iconDef = resourceIcon(o.rid);
-    const fly = el("div", { class: "cg-fly", style: `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;` });
-    if (iconDef) fly.appendChild(pixelIcon(iconDef.grid, iconDef.palette, Math.round(Math.min(r.width, r.height))));
-    layer.appendChild(fly);
-    const dx = tx - (r.left + r.width / 2), dy = ty - (r.top + r.height / 2);
-    const delay = Math.min(n * 16, 90);
-    arrive = Math.max(arrive, delay + CG_FLY_MS);
-    const anim = fly.animate([
-      { transform: "translate(0px, 0px) scale(1)", opacity: 1, easing: "ease-out" },
-      { transform: `translate(${-dx * 0.06}px, ${-dy * 0.06 - 4}px) scale(1.12)`, opacity: 1, offset: 0.22, easing: "cubic-bezier(.7,0,1,.6)" },
-      { transform: `translate(${dx}px, ${dy}px) scale(${intoMachine ? 0.15 : 0.35})`, opacity: intoMachine ? 0 : 0.9 },
-    ], { duration: CG_FLY_MS, delay, fill: "both" });
-    anim.onfinish = () => fly.remove();
-    anim.oncancel = () => fly.remove();
+  const stage = document.querySelector("#craftGridOverlay .cg-stage");
+  const sr = stage ? stage.getBoundingClientRect() : null;
+  return mechFxGather(origin.map(o => ({
+    rect: o.rect, index: o.index,
+    make: (size) => {
+      const iconDef = resourceIcon(o.rid);
+      return iconDef ? pixelIcon(iconDef.grid, iconDef.palette, size) : null;
+    },
+  })), target.getBoundingClientRect(), craftGridLook().gather, {
+    into: intoMachine,
+    layer: craftGridFxLayer(),
+    links: stage ? stage.querySelector(".mfx-links") : null,
+    shockRadius: sr ? Math.max(sr.width, sr.height) * 0.6 : 160,
   });
-  return arrive;
 }
 
 // "Хоп" в выходном слоте: вспышка, кольцо, искры цвета результата, иконка
@@ -12155,7 +12261,10 @@ function craftGridOutputBurst(items) {
     craftGridFxOnce(el("div", { class: "cg-float-text muted", text: "ничего не вышло", style: `left:${cx}px;top:${r.top - 22}px;` }));
     return;
   }
-  craftGridFxOnce(el("div", { class: "cg-burst-ring", style: `left:${cx}px;top:${cy}px;` }));
+  craftGridFxOnce(el("div", {
+    class: "cg-burst-ring" + (out.classList.contains("mfx-slot-square") || !out.classList.contains("mfx-slot") ? "" : " round"),
+    style: `left:${cx}px;top:${cy}px;`,
+  }));
   // Частицы механизма (appearance.particles, варианты - tools/mechanism_fx.js);
   // без своих - искры цвета результата.
   mechFxEmit(craftGridFxLayer(), cx, cy, craftGridLook().particles, { colors: craftGridSparkColors(firstId) });
@@ -12189,7 +12298,10 @@ function craftGridLook() {
 function craftGridArrowHit(arrow, puff) {
   if (!arrow) return;
   const look = craftGridLook();
-  if (look.motion) mechFxHit(arrow, look.motion);
+  // Прогресс кольцом вокруг результата (layout.progress = "ring") - не молот и не
+  // стрелка: кольцо вспыхивает и чуть раздувается.
+  if (arrow.classList.contains("cg-arrow-ring")) restartClassAnimation(arrow, "mfx-ring-hit");
+  else if (look.motion) mechFxHit(arrow, look.motion);
   else restartClassAnimation(arrow, "cg-arrow-pulse");
   if (puff && look.particles) {
     const r = arrow.getBoundingClientRect();
@@ -12335,29 +12447,65 @@ function openCraftGridModal(locationId) {
   // Оформление механизма (locations.*.appearance, tools/mechanism_fx.js): фон
   // только у сцены - каркас модалки и колонки по бокам общие для всех механизмов.
   const look = entry.appearance || {};
-  const stage = el("div", { class: "cg-stage" });
+  // Свободная расстановка (appearance.layout): ячейки, прогресс и результат стоят
+  // где их поставили в редакторе (по кругу, бак в стороне...), сцена - занятая ими
+  // область. Это только вид: ячейка i - та же ячейка i узора.
+  const geo = look.layout ? mechFxLayoutGeometry(look.layout, entry.width * entry.height) : null;
+  const ox = geo ? geo.bounds.left : 0, oy = geo ? geo.bounds.top : 0;
+  const stage = el("div", { class: "cg-stage" + (geo ? " cg-stage-free" : "") });
+  if (geo) {
+    stage.style.width = `${geo.bounds.width}px`;
+    stage.style.height = `${geo.bounds.height}px`;
+    // Каналы от ячеек к механизму - под всем остальным.
+    if (geo.links) stage.appendChild(mechFxLinksSvg(geo, ox, oy));
+  }
   const textureStyle = mechFxTextureStyle(look);
   if (textureStyle) {
     Object.assign(stage.style, textureStyle);
     stage.classList.add("cg-stage-textured");
   }
-  const gridEl = el("div", { class: "cg-grid", style: `grid-template-columns: repeat(${entry.width}, minmax(0, 1fr));` });
-  craftGridPlaced.forEach((rid, i) => gridEl.appendChild(craftGridCellEl(i, entry, initialHover)));
+  const gridEl = el("div", { class: "cg-grid", style: geo ? "" : `grid-template-columns: repeat(${entry.width}, minmax(0, 1fr));` });
+  craftGridPlaced.forEach((rid, i) => {
+    const cell = craftGridCellEl(i, entry, initialHover);
+    if (geo) mechFxPlace(cell, geo.cells[i], ox, oy);
+    gridEl.appendChild(cell);
+  });
   stage.appendChild(gridEl);
   // Стрелка - она же полоса прогресса долгого job'а (заливается слева направо,
   // как стрелка печи в Minecraft); у мгновенного крафта - просто стрелка.
   // Своя пиксельная иконка механизма (appearance.progress_icon) заменяет
   // стрелку и заливается по progress_fill; фоновое движение (appearance.motion)
   // крутится на внутреннем .mfx-art, пока идёт job, удар - на самой .cg-arrow.
+  // В свободной расстановке прогресс - либо отдельно (своя точка и поворот), либо
+  // кольцо вокруг результата (layout.progress = "ring").
   const arrow = el("div", { class: "cg-arrow" });
-  const pixelProgress = look.progress_icon ? mechFxProgressArt(look.progress_icon, look.motion) : null;
-  const art = pixelProgress ? pixelProgress.art : mechFxMotionWrap([craftGridArrowSvg()], look.motion);
+  const ringProgress = geo && geo.progress.ring ? mechFxRingProgress(geo.progress.d) : null;
+  const pixelProgress = !ringProgress && look.progress_icon ? mechFxProgressArt(look.progress_icon, look.motion) : null;
+  const art = ringProgress ? ringProgress.art
+    : pixelProgress ? pixelProgress.art : mechFxMotionWrap([craftGridArrowSvg()], look.motion);
   arrow.appendChild(art);
+  // arrowHost - что встаёт на сцену; labelHost - куда вешаются подписи (фоновые
+  // ресурсы, масштаб): у отдельного прогресса свободной расстановки это неповёрнутая
+  // обёртка, иначе подписи крутились бы вместе со стрелкой.
+  let arrowHost = arrow, labelHost = arrow;
+  if (ringProgress) {
+    arrow.classList.add("cg-arrow-ring");
+    mechFxPlace(arrow, { x: geo.progress.x, y: geo.progress.y, w: geo.progress.d, h: geo.progress.d }, ox, oy);
+  } else if (geo) {
+    arrowHost = labelHost = el("div", { class: "cg-progress-box" });
+    mechFxPlace(arrowHost, { x: geo.progress.x, y: geo.progress.y, w: MECH_FX_PROGRESS_BOX, h: MECH_FX_PROGRESS_BOX }, ox, oy);
+    const rot = el("div", { class: "cg-progress-rot" });
+    if (geo.progress.angle) rot.style.transform = `rotate(${geo.progress.angle}deg)`;
+    rot.appendChild(arrow);
+    arrowHost.appendChild(rot);
+  }
   if (job || completedJob) {
     arrow.classList.add("cg-arrow-busy");
     mechFxSetState(art, { active: true, running: !!job });
     let setFill;
-    if (pixelProgress) {
+    if (ringProgress) {
+      setFill = ringProgress.setFill;
+    } else if (pixelProgress) {
       setFill = (from, to) => mechFxSetFill(pixelProgress.fill, look.progress_fill, from, to);
     } else {
       const fill = el("div", { class: "cg-arrow-fill" }, [craftGridArrowSvg()]);
@@ -12405,25 +12553,32 @@ function openCraftGridModal(locationId) {
       item.appendChild(document.createTextNode(formatAmount(c.amount)));
       line.appendChild(item);
     });
-    arrow.appendChild(line);
+    labelHost.appendChild(line);
   }
   // Масштаб механизма: на сетке - узор одного раза, а спишется и выйдет ×N
   // (tools/web_ui.py: crafting_view cost/gain уже с масштабом).
   if (matched && matched.scale > 1) {
     const list = items => items.map(c => `${c.name} ${formatAmount(c.amount)}`).join(", ");
-    arrow.appendChild(el("span", {
+    labelHost.appendChild(el("span", {
       class: "cg-arrow-scale",
       text: `×${matched.scale}`,
       title: `Масштаб механизма ×${matched.scale}: узор на сетке - на один раз, `
         + `а спишется ${list(matched.cost)} и выйдет ${list(matched.gain)}`,
     }));
   }
-  stage.appendChild(arrow);
+  if (!geo) stage.appendChild(arrowHost);
   const outputSlot = el("div", { class: "cg-output" });
   // В выходном слоте - результат разложенного узора; если узора нет, а
   // механизм занят - бледный "будущий" результат идущего job'а.
   const shownGain = matched ? matched.gain : (job ? job.gain : null);
   const outId = shownGain && shownGain[0] ? shownGain[0].id : null;
+  if (geo) {
+    mechFxPlace(outputSlot, geo.output, ox, oy);
+    // Моделька результата: бак полон, когда узор собран, и наполовину - пока идёт job.
+    mechFxDecorateSlot(outputSlot, geo.output.shape, {
+      color: outId ? mechFxIconMainColor(resourceIcon(outId)) : null, level: matched ? 1 : (outId ? 0.5 : 0),
+    });
+  }
   if (outId) {
     const iconDef = resourceIcon(outId);
     const wrap = el("div", { class: "cg-icon-wrap" + (matched ? "" : " cg-output-pending") });
@@ -12433,6 +12588,8 @@ function openCraftGridModal(locationId) {
   }
   outputSlot.appendChild(el("span", { class: "cg-output-count", text: craftGridGainCountText(shownGain) }));
   stage.appendChild(outputSlot);
+  // В свободной расстановке прогресс - поверх результата (кольцо обнимает его).
+  if (geo) stage.appendChild(arrowHost);
   centerCol.appendChild(stage);
   if (job && job.kind === "energy_recipe") {
     centerCol.appendChild(craftGridEnergyRow({
@@ -14665,12 +14822,9 @@ function renderTechTree() {
 // быстрого перетаскивания - а слушать эти события нужно на window, а не на самом
 // графе.
 let graphPanState = null; // { graph, cols, zoomState, redraw, startX, startY, panX0, panY0 } | null
-// Текущий зум+панорама графа техов/квестов - см. enableGraphZoom/enableGraphPanning.
-// Раздельные переменные (а не одна общая), потому что обе модалки могут быть
-// открыты для разных целей в разное время и не должны делить один и тот же
-// уровень приближения/сдвиг вида.
+// Текущий зум+панорама графа техов - см. enableGraphZoom/enableGraphPanning. У графа
+// квестов свой вид на каждую эру (questGraphView).
 let techGraphZoom = { zoom: 1, panX: 0, panY: 0 };
-let questGraphZoom = { zoom: 1, panX: 0, panY: 0 };
 
 // mousedown вешается ЗАНОВО на каждый свежий .tech-graph (renderTechTree()
 // пересоздаёт граф с нуля при каждой перерисовке) - это не течёт, старый
@@ -14682,7 +14836,7 @@ let questGraphZoom = { zoom: 1, panX: 0, panY: 0 };
 function enableGraphPanning(graph, cols, zoomState, redraw) {
   graph.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return; // только левая кнопка мыши
-    if (e.target.closest(".tech-node, .quest-node")) return; // клик по узлу - это выбор технологии/квеста, не панорамирование
+    if (e.target.closest(".tech-node, .qfx-n")) return; // клик по узлу - это выбор технологии/квеста, не панорамирование
     graphPanState = {
       graph, cols, zoomState, redraw,
       startX: e.clientX, startY: e.clientY,
@@ -14701,7 +14855,7 @@ function enableGraphPanning(graph, cols, zoomState, redraw) {
 // эта рамка нулевая - раньше это тихо схлопывало scrollLeft обратно в 0, и зум
 // визуально цеплялся за transform-origin (левый верхний угол) вместо курсора,
 // где бы тот ни стоял. .tech-edges (SVG рёбер) намеренно остаётся ВНЕ этого
-// transform - drawTechEdges/drawQuestEdges честно перечитывают geometry узлов
+// transform - drawTechEdges честно перечитывает geometry узлов
 // через getBoundingClientRect ПОСЛЕ transform (redraw(), см. ниже), поэтому рёбра
 // просто сами оказываются в новых координатах без единой строчки, знающей про
 // zoom/pan, а сами линии не "толстеют" при масштабировании вместе с узлами.
@@ -15494,15 +15648,44 @@ function closeSkillsModal() {
   if (overlay) overlay.remove();
 }
 
-// Модалка "Квесты" - вкладка на каждую эру (VIEW.quests[].era), внутри вкладки
-// свой отдельный граф зависимостей (см. renderQuestGraph). requires на квест из
-// ДРУГОЙ эры по-прежнему реально гейтит доступность (см. game/engine.py:
-// is_quest_available/check_quests) - просто не рисуется ребром, раз квест-условие
-// физически не на этой вкладке (см. renderQuestDetail: список текстом вместо
-// линии). Прежде эры были просто цветными колонками ОДНОГО общего графа - теперь
-// это разные графы, что и даёт квестам ВНУТРИ одной эры собственные прямые связи
-// без наложения на длинные межэровые рёбра.
+// Модалка "Квесты" (макет «Новый квестбук», прямое пожелание, 2026-09-30) - три
+// колонки: эры | шапка эры + граф | панель квеста. Узлы, связи, фон эры и карточки
+// эр рисует tools/quest_fx.js, общий с вкладкой «Квесты» → «Граф» в редакторе. У
+// каждой эры свой граф: requires на квест из ДРУГОЙ эры по-прежнему гейтит (см.
+// game/engine.py: is_quest_available), но рисуется меткой над узлом, а не линией.
+// Граф двигается мышью и масштабируется колесом - тот же enableGraphPanning/
+// enableGraphZoom, что у дерева технологий: узлы и связи лежат в одном слое под
+// transform (.qb-layer), фон эры едет вместе с ним (questFxBackdropView).
 let questsActiveEra = null; // переживает переоткрытие модалки, как prioritiesActiveTab
+// Вид графа КАЖДОЙ эры - зум и сдвиг (прямое пожелание, 2026-09-30): приблизил часть
+// графа, закрыл окно - при следующем заходе в эту эру видишь то же самое. Живёт в
+// localStorage (как громкость звука - переживает и перезапуск игры); эра без
+// сохранённого вида при первом заходе вписывается целиком, как кнопка «Весь граф».
+const QUEST_GRAPH_VIEWS_KEY = "questGraphViews";
+let questGraphViews = null; // {"<era>": {zoom, panX, panY}}, читается из localStorage при первом обращении
+
+function questGraphView(era) {
+  if (!questGraphViews) {
+    questGraphViews = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(QUEST_GRAPH_VIEWS_KEY) || "{}");
+      Object.entries(saved).forEach(([key, v]) => {
+        if (v && [v.zoom, v.panX, v.panY].every(Number.isFinite)) questGraphViews[key] = { zoom: v.zoom, panX: v.panX, panY: v.panY };
+      });
+    } catch (e) { /* пусто или повреждено - начинаем с чистого листа */ }
+  }
+  return questGraphViews[String(era)] || null;
+}
+
+let questGraphViewsSaveTimer = null;
+function saveQuestGraphViews() {
+  clearTimeout(questGraphViewsSaveTimer);
+  questGraphViewsSaveTimer = setTimeout(() => {
+    try { localStorage.setItem(QUEST_GRAPH_VIEWS_KEY, JSON.stringify(questGraphViews)); } catch (e) { /* ignore */ }
+  }, 300);
+}
+// Квест, награду которого только что забрали - его узел один раз вспыхивает.
+let questJustClaimedId = null;
 
 function defaultQuestEra(eras, quests) {
   const inProgress = quests.find(q => q.status === "available");
@@ -15512,60 +15695,393 @@ function defaultQuestEra(eras, quests) {
   return eras[0];
 }
 
+// Оформление эры (content.json: eras[era]) с умолчаниями - имя и цвет как у eraTheme.
+function questEraInfo(era) {
+  const info = (VIEW.eras && VIEW.eras[String(era)]) || {};
+  const theme = eraTheme(era);
+  return {
+    name: theme.name, color: theme.text, subtitle: info.subtitle || "",
+    icon: info.icon || QUEST_FX_DEFAULT_ICON, backdrop: info.backdrop || null,
+  };
+}
+
+function questById() {
+  const byId = {};
+  VIEW.quests.forEach(q => { byId[q.id] = q; });
+  return byId;
+}
+
+function questAccent(q) {
+  return q.accent || questEraInfo(q.era).color;
+}
+
+function fmtQuestNum(v) {
+  return Number.isInteger(v) ? String(v) : String(Math.floor(v * 10) / 10);
+}
+
+// Прогресс по условиям (VIEW.quests[].conditions = [{text, current, target}]):
+// доля для полоски и подпись - "5/8" у одного условия, "1/2" (выполнено условий) у нескольких.
+function questProgress(q) {
+  let done = 0, frac = 0;
+  q.conditions.forEach(c => {
+    const f = c.target > 0 ? Math.min(1, c.current / c.target) : 1;
+    frac += f;
+    if (f >= 1) done++;
+  });
+  const n = q.conditions.length;
+  const one = n === 1 ? q.conditions[0] : null;
+  const label = one ? `${fmtQuestNum(Math.min(one.current, one.target))}/${fmtQuestNum(one.target)}` : `${done}/${n}`;
+  return { done, total: n, frac: n ? frac / n : 0, label };
+}
+
+function questReqLabel(q, reqQuest) {
+  return reqQuest.era === q.era ? reqQuest.name : `${reqQuest.name} (${questEraInfo(reqQuest.era).name})`;
+}
+
+// Данные узла для questFxNode (tools/quest_fx.js).
+function questNodeView(q, rect, byId) {
+  const reqs = q.requires.map(r => byId[r]).filter(Boolean);
+  const unmet = reqs.filter(r => r.status !== "completed" && r.status !== "claimed");
+  const cross = reqs.filter(r => r.era !== q.era);
+  const progress = questProgress(q);
+  let line;
+  if (q.status === "locked") line = unmet.length ? `Откроется после: ${unmet.map(r => questReqLabel(q, r)).join(", ")}` : "Закрыт";
+  else if (q.status === "available") line = `${QUEST_FX_STATUS_LABELS.available} · ${progress.label}`;
+  else line = QUEST_FX_STATUS_LABELS[q.status];
+  let crossView = null;
+  if (cross.length) {
+    const era = questEraInfo(cross[0].era);
+    crossView = { label: `⟵ ${era.name}: ${cross[0].name}`, color: era.color, title: `Требует: ${cross.map(r => questReqLabel(q, r)).join(", ")}` };
+  }
+  return {
+    name: q.name, icon: questIcon(q), style: q.style, ribbon: q.ribbon, accent: questAccent(q), status: q.status,
+    progress, note: unmet.length ? `после: ${unmet.map(r => r.name).join(", ")}` : "Закрыт",
+    cross: crossView, tip: { title: q.name, line }, selected: q.id === selectedQuestId, tipBelow: rect.y < 56,
+  };
+}
+
 function openQuestsModal() {
-  // Позиция/зум графа переживают пересборку сами через questGraphZoom - см.
-  // комментарий в openTechTreeModal.
+  // Зум/сдвиг графа переживают пересборку сами - у каждой эры свой вид (questGraphView).
   closeQuestsModal();
   const overlay = el("div", { class: "modal-overlay" });
   overlay.addEventListener("click", (e) => { if (e.target === overlay) closeQuestsModal(); });
 
-  const modal = el("div", { class: "modal tech-modal quest-modal graph-modal" });
+  const quests = VIEW.quests;
+  const modal = el("div", { class: "modal quest-modal" });
   const head = el("div", { class: "modal-head" });
   head.appendChild(el("strong", { text: "Квесты" }));
+  if (quests.length) {
+    const done = quests.filter(q => q.status === "completed" || q.status === "claimed").length;
+    const gifts = quests.filter(q => q.status === "completed");
+    const sum = el("div", { class: "qb-sum" });
+    sum.appendChild(el("span", {}, [document.createTextNode("Выполнено "), el("b", { text: `${done} из ${quests.length}` })]));
+    if (gifts.length) {
+      // span, а не button: .modal-head button - это кнопка «Закрыть» со своей формой.
+      const gift = el("span", { class: "qb-gift", role: "button", tabindex: "0", title: "Показать квест с наградой" });
+      gift.appendChild(questFxIcon(QUEST_FX_CHEST_ICON, 16));
+      gift.appendChild(document.createTextNode(gifts.length === 1 ? "1 награда ждёт" : `Наград ждёт: ${gifts.length}`));
+      const jump = () => { questsActiveEra = gifts[0].era; selectedQuestId = gifts[0].id; openQuestsModal(); };
+      gift.addEventListener("click", jump);
+      gift.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump(); } });
+      sum.appendChild(gift);
+    }
+    head.appendChild(sum);
+  }
   head.appendChild(el("button", { text: "Закрыть", onclick: closeQuestsModal }));
   modal.appendChild(head);
 
-  const quests = VIEW.quests;
-  const eras = [...new Set(quests.map(q => q.era))].sort((a, b) => a - b);
-  const body = el("div", { class: "quest-era-body" });
-  if (!eras.length) {
-    body.appendChild(el("div", { class: "empty-note", text: "В этой игре нет квестов." }));
+  let fitView = null;
+  if (!quests.length) {
+    modal.appendChild(el("div", { class: "empty-note", text: "В этой игре нет квестов." }));
+    questGraphState = null;
   } else {
-    if (questsActiveEra === null || !eras.includes(questsActiveEra)) {
-      questsActiveEra = defaultQuestEra(eras, quests);
+    const eras = [...new Set(quests.map(q => q.era))].sort((a, b) => a - b);
+    if (questsActiveEra === null || !eras.includes(questsActiveEra)) questsActiveEra = defaultQuestEra(eras, quests);
+    const era = questsActiveEra;
+    const eraQuests = quests.filter(q => q.era === era);
+
+    // Выбранный квест: закрытый не выбирается (как раньше), без выбора - первый с наградой/в работе.
+    const current = eraQuests.find(q => q.id === selectedQuestId);
+    if (!current || current.status === "locked") {
+      const fallback = eraQuests.find(q => q.status === "completed") || eraQuests.find(q => q.status === "available")
+        || eraQuests.find(q => q.status === "claimed");
+      selectedQuestId = fallback ? fallback.id : null;
     }
-    const tabs = el("div", { class: "tabs quest-era-tabs" });
-    let activeEraBtn = null;
-    eras.forEach(era => {
-      const theme = eraTheme(era);
-      const btn = el("button", { text: theme.name, class: era === questsActiveEra ? "active" : "" });
-      btn.style.setProperty("--era-accent", theme.text);
-      btn.addEventListener("click", () => {
-        questsActiveEra = era;
-        tabs.querySelectorAll("button").forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-        body.innerHTML = "";
-        body.appendChild(renderQuestGraph(era));
-        positionTabUnderline(tabs, btn);
-      });
-      tabs.appendChild(btn);
-      if (era === questsActiveEra) activeEraBtn = btn;
-    });
-    modal.appendChild(tabs);
-    body.appendChild(renderQuestGraph(questsActiveEra));
-    // rAF - на первом открытии tabs ещё не в document (appendChild ниже по коду).
-    requestAnimationFrame(() => positionTabUnderline(tabs, activeEraBtn));
+
+    const body = el("div", { class: "qb-body" });
+    body.appendChild(renderQuestEraList(eras, quests));
+    const mid = el("div", { class: "qb-mid" });
+    mid.appendChild(renderQuestEraBanner(era, eraQuests));
+    const graph = renderQuestGraph(era, eraQuests);
+    mid.appendChild(graph.viewport);
+    body.appendChild(mid);
+    const detailCol = el("div", { class: "qb-detail-col" });
+    detailCol.appendChild(renderQuestDetail(eraQuests.find(q => q.id === selectedQuestId)));
+    body.appendChild(detailCol);
+    modal.appendChild(body);
+    questGraphState = { nodeEls: graph.nodeEls, detailBox: detailCol };
+    fitView = graph.initialFit;
   }
-  modal.appendChild(body);
 
   overlay.appendChild(modal);
   overlay.id = "questsOverlay";
   document.body.appendChild(overlay);
+  if (fitView) fitView();
 }
 
 function closeQuestsModal() {
   const overlay = document.getElementById("questsOverlay");
   if (overlay) overlay.remove();
+}
+
+function renderQuestEraList(eras, quests) {
+  const col = el("div", { class: "qb-eras-col" });
+  col.appendChild(el("div", { class: "qb-col-label", text: "Эры" }));
+  const list = el("div", { class: "qb-eras" });
+  eras.forEach(era => {
+    const info = questEraInfo(era);
+    const qs = quests.filter(q => q.era === era);
+    const item = questFxEraItem({
+      name: info.name, subtitle: info.subtitle, color: info.color, icon: info.icon,
+      done: qs.filter(q => q.status === "completed" || q.status === "claimed").length, total: qs.length,
+      gifts: qs.filter(q => q.status === "completed").length, statuses: qs.map(q => q.status),
+      active: era === questsActiveEra, dim: qs.every(q => q.status === "locked"),
+    }, "button");
+    item.addEventListener("click", () => { if (era !== questsActiveEra) { questsActiveEra = era; openQuestsModal(); } });
+    list.appendChild(item);
+  });
+  col.appendChild(list);
+  return col;
+}
+
+function renderQuestEraBanner(era, eraQuests) {
+  const info = questEraInfo(era);
+  const banner = el("div", { class: "qb-banner" });
+  banner.style.setProperty("--qfx-era", info.color);
+  const emb = el("div", { class: "qb-banner-emb" });
+  emb.appendChild(questFxIcon(info.icon, 32));
+  const titles = el("div", { class: "qb-banner-titles" }, [el("div", { class: "qb-banner-name", text: info.name })]);
+  if (info.subtitle) titles.appendChild(el("div", { class: "qb-banner-sub", text: info.subtitle }));
+  const done = eraQuests.filter(q => q.status === "completed" || q.status === "claimed").length;
+  const prog = el("div", { class: "qb-banner-prog" }, [
+    el("div", { class: "qb-banner-num" }, [el("b", { text: `${done} / ${eraQuests.length}` }), document.createTextNode(" выполнено")]),
+    questFxPips(eraQuests.map(q => q.status), "qb-banner-pips"),
+  ]);
+  banner.append(emb, titles, prog);
+  return banner;
+}
+
+// Как techTreeState/selectTechNode - живёт, пока граф не перестроен целиком,
+// клик по узлу подменяет только панель квеста, не трогая граф (иначе вид графа
+// дёргался бы при каждом выборе).
+let questGraphState = null;
+
+function selectQuestNode(id) {
+  selectedQuestId = id;
+  if (!questGraphState) { openQuestsModal(); return; }
+  Object.entries(questGraphState.nodeEls).forEach(([qid, node]) => node.classList.toggle("sel", qid === id));
+  const quest = VIEW.quests.find(q => q.id === id);
+  questGraphState.detailBox.innerHTML = "";
+  questGraphState.detailBox.appendChild(renderQuestDetail(quest));
+}
+
+// Граф ОДНОЙ эры. -> {viewport, nodeEls, initialFit}; initialFit - вписать граф в окно,
+// если у эры ещё нет сохранённого вида (null, если есть); зовётся после вставки модалки
+// в документ, когда известен размер окна.
+function renderQuestGraph(era, eraQuests) {
+  const byId = questById();
+  const layout = questFxLayout(eraQuests);
+  const viewport = el("div", { class: "qb-graph" });
+  questFxApplyBackdrop(viewport, questEraInfo(era));
+  const layer = el("div", { class: "qb-layer" });
+  layer.style.width = `${layout.width}px`;
+  layer.style.height = `${layout.height}px`;
+  const svg = svgEl("svg", { class: "qb-edges", width: layout.width, height: layout.height });
+  layer.appendChild(svg);
+  const nodeEls = {};
+  eraQuests.forEach(q => {
+    const rect = layout.rects[q.id];
+    const node = questFxNode(questNodeView(q, rect, byId));
+    node.style.left = `${rect.x}px`;
+    node.style.top = `${rect.y}px`;
+    if (q.id === questJustClaimedId) node.classList.add("burst");
+    // Закрытый квест на графе виден, но не выбирается - только подсказка при наведении.
+    if (q.status !== "locked") node.addEventListener("click", () => selectQuestNode(q.id));
+    layer.appendChild(node);
+    nodeEls[q.id] = node;
+  });
+  questFxDrawEdges(svg, eraQuests, layout.rects, id => byId[id].status, id => questAccent(byId[id]));
+  viewport.appendChild(layer);
+
+  const legend = el("div", { class: "qb-legend" });
+  const eraColor = questEraInfo(era).color;
+  [["locked", "#2b343d"], ["available", eraColor], ["completed", QUEST_FX_GOLD], ["claimed", `color-mix(in srgb, ${eraColor} 55%, #28313a)`]].forEach(([status, color]) => {
+    const swatch = el("i");
+    swatch.style.background = color;
+    legend.appendChild(el("span", {}, [swatch, document.createTextNode(QUEST_FX_STATUS_LABELS[status])]));
+  });
+  viewport.appendChild(legend);
+
+  const saved = questGraphView(era);
+  const view = saved || (questGraphViews[String(era)] = { zoom: 1, panX: 0, panY: 0 });
+  const redraw = () => { questFxBackdropView(viewport, view); saveQuestGraphViews(); };
+  const fit = () => {
+    const vw = viewport.clientWidth, vh = viewport.clientHeight;
+    const rects = Object.values(layout.rects);
+    if (!vw || !vh || !rects.length) {
+      if (!saved) delete questGraphViews[String(era)]; // окно ещё без размера - впишем в следующий раз
+      return;
+    }
+    const minX = Math.min(...rects.map(r => r.x)), minY = Math.min(...rects.map(r => r.y));
+    const maxX = Math.max(...rects.map(r => r.x + r.w)), maxY = Math.max(...rects.map(r => r.y + r.h));
+    const margin = 44;
+    const zoom = Math.max(GRAPH_ZOOM_MIN, Math.min(1, (vw - margin * 2) / (maxX - minX), (vh - margin * 2) / (maxY - minY)));
+    view.zoom = zoom;
+    view.panX = vw / 2 - zoom * (minX + maxX) / 2;
+    view.panY = (maxY - minY) * zoom <= vh - margin * 2 ? vh / 2 - zoom * (minY + maxY) / 2 : margin - zoom * minY;
+    applyGraphTransform(layer, view);
+    redraw();
+  };
+  const fitBtn = el("button", { class: "qb-fit", type: "button", title: "Показать весь граф эры", text: "⤢ Весь граф" });
+  fitBtn.addEventListener("mousedown", (e) => e.stopPropagation()); // не начинать панораму
+  fitBtn.addEventListener("click", fit);
+  viewport.appendChild(fitBtn);
+
+  enableGraphPanning(viewport, layer, view, redraw);
+  enableGraphZoom(viewport, layer, view, redraw);
+  questFxBackdropView(viewport, view);
+  return { viewport, nodeEls, initialFit: saved ? null : fit };
+}
+
+// Цвет редкости приза - тот же код, что у ячеек барабана лутбокса (.lootbox-cell.rarity-*).
+const LOOTBOX_RARITY_COLORS = {
+  "rarity-common": "#4082ff", "rarity-rare": "#29c8f0", "rarity-epic": "#aa46ff",
+  "rarity-legendary": "#ff3c3c", "rarity-mythic": "#ffd228",
+};
+
+function fmtPrizeOdds(p) {
+  if (p >= 10) return `${Math.round(p)}%`;
+  return `${(p >= 1 ? p.toFixed(1) : p.toFixed(2)).replace(".", ",")}%`;
+}
+
+function questDetailSection(title, aside) {
+  const sec = el("div", { class: "qb-sec" });
+  const h = el("div", { class: "qb-sec-h" }, [el("span", { text: title })]);
+  if (aside) h.appendChild(el("span", { text: aside }));
+  sec.appendChild(h);
+  return sec;
+}
+
+function renderQuestDetail(quest) {
+  const box = el("div", { class: "qb-detail" });
+  box.appendChild(el("div", { class: "qb-col-label", text: "Квест" }));
+  if (!quest) {
+    box.appendChild(el("div", { class: "qb-detail-scroll" }, [el("p", { class: "qb-desc", text: "В этой эре пока нет открытых квестов." })]));
+    return box;
+  }
+  const byId = questById();
+  const info = questEraInfo(quest.era);
+  const scroll = el("div", { class: "qb-detail-scroll" });
+
+  const heroIc = el("div", { class: "qb-hero-ic" });
+  heroIc.appendChild(questFxIcon(questIcon(quest), 52));
+  const hero = el("div", { class: "qb-hero" }, [heroIc, el("div", {}, [
+    el("div", { class: "qb-hero-name", text: quest.name }),
+    el("span", { class: `qb-status ${quest.status}`, text: QUEST_FX_STATUS_LABELS[quest.status] }),
+    el("div", { class: "qb-hero-era", text: info.subtitle ? `${info.name} · ${info.subtitle}` : info.name }),
+  ])]);
+  hero.style.setProperty("--qfx-acc", questAccent(quest));
+  scroll.appendChild(hero);
+  if (quest.description) scroll.appendChild(el("p", { class: "qb-desc", text: quest.description }));
+
+  const progress = questProgress(quest);
+  if (quest.conditions.length) {
+    const tasks = questDetailSection("Задачи", `${progress.done} из ${progress.total}`);
+    quest.conditions.forEach(c => {
+      const ok = c.target <= 0 || c.current >= c.target;
+      const fill = el("i");
+      fill.style.width = `${c.target > 0 ? Math.min(100, c.current / c.target * 100) : 100}%`;
+      const row = el("div", { class: `qb-task${ok ? " done" : ""}` }, [
+        el("div", { class: "qb-task-box", text: ok ? "✓" : "" }),
+        el("div", { class: "qb-task-t", text: c.text }),
+        el("div", { class: "qb-task-n", text: `${fmtQuestNum(Math.min(c.current, c.target))} / ${fmtQuestNum(c.target)}` }),
+        el("div", { class: "qb-task-bar" }, [fill]),
+      ]);
+      row.style.setProperty("--qfx-acc", questAccent(quest));
+      tasks.appendChild(row);
+    });
+    scroll.appendChild(tasks);
+  }
+
+  const reqs = quest.requires.map(r => byId[r]).filter(Boolean);
+  if (reqs.length) {
+    const sec = questDetailSection("Сначала");
+    const chips = el("div", { class: "qb-reqs" });
+    reqs.forEach(r => {
+      const doneReq = r.status === "completed" || r.status === "claimed";
+      const chip = el("button", { class: "qb-req", type: "button", title: r.status === "locked" ? "Этот квест ещё закрыт" : "Показать квест" });
+      chip.appendChild(questFxIcon(questIcon(r), 18));
+      chip.appendChild(document.createTextNode(r.name));
+      if (r.era !== quest.era) {
+        const tag = el("span", { class: "qb-req-era", text: questEraInfo(r.era).name });
+        tag.style.color = questEraInfo(r.era).color;
+        chip.appendChild(tag);
+      }
+      chip.appendChild(el("span", { class: doneReq ? "qb-req-ok" : "qb-req-no", text: doneReq ? "✓" : "…" }));
+      chip.addEventListener("click", () => {
+        if (r.status === "locked") return;
+        if (r.era !== questsActiveEra) { questsActiveEra = r.era; selectedQuestId = r.id; openQuestsModal(); }
+        else selectQuestNode(r.id);
+      });
+      chips.appendChild(chip);
+    });
+    sec.appendChild(chips);
+    scroll.appendChild(sec);
+  }
+
+  // Награда - лутбокс: выпадает РОВНО один приз (game/engine.py: _roll_loot_case_prize),
+  // шансы показаны заранее - барабан всё равно крутится до настоящего результата.
+  const reward = quest.reward_case;
+  const rewardSec = questDetailSection("Награда", "один приз из барабана");
+  const caseIc = el("div", { class: "qb-case-ic" });
+  caseIc.appendChild(questFxIcon(QUEST_FX_CHEST_ICON, 34));
+  const caseText = el("div", {}, [el("div", { class: "qb-case-name", text: reward.name })]);
+  if (reward.description) caseText.appendChild(el("div", { class: "qb-case-desc", text: reward.description }));
+  rewardSec.appendChild(el("div", { class: "qb-case" }, [caseIc, caseText]));
+  const total = totalPrizeWeight(reward.prizes);
+  const prizes = el("div", { class: "qb-prizes" });
+  [...reward.prizes].sort((a, b) => (b.weight || 1) - (a.weight || 1)).forEach(p => {
+    const pct = total ? (p.weight || 1) / total * 100 : 0;
+    const iconDef = resourceIcon(p.resource);
+    const fill = el("i");
+    fill.style.width = `${Math.max(3, pct)}%`;
+    const row = el("div", { class: "qb-prize" }, [
+      el("div", { class: "qb-prize-ic" }, iconDef ? [pixelIcon(iconDef.grid, iconDef.palette, 22)] : []),
+      el("div", { class: "qb-prize-n" }, [document.createTextNode(`${VIEW.resource_names[p.resource] || p.resource} `), el("b", { text: `×${p.amount}` })]),
+      el("div", { class: "qb-prize-bar" }, [fill]),
+      el("div", { class: "qb-prize-p", text: fmtPrizeOdds(pct) }),
+    ]);
+    row.style.setProperty("--qb-r", LOOTBOX_RARITY_COLORS[lootboxRarityClass(pct)]);
+    prizes.appendChild(row);
+  });
+  rewardSec.appendChild(prizes);
+  scroll.appendChild(rewardSec);
+  box.appendChild(scroll);
+
+  const foot = el("div", { class: "qb-foot" });
+  if (quest.status === "completed") {
+    const claimBtn = el("button", { class: "qb-claim", type: "button" });
+    claimBtn.appendChild(questFxIcon(QUEST_FX_CHEST_ICON, 20));
+    claimBtn.appendChild(document.createTextNode("Открыть лутбокс"));
+    claimBtn.addEventListener("click", () => claimQuestReward(quest, claimBtn));
+    foot.appendChild(claimBtn);
+  } else if (quest.status === "claimed") {
+    foot.appendChild(el("div", { class: "qb-foot-done", text: "✓ Награда получена" }));
+  } else {
+    foot.appendChild(el("div", { class: "qb-foot-wait", text: `Выполни задачи: ${progress.done} из ${progress.total}` }));
+  }
+  box.appendChild(foot);
+  return box;
 }
 
 // Суммарный вес всех призов кейса - знаменатель для отображаемых шансов
@@ -15591,230 +16107,6 @@ function lootboxRarityClass(oddsPercent) {
   return LOOTBOX_RARITY_THRESHOLDS.find(t => oddsPercent >= t.min).cls;
 }
 
-// Столбец графа ОДНОЙ эры - локальная глубина зависимостей среди квестов ЭТОЙ
-// эры (requires на квест из другой эры сюда не попадает - его тут физически нет,
-// см. openQuestsModal). Та же идея, что computeTechColumns, но без внешнего
-// уровня "по тирам" - вкладка уже одна эра, offset всегда с нуля.
-function computeQuestEraLevels(quests) {
-  const byId = {};
-  quests.forEach(q => { byId[q.id] = q; });
-  const localLevel = {};
-  function localLevelOf(id, stack) {
-    if (localLevel[id] !== undefined) return localLevel[id];
-    if (stack.has(id)) return 0; // цикл - не должно происходить в валидном контенте
-    stack.add(id);
-    const q = byId[id];
-    const sameEraReqs = (q.requires || []).filter(r => byId[r]);
-    localLevel[id] = sameEraReqs.length ? 1 + Math.max(...sameEraReqs.map(r => localLevelOf(r, stack))) : 0;
-    return localLevel[id];
-  }
-  quests.forEach(q => localLevelOf(q.id, new Set()));
-  return localLevel;
-}
-
-const QUEST_STATUS_ICON = { locked: "🔒", available: "⏳", completed: "🎁", claimed: "✓" };
-// Дефолтный цвет текста подсказки, когда у квеста нет своего tooltip_color -
-// держать в паре с QUEST_DEFAULT_TOOLTIP_COLOR в content_editor.html и с
-// дефолтом .quest-node-tip { color: ... } в CSS выше.
-const QUEST_DEFAULT_TOOLTIP_COLOR = "#dbe7ec";
-
-// q.icon (content.json: quests.*.icon) - необязательный per-квестовый оверрайд
-// центральной пиксель-иконки узла ({grid,palette}, рисуется тем же редактором
-// иконок, что у ресурсов/построек/мобов - см. questIcon), действует для ЛЮБОГО
-// статуса, включая locked (приглушается CSS-фильтром .quest-node.locked
-// .quest-node-icon), в отличие от QUEST_STATUS_ICON (жетон в углу - это
-// всегда значок СТАТУСА, а не квеста). q.bg/q.border - оверрайд цвета узла
-// целиком (иначе узел красится по статусу, см. CSS .quest-node.<status>) -
-// инлайн-стиль перебивает правило из таблицы стилей. q.tooltip_color - та же
-// идея для цвета текста подсказки (ПЕР-КВЕСТОВО, не общая настройка - разным
-// квестам может требоваться разный контраст на разном фоне узла). Имя квеста
-// здесь НЕ печатается - только во всплывающей подсказке (.quest-node-tip)
-// при наведении, см. CSS-комментарий выше.
-function buildQuestNode(q) {
-  const node = el("div", { class: `quest-node ${q.status}${q.id === selectedQuestId ? " selected" : ""}` });
-  const iconDef = questIcon(q);
-  const iconWrap = el("div", { class: "quest-node-icon" });
-  iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 34));
-  node.appendChild(iconWrap);
-  node.appendChild(el("div", { class: "quest-node-badge", text: QUEST_STATUS_ICON[q.status] || "" }));
-  const tip = el("div", { class: "quest-node-tip", text: q.name });
-  tip.style.color = q.tooltip_color || QUEST_DEFAULT_TOOLTIP_COLOR;
-  node.appendChild(tip);
-  if (q.bg) node.style.background = q.bg;
-  if (q.border) node.style.borderColor = q.border;
-  return node;
-}
-
-// Как techTreeState/selectTechNode - живёт, пока граф не перестроен целиком,
-// клик по узлу подменяет только панель деталей напрямую, не трогая .tech-graph
-// (иначе прокрутка/панорамирование графа сбрасывались бы при каждом выборе).
-let questGraphState = null;
-
-function selectQuestNode(id) {
-  selectedQuestId = id;
-  if (!questGraphState) { openQuestsModal(); return; }
-  Object.entries(questGraphState.nodeEls).forEach(([qid, node]) => {
-    node.classList.toggle("selected", qid === id);
-  });
-  const quest = VIEW.quests.find(q => q.id === id);
-  questGraphState.detailBox.innerHTML = "";
-  questGraphState.detailBox.appendChild(renderQuestDetail(quest));
-}
-
-// Граф квестов ОДНОЙ эры (era) - вызывается заново при переключении вкладки
-// (см. openQuestsModal). Квесты других эр тут не участвуют вообще, поэтому
-// requires на них не может нарисовать ребро - лок остаётся виден только по
-// статусу узла и текстом в панели деталей (renderQuestDetail).
-function renderQuestGraph(era) {
-  const wrap = el("div", { class: "tech-tree-wrap" });
-  const quests = VIEW.quests.filter(q => q.era === era);
-  questGraphState = null;
-  if (!quests.length) {
-    wrap.appendChild(el("div", { class: "empty-note", text: "В этой эре пока нет квестов." }));
-    return wrap;
-  }
-  if (!quests.some(q => q.id === selectedQuestId)) {
-    // Locked-квест сюда попасть не должен (см. click-листенер ниже - на locked
-    // он не вешается вовсе), поэтому и фолбэк выбора его игнорирует - если в
-    // эре вообще нет ни одного разблокированного квеста (вырожденный случай),
-    // панель деталей просто остаётся пустой (renderQuestDetail(undefined)).
-    const fallback = quests.find(q => q.status === "completed") || quests.find(q => q.status === "claimed")
-      || quests.find(q => q.status === "available") || quests.find(q => q.status !== "locked");
-    selectedQuestId = fallback ? fallback.id : null;
-  }
-
-  const localLevel = computeQuestEraLevels(quests);
-  const maxCol = Math.max(0, ...quests.map(q => localLevel[q.id]));
-
-  const graph = el("div", { class: "tech-graph quest-graph" });
-  const svg = svgEl("svg", { class: "tech-edges" });
-  const cols = el("div", { class: "tech-cols" });
-  // Раньше тут была одна большая цветная "плашка" эры (.tech-col-band,
-  // background/border = theme.bg/border) под ВСЕМИ колонками сразу - с тех
-  // пор, как узлы стали компактными квадратами 64x64 (см. CSS-комментарий у
-  // .quest-node), а .tech-col по умолчанию 160px шириной (общий класс с
-  // деревом технологий, там под текстовые карточки), плашка растягивалась
-  // далеко за пределы самих квадратов и выглядела как случайное цветное
-  // пятно - убрана совсем (принадлежность к эре и так видна по вкладке
-  // сверху и по цвету рамки/фона узла из его статуса).
-  const row = el("div", { class: "tech-col-row" });
-  const nodeEls = {};
-  for (let col = 0; col <= maxCol; col++) {
-    const colEl = el("div", { class: "tech-col" });
-    quests.filter(q => localLevel[q.id] === col).forEach(q => {
-      const node = buildQuestNode(q);
-      // Locked-квест рисуется на графе, но некликабелен (см. CSS-комментарий у
-      // .quest-node) - открыть детали можно только для уже доступного квеста.
-      if (q.status !== "locked") node.addEventListener("click", () => selectQuestNode(q.id));
-      colEl.appendChild(node);
-      nodeEls[q.id] = node;
-    });
-    row.appendChild(colEl);
-  }
-  cols.appendChild(row);
-  graph.appendChild(svg);
-  graph.appendChild(cols);
-  const redrawQuestEdges = () => drawQuestEdges(graph, svg, quests, nodeEls);
-  enableGraphPanning(graph, cols, questGraphZoom, redrawQuestEdges);
-  enableGraphZoom(graph, cols, questGraphZoom, redrawQuestEdges);
-  wrap.appendChild(graph);
-  const detailBox = el("div");
-  detailBox.appendChild(renderQuestDetail(quests.find(q => q.id === selectedQuestId)));
-  wrap.appendChild(detailBox);
-  questGraphState = { nodeEls, detailBox };
-
-  requestAnimationFrame(redrawQuestEdges);
-  return wrap;
-}
-
-// Буквальная копия drawTechEdges - "done" (сплошное ребро) тут означает "квест
-// уже ДОСТУПЕН" (status !== locked), а не только "выполнен" - иначе ребро от
-// выполненного prerequisite к следующему квесту не подсвечивалось бы, пока сам
-// следующий квест ещё не пройден. reqId, указывающий на квест другой эры, тут
-// просто не найдётся в nodeEls (эта эра его не рендерила) - ребро не рисуется,
-// это и есть "зависимость от другой эры не видна явной линией".
-function drawQuestEdges(graph, svg, quests, nodeEls) {
-  const graphRect = graph.getBoundingClientRect();
-  svg.setAttribute("width", graph.scrollWidth);
-  svg.setAttribute("height", graph.scrollHeight);
-  svg.innerHTML = "";
-  let edgeIndex = 0;
-  quests.forEach(q => {
-    const toEl = nodeEls[q.id];
-    if (!toEl) return;
-    const toRect = toEl.getBoundingClientRect();
-    (q.requires || []).forEach(reqId => {
-      const fromEl = nodeEls[reqId];
-      if (!fromEl) return;
-      const fromRect = fromEl.getBoundingClientRect();
-      // Без + graph.scrollLeft/scrollTop - см. тот же комментарий в drawTechEdges.
-      const x1 = fromRect.right - graphRect.left;
-      const y1 = fromRect.top - graphRect.top + fromRect.height / 2;
-      const x2 = toRect.left - graphRect.left;
-      const y2 = toRect.top - graphRect.top + toRect.height / 2;
-      const midX = (x1 + x2) / 2;
-      const done = q.status !== "locked";
-      svg.appendChild(svgEl("path", {
-        d: `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`,
-        class: `tech-edge${done ? " edge-done" : ""}`,
-        pathLength: "1",
-        style: `animation-delay:${(edgeIndex++ * 0.03).toFixed(2)}s`,
-      }));
-    });
-  });
-}
-
-function renderQuestDetail(quest) {
-  const box = el("div", { class: "tech-detail" });
-  if (!quest) return box;
-
-  // "Нужно"/"Награда" - визуально ЯРЧЕ соседних строк (.quest-detail-goal/
-  // .quest-detail-reward, см. CSS) - прямая жалоба игрока "текст снизу
-  // незаметен, непонятно что делать и какая награда". Разбивка призов по
-  // шансам теперь тоже постоянный текст в строке награды (барабан всё равно
-  // крутится ДО настоящего результата в openLootBoxModal, см.
-  // claimQuestReward - показ шансов заранее не портит анимацию) - в подсказке
-  // на имени остаётся только пояснение про требования из другой эры.
-  const totalWeight = totalPrizeWeight(quest.reward_case.prizes);
-  const prizeLines = quest.reward_case.prizes.map(p => {
-    const odds = totalWeight ? Math.round((p.weight || 1) / totalWeight * 100) : 0;
-    return `${VIEW.resource_names[p.resource]} ×${p.amount} (${odds}%)`;
-  });
-  let title = "";
-  if (quest.status === "locked" && quest.requires.length) {
-    // Требование из ДРУГОЙ эры не нарисовано линией на этом графе (см.
-    // renderQuestGraph) - поэтому явно подписываем эру рядом с именем, иначе
-    // игрок не поймёт, почему у явно "готового" на вид узла нет входящего ребра.
-    const reqNames = quest.requires.map(rid => {
-      const rq = VIEW.quests.find(q => q.id === rid);
-      if (!rq) return rid;
-      return rq.era === quest.era ? rq.name : `${rq.name} (${eraTheme(rq.era).name})`;
-    });
-    title = `Нужно сначала выполнить: ${reqNames.join(", ")}`;
-  }
-
-  const info = el("div", { class: "tech-detail-info" });
-  const statusSuffix = {
-    claimed: " — награда получена", completed: " — готов к выполнению",
-    available: " — в процессе", locked: " — заблокирован",
-  };
-  info.appendChild(el("div", { class: "tech-detail-name", title, text: `${quest.name}${statusSuffix[quest.status] || ""}` }));
-  if (quest.description) info.appendChild(el("div", { class: "tech-detail-cost", text: quest.description }));
-  info.appendChild(el("div", { class: "tech-detail-cost", text: eraTheme(quest.era).name }));
-  if (quest.conditions.length && quest.status !== "claimed") {
-    info.appendChild(el("div", { class: "quest-detail-goal", text: `Нужно: ${quest.conditions.join(" · ")}` }));
-  }
-  info.appendChild(el("div", { class: "quest-detail-reward", text: `Награда: «${quest.reward_case.name}» — ${prizeLines.join(", ")}` }));
-  box.appendChild(info);
-
-  if (quest.status === "completed") {
-    const claimBtn = el("button", { text: "Открыть лутбокс" });
-    claimBtn.addEventListener("click", () => claimQuestReward(quest, claimBtn));
-    box.appendChild(claimBtn);
-  }
-  return box;
-}
-
 // Как cancelJob/insert_soul - управление имуществом, НЕ тратит ход, поэтому не
 // идёт через doAction() (тот предполагает трату хода/автокрафт-предпросмотр).
 // Сервер уже решил, какой приз выпал (RNG на сервере, не на клиенте) и начислил
@@ -15835,7 +16127,9 @@ async function claimQuestReward(quest, btn) {
     // она пересоберётся тут же (см. renderAll: openQuestsModal), и лутбокс должен
     // лечь НА неё сверху, а не оказаться погребён под свежепересобранной модалкой
     // (обе - .modal-overlay с одним z-index, порядок в DOM решает, что рисуется поверх).
+    questJustClaimedId = payload.ok ? quest.id : null;
     renderAll();
+    questJustClaimedId = null;
     if (payload.ok && payload.prize) {
       openLootBoxModal(quest.reward_case, payload.prize);
     } else {

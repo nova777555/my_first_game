@@ -358,6 +358,29 @@ class QuestValidationTests(unittest.TestCase):
         errors = cv.validate(d)
         self.assertTrue(any("no_such_species" in e for e in errors))
 
+    def test_rejects_mob_killed_referencing_unknown_mob(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [{"type": "mob_killed", "mob": "no_such_mob"}]
+        errors = cv.validate(d)
+        self.assertTrue(any("no_such_mob" in e for e in errors))
+
+    def test_accepts_mob_killed_with_known_mob_or_boss(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [
+            {"type": "mob_killed", "mob": "test_mob"},
+            {"type": "mob_killed", "mob": "test_boss"},
+        ]
+        self.assertEqual(cv.validate(d), [])
+
+    def test_rejects_mob_killed_without_mob(self):
+        d = copy.deepcopy(self.data)
+        any_q = next(iter(d["quests"]))
+        d["quests"][any_q]["conditions"] = [{"type": "mob_killed"}]
+        errors = cv.validate(d)
+        self.assertTrue(any("'mob'" in e for e in errors))
+
     def test_rejects_building_upgrade_purchased_referencing_unknown_upgrade(self):
         # Постройка известна, но у НЕЁ конкретно такого улучшения нет (ошибка
         # отдельная от generic "неизвестная постройка" - см. content_validation.py).
@@ -2277,7 +2300,153 @@ class MechanismAppearanceValidationTests(unittest.TestCase):
         self.assertEqual(js_keys("MECH_FX_MOTIONS"), set(cv.MECHANISM_MOTIONS))
         self.assertEqual(js_keys("MECH_FX_PARTICLES"), set(cv.MECHANISM_PARTICLES))
         self.assertEqual(js_keys("MECH_FX_FILLS"), set(cv.MECHANISM_PROGRESS_FILLS))
+        self.assertEqual(js_keys("MECH_FX_SLOTS"), set(cv.MECHANISM_SLOT_SHAPES))
+        self.assertEqual(js_keys("MECH_FX_GATHERS"), set(cv.MECHANISM_GATHERS))
 
+        def js_number(const):
+            return int(re.search(rf"const {const} = (\d+);", js).group(1))
+        self.assertEqual(js_number("MECH_FX_LAYOUT_W"), cv.MECHANISM_LAYOUT_W)
+        self.assertEqual(js_number("MECH_FX_LAYOUT_H"), cv.MECHANISM_LAYOUT_H)
+        low, high = re.search(r"const MECH_FX_SLOT_SIZE_RANGE = \[(\d+), (\d+)\];", js).groups()
+        self.assertEqual((int(low), int(high)), cv.MECHANISM_SLOT_SIZE_RANGE)
+
+
+class MechanismLayoutValidationTests(unittest.TestCase):
+    """locations.*.appearance.layout (свободная расстановка слотов), appearance.gather
+    и crafting.fixed (узор привязан к ячейкам). grid_loc в фикстуре - сетка 2x2."""
+
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    @staticmethod
+    def _layout(**over):
+        layout = {
+            "cells": [{"x": 60, "y": 60}, {"x": 140, "y": 60, "shape": "round"},
+                      {"x": 60, "y": 140, "shape": "tank", "size": 70}, {"x": 140, "y": 140}],
+            "output": {"x": 300, "y": 100, "shape": "round"},
+            "progress": {"x": 220, "y": 100, "angle": 90},
+            "links": True,
+        }
+        layout.update(over)
+        return layout
+
+    def _errors(self, appearance=None, crafting=None):
+        d = copy.deepcopy(self.data)
+        if appearance is not None:
+            d["locations"]["grid_loc"]["appearance"] = appearance
+        if crafting is not None:
+            d["locations"]["grid_loc"]["crafting"].update(crafting)
+        return [e for e in cv.validate(d) if "grid_loc" in e]
+
+    def test_full_layout_and_gather_are_valid(self):
+        self.assertEqual(self._errors({"layout": self._layout(), "gather": "vortex"}), [])
+
+    def test_ring_progress_is_valid(self):
+        self.assertEqual(self._errors({"layout": self._layout(progress="ring")}), [])
+
+    def test_cell_count_must_match_the_grid(self):
+        layout = self._layout()
+        layout["cells"] = layout["cells"][:3]
+        errors = self._errors({"layout": layout})
+        self.assertTrue(any("layout.cells" in e and "2×2" in e for e in errors), errors)
+
+    def test_rejects_bad_slots(self):
+        layout = self._layout(output={"x": 900, "y": -5, "shape": "hexagon", "size": 12, "color": "#fff"})
+        errors = self._errors({"layout": layout})
+        self.assertTrue(any("output.x" in e for e in errors), errors)
+        self.assertTrue(any("output.y" in e for e in errors), errors)
+        self.assertTrue(any("output.shape" in e and "hexagon" in e for e in errors), errors)
+        self.assertTrue(any("output.size" in e for e in errors), errors)
+        self.assertTrue(any("color" in e for e in errors), errors)
+
+    def test_rejects_bad_progress_links_and_gather(self):
+        errors = self._errors({"layout": self._layout(progress={"x": 10, "y": 10, "angle": 400}, links="yes"),
+                               "gather": "teleport"})
+        self.assertTrue(any("progress.angle" in e for e in errors), errors)
+        self.assertTrue(any("links" in e for e in errors), errors)
+        self.assertTrue(any("gather" in e and "teleport" in e for e in errors), errors)
+        self.assertTrue(any("progress" in e for e in self._errors({"layout": self._layout(progress="spiral")})))
+
+    def test_fixed_flag_is_bool_and_not_for_stacks(self):
+        self.assertEqual(self._errors(crafting={"fixed": True}), [])
+        self.assertTrue(any("fixed" in e for e in self._errors(crafting={"fixed": "yes"})))
+        self.assertTrue(any("fixed" in e for e in self._errors(crafting={"fixed": True, "stacks": True})))
+
+    def test_fixed_grid_tells_apart_same_shape_in_other_cells(self):
+        # Узор "AA" в нижнем ряду: со сдвигом это та же форма, что у grid_line
+        # (верхний ряд) - дубликат; у привязанного к ячейкам механизма - другой рецепт.
+        d = copy.deepcopy(self.data)
+        d["manual_actions"]["grid_line_low"] = {
+            "name": "Линия снизу", "requires_tech": None, "location": "grid_loc",
+            "cost": {"raw_a": 2}, "gain": {"grid_output": 1},
+            "pattern": {"rows": ["..", "AA"], "key": {"A": "raw_a"}},
+        }
+        self.assertTrue(any("grid_line_low" in e and "форма" in e for e in cv.validate(d)))
+        d["locations"]["grid_loc"]["crafting"]["fixed"] = True
+        self.assertFalse(any("grid_line_low" in e for e in cv.validate(d)))
+
+    def test_layout_without_crafting_checks_only_shape(self):
+        d = copy.deepcopy(self.data)
+        loc = next(l for l in d["locations"].values() if not l.get("crafting"))
+        loc["appearance"] = {"layout": self._layout()}
+        self.assertEqual([e for e in cv.validate(d) if "layout" in e], [])
+
+
+
+class QuestbookLookValidationTests(unittest.TestCase):
+    """Оформление квестбука (tools/quest_fx.js): eras.*.subtitle/icon/backdrop и
+    quests.*.accent/style/ribbon/pos. Всё необязательно - проверяются только заданные значения."""
+
+    ICON = {"grid": ["AB", "BA"], "palette": {"A": "#111111", "B": "#eeeeee"}}
+
+    def setUp(self):
+        self.data = fixtures.as_content_dict()
+
+    def _errors(self, mutate):
+        d = copy.deepcopy(self.data)
+        mutate(d)
+        return [e for e in cv.validate(d) if "Эра '1'" in e or "Квест 'test_quest'" in e]
+
+    def test_full_look_is_valid(self):
+        def mutate(d):
+            d["eras"] = {"1": {
+                "name": "Эра 1", "color": "#f0a030", "subtitle": "Камень и бронза", "icon": self.ICON,
+                "backdrop": {"pattern": "tile", "tile": self.ICON, "opacity": 0.6},
+            }}
+            d["quests"]["test_quest"].update({"accent": "#e0524a", "style": "milestone", "ribbon": "Босс", "pos": {"x": 40, "y": 80.5}})
+        self.assertEqual(self._errors(mutate), [])
+
+    def test_rejects_bad_backdrop(self):
+        def mutate(d):
+            d["eras"] = {"1": {"name": "Эра 1", "color": "#f0a030", "backdrop": {"pattern": "stripes", "opacity": 2, "speed": 1}}}
+        errors = self._errors(mutate)
+        self.assertTrue(any("backdrop.pattern" in e and "stripes" in e for e in errors))
+        self.assertTrue(any("backdrop.opacity" in e for e in errors))
+        self.assertTrue(any("speed" in e for e in errors))
+
+    def test_rejects_bad_quest_look(self):
+        def mutate(d):
+            d["quests"]["test_quest"].update({"accent": "red", "style": "huge", "ribbon": "Очень длинная надпись на ленте", "pos": {"x": "1", "y": 2}})
+        errors = self._errors(mutate)
+        for field in ("accent", "style", "ribbon", "pos"):
+            self.assertTrue(any(field in e for e in errors), field)
+
+    def test_legacy_node_colors_are_reported(self):
+        # bg/border/tooltip_color заменены одним accent - редактор переносит их сам при загрузке.
+        errors = self._errors(lambda d: d["quests"]["test_quest"].update({"border": "#ffffff", "tooltip_color": "#000000"}))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("accent", errors[0])
+
+    def test_variant_ids_match_quest_fx_js(self):
+        # id вариантов продублированы руками (JS не импортирует Python) - держать в паре.
+        import re
+        js = (ROOT / "tools" / "quest_fx.js").read_text(encoding="utf-8")
+
+        def js_keys(const):
+            block = re.search(rf"const {const} = \{{(.*?)\n\}};", js, re.S).group(1)
+            return set(re.findall(r"^  ([a-z_]+):", block, re.M))
+        self.assertEqual(js_keys("QUEST_FX_STYLES"), set(cv.QUEST_STYLES))
+        self.assertEqual(js_keys("QUEST_FX_BACKDROPS"), set(cv.QUEST_BACKDROP_PATTERNS))
 
 
 class HuntFxValidationTests(unittest.TestCase):

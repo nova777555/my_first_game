@@ -183,6 +183,16 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 вариант движения/частиц = запись там + id в `content_validation.py: MECHANISM_*`
 (паритет проверяет тест). Удар — на `.cg-arrow` при крафте и на КАЖДОМ ходу долгого
 крафта («1 ход = 1 удар»), фоновый цикл — на внутреннем `.mfx-art`, пока идёт job.
+`appearance.layout` (прямое пожелание, 2026-09-30) — свободная расстановка: центры
+`cells[i]` (ячейка i узора, построчно)/`output`/`progress` (`{x,y,angle}` или `"ring"` —
+кольцо вокруг результата) на холсте 560×400, модельки слотов `shape` (квадрат/чаша/бак
+с жидкостью цвета предмета) и `size`, `links` — каналы к механизму. ТОЛЬКО вид: движок
+видит ту же сетку width×height; сцена в игре — занятая область (`mechFxLayoutGeometry`),
+справочник и окно узора в редакторе рисуют ту же расстановку. `appearance.gather` — как
+ингредиенты летят в механизм (`mechFxGather`: рывок/воронка/дуга). Узор по умолчанию
+сдвигается по сетке; `crafting.fixed` привязывает его к ячейкам (без обрезки краёв:
+`engine._pattern_grid`/`location_fixed`, копии в `content_validation.pattern_grid` и
+`web_ui.html: craftGridMatchRecipe`) — нужно, когда у ячейки свой смысл (бак).
 
 **Сетка преобразователя.** Если у `CONVERTER_LOCATION_ID` есть `crafting`
 (в реальном контенте 2×1), в той же модалке собираются `energy_recipes` —
@@ -282,7 +292,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Синтезаторы душ (вечный слот-предмет → пассивная продукция) | `engine.py`: `soul_kind`, `soul_collector_accepts_kind`, `soul_collector_capacity`, `insert_soul`, `remove_soul`, `_process_soul_collectors`; `state.soul_slots`; контент `resources.*.soul_kind` + `buildings.*.soul_collector` + `soul_recipes`; `web_ui.html: openSoulSynthesizerModal` |
 | Ритуальный круг: ритуалы, сборщики ритуалов | `engine.py`: `ritual_pedestal_capacity`, `is_ritual_recipe_available`, `start_ritual`/`cancel_ritual`, `_process_ritual_jobs`, `building_assembler_capacity`, `ritual_recipe_for_resource`, `_ritual_autocraft_failure`, `_advance_ritual_step`; `state.ritual_jobs`; контент `ritual_recipes` + `buildings.*.ritual_circle` + `autocraft_assembler.building`; `web_ui.py: ritual_altars_view`; `web_ui.html: openRitualCircleModal`, `sourceOrderKey` |
 | Автоматизатор (правила "если ресурс — тогда действие/рецепт энергокрафта/ритуал", проверяются каждый ход) | `engine.py`: `automation_slots_capacity`, `is_automation_eligible_action`/`is_automation_eligible_energy_recipe`, `automation_eligible_targets`, `add_automation_rule`/`update_automation_rule`/`remove_automation_rule` (принимают `kind`+`target_id`), `process_automation_rules`; `state.automation_rules`; контент `buildings.*.automation_hub` + апгрейд типа `automation_slots`; `web_ui.py: automation_view`; `web_ui.html: openAutomationModal`/`openAutomationRuleEditorModal` |
-| Квестбук (вкладка-граф на каждую эру, requires между эрами гейтит без явного ребра), оформление эр/квестов и лутбоксы (кейс = один приз из барабана) | `engine.py`: `is_quest_available`, `_condition_met`, `check_quests`, `_roll_loot_case_prize`, `claim_quest_reward`; `state.completed_quests`/`claimed_quests`; контент `quests` (`era`/`requires`/`icon`/`bg`/`border`) + `eras` (`game/content.py: ERAS`) + `loot_cases`; `web_ui.html: openQuestsModal`/`renderQuestGraph`/`eraTheme`/`buildQuestNode`/`openLootBoxModal`; `content_editor.html: renderQuestGraphView`/`renderEraManager` |
+| Квестбук (граф на каждую эру, requires между эрами гейтит без явного ребра), оформление эр/квестов (общий `tools/quest_fx.js`), сохранённый вид графа эры и лутбоксы (кейс = один приз из барабана) | `engine.py`: `is_quest_available`, `_condition_met`, `check_quests`, `_roll_loot_case_prize`, `claim_quest_reward`; `state.completed_quests`/`claimed_quests`; контент `quests` (`era`/`requires`/`icon`/`accent`/`style`/`ribbon`/`pos`) + `eras` (`subtitle`/`icon`/`backdrop`, `game/content.py: ERAS`) + `loot_cases`; `tools/quest_fx.js`: `questFxLayout`/`questFxNode`/`questFxDrawEdges`/`questFxEraItem`/`questFxApplyBackdrop`; `web_ui.py: _condition_progress`; `web_ui.html: openQuestsModal`/`renderQuestGraph`/`renderQuestDetail`/`questGraphView`/`openLootBoxModal`; `content_editor.html: renderQuestGraphView`/`buildQuestGraph`/`renderQuestInspector`/`renderEraLookCard`/`migrateQuestAppearance`; тесты `test_content_validation.py: QuestbookLookValidationTests` |
 | Repeatable-апгрейды (покупка N раз, цена растёт геометрически) | `engine.py`: `_purchased_upgrade_value`, `repeatable_upgrade_cost`, `building_upgrade_purchase_count`, `farm_instance_upgrade_purchase_count`; контент `upgrades[].repeatable`/`cost_growth`/`max_purchases` |
 | Ползунок масштаба ручного действия | `engine.py`: `mechanism_scale_cap`, `effective_manual_action_stats(chosen_scale=...)`; `POST /api/action {scale}` |
 | Меню "Механизмы": вкл/выкл N из M копий пассивной постройки (produces И consumes непустые) | `state.building_disabled`; `engine.py`: `is_disableable_building`, `building_active_count`, `set_building_active_count`; `POST /api/set_building_active_count`; `web_ui.html: renderMechanismToggle` |
@@ -307,7 +317,7 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 | Отмена фоновой задачи / заказа | `engine.py`: `cancel_order`/`cancel_energy_job`/`cancel_manual_job`; `web_ui.html: jobCancelButton` |
 | Вложенные локации | контент `locations.*.parent_location`; `engine.py: location_children`; `web_ui.html: locationPath` |
 | Крафт на сетке (верстак, печь, любой механизм с `crafting`): узор, матчинг, перенос, пачка ×N, закреплённые, справочник источников | `engine.py`: `location_crafting`, `action_pattern`, `match_grid`, `_normalize_grid`, `toggle_pinned_recipe`; `state.pinned_recipes`; контент `locations.*.crafting` (+`batch`) + `manual_actions.*.pattern`/`pattern_mirror`; валидация - `content_validation.py`: `pattern_shape`, `mirror_shape`, `check_action_pattern`; редактор - `content_editor.html`: `craftingGridRow`, `actionPatternRow`, `openPatternModal`; HTTP - `tools/web_ui.py`: `crafting_view`, `craft_grid_view`, `resource_sources`, `sources_summary_view`, `/api/craft_grid`, `/api/pin_recipe`, `/api/sources`, `/api/sources_summary`; UI - `web_ui.html`: `openCraftGridModal`, `craftGridMatchRecipe`, `craftGridBuildPinnedCol`, `craftGridShowRecipe`, `craftGridSourceDetailView`, `craftGridLayButton`/`craftGridLayRecipe`, `craftGridApplyHoverToDom`, `craftGridBuildSourcesPanel` |
-| Оформление модалки механизма: фон-текстура, пиксельный прогресс, движения, частицы, звук | контент `locations.*.appearance`; `tools/mechanism_fx.js` (`MECH_FX_MOTIONS`/`MECH_FX_PARTICLES`/`MECH_FX_FILLS`, `mechFxProgressArt`, `mechFxSetFill`, `mechFxHit`, `mechFxEmit`, `mechFxTextureStyle`); валидация `content_validation.py: MECHANISM_*`; `web_ui.py`: `mechanism_appearance_view`, `mechanism_sound_url`; `web_ui.html`: `openCraftGridModal`, `craftGridLook`, `craftGridArrowHit`, `craftGridOutputBurst`; `content_editor.html`: `mechanismAppearanceRow`, `openMechanismAppearanceModal`, заготовки `MECHANISM_TEXTURE_SEEDS`/`MECHANISM_PROGRESS_SEEDS` |
+| Оформление модалки механизма: фон-текстура, пиксельный прогресс, движения, частицы, звук, свободная расстановка слотов и модельки, сбор ингредиентов | контент `locations.*.appearance` (+`layout`/`gather`) и `crafting.fixed`; `tools/mechanism_fx.js` (`MECH_FX_MOTIONS`/`MECH_FX_PARTICLES`/`MECH_FX_FILLS`/`MECH_FX_SLOTS`/`MECH_FX_GATHERS`, `mechFxProgressArt`, `mechFxSetFill`, `mechFxHit`, `mechFxEmit`, `mechFxTextureStyle`, `mechFxLayoutGeometry`, `mechFxDecorateSlot`, `mechFxLinksSvg`, `mechFxRingProgress`, `mechFxGather`); валидация `content_validation.py: MECHANISM_*`, `check_mechanism_layout`; `web_ui.py`: `mechanism_appearance_view`, `mechanism_layout`, `mechanism_sound_url`; `web_ui.html`: `openCraftGridModal`, `craftGridSlotShape`, `craftGridLook`, `craftGridFlyIngredients`, `craftGridArrowHit`, `craftGridOutputBurst`, `sourcesLayoutVisual`; `content_editor.html`: `mechanismAppearanceRow`, `openMechanismAppearanceModal` (холст расстановки), `mechanismLayoutGridPreset`/`mechanismLayoutCirclePreset`, `syncMechanismLayoutCells`, заготовки `MECHANISM_TEXTURE_SEEDS`/`MECHANISM_PROGRESS_SEEDS` |
 | Потолок ресурса (1e9) | `engine.py`: `MAX_RESOURCE_AMOUNT`, `_add_resource` (ЕДИНСТВЕННАЯ точка начисления) |
 | Вместимость склада | контент `resources.*.storage`; `engine.py`: `storage_capacity`, `state.storage_tier`, `upgrade_storage`; `web_ui.html: openStorage` |
 | Подтверждение автокрафта (модалка "спишется/докрафтится/не хватает"; `reason` - заказ не оформится, «Запустить» выключена; строка причины - только если нет красных строк `missing`; докрафтить нечего - модалки нет вовсе) | `engine.py`: `autocraft_preview` (→ `_preview_node` по дереву `_order_route`), `autocraft_failure` (→ `_order_failure`, общая с `_place_order`/`check_order`), `resolve_action_cost`; `web_ui.py: autocraft_preview_view`, `_preview_crafts_anything`; `web_ui.html: openAutocraftConfirmModal`, `autocraftAmountText` |
@@ -804,27 +814,24 @@ job механизма (`crafting_view: job`), по завершении (`log.m
 ## Квестбук и лутбоксы
 
 - Квест (`quests`) — `{name, description, era, requires, conditions, reward_case,
-  icon?, bg?, border?}`. `requires` ссылается на ДРУГИЕ КВЕСТЫ (не на
-  технологии). `era` — ГРУППИРОВКА В ОТДЕЛЬНЫЕ ГРАФЫ: каждая эра — своя вкладка
-  со своим независимым графом (см. ниже), НЕ колонка одного общего графа (как
-  было раньше и как до сих пор устроено у `techs.*.tier`) и никак не связана с
-  технологиями; само число остаётся ключом-позицией (как тир инструмента), а
-  ЕГО ОФОРМЛЕНИЕ (имя вкладки, главный цвет) живёт отдельно в top-level
-  `eras` — `{"<era>": {"name", "color"}}`, необязательный раздел (`game/
-  content.py: ERAS`): у era без записи тут UI сам подставляет дефолт "Эра N" +
-  цикличную палитру (`tierBandColor`/`tierBandColorEditor`), тем самым старый
-  контент без `eras` продолжает работать как раньше. `content_editor.html`
-  держит эту секцию УДОБНОЙ для правки через `renderEraManager` (вкладка
-  "Граф" у квестов) — переименование/перекраска, добавление, реордер (кнопки
-  ↑/↓ — `swapEras`, меняет местами оформление ДВУХ id И `era` у всех их
-  квестов, сам номер остаётся позицией) и удаление (только если ни один квест
-  этой era не использует, см. `eraUsageCount`). `icon`/`bg`/`border` —
-  необязательные per-квестовые оверрайды узла графа: `icon` подменяет значок
-  ТОЛЬКО для статусов `completed`/`claimed` (у `locked`/`available` значок
-  означает статус, а не сам квест), `bg`/`border` подменяют цвет узла целиком
-  вместо цвета, унаследованного от `era`. Оба редактора рисуют эти поля живым
-  превью узла (`content_editor.html` — в самом графе, хотя там нет игрового
-  статуса; `web_ui.html: buildQuestNode` — в реальной игре).
+  icon?, accent?, style?, ribbon?, pos?}`. `requires` ссылается на ДРУГИЕ КВЕСТЫ
+  (не на технологии). `era` — ОТДЕЛЬНЫЙ ГРАФ: у каждой эры свой независимый граф,
+  с технологиями никак не связана; само число — ключ-позиция (как тир
+  инструмента), оформление эры — top-level `eras` (`game/content.py: ERAS`):
+  `{"<era>": {name, color, subtitle?, icon?, backdrop?: {pattern, tile?, opacity?}}}`,
+  раздел необязательный (у era без записи — "Эра N" + цикличная палитра).
+  Оформление узла: `icon` (виден в любом статусе), `accent` (цвет узла; без него —
+  цвет эры), `style` (`normal`/`milestone` — веха крупнее, с лентой), `ribbon`
+  (надпись на ленте), `pos` (место на графе; без него — авторасстановка колонками
+  по глубине требований). Прежние `bg`/`border`/`tooltip_color` заменены `accent`
+  (прямое пожелание, 2026-09-30): редактор переносит их при загрузке
+  (`migrateQuestAppearance`), валидатор ругается, если они остались.
+- **Узел, связи, раскладку, фон эры и карточку эры рисует `tools/quest_fx.js`** —
+  общий для игры и редактора (оба сервера отдают `/quest_fx.js`, оба `.spec` его
+  вшивают), тот же приём, что `hunt_fx.js`. Умолчания (цвета, плитка, размеры
+  узлов, шаг авторасстановки) — только там; id вариантов `QUEST_FX_STYLES`/
+  `QUEST_FX_BACKDROPS` в паре с `content_validation.py: QUEST_STYLES`/
+  `QUEST_BACKDROP_PATTERNS` (сверяет тест).
 - `conditions` — форма `{type, ...}` (унаследована от убранной из игры механики
   достижений — она ЦЕЛИКОМ удалена в пользу квестбука; `CONDITION_TYPES`/
   `renderConditions`/`CONDITION_FIELDS`/`_condition_met` — переиспользуемые
@@ -833,6 +840,8 @@ job механизма (`crafting_view: job`), по завершении (`log.m
   `tech_count_at_least`, `all_techs_researched`, `turn_at_least`,
   `tool_tier_at_least`, `species_discovered_at_least`, `species_discovered`
   (конкретный вид, а не счётчик — например «вывести/поймать пчелу»),
+  `mob_killed` (`mob` — моб или босс добит хоть раз, `state.mobs_killed`; число
+  убийств НЕ хранится, прямое пожелание; отступление/«Бросить» не в счёт),
   `manual_action_performed_at_least` (действие УСПЕШНО дало результат —
   `state.action_performed_count`, растёт при начислении gain: на мгновенном
   клике сразу, на многоходовом — только по завершении job'а, не на старте),
@@ -873,40 +882,31 @@ job механизма (`crafting_view: job`), по завершении (`log.m
   нужен UI, чтобы анимировать прокрутку барабана до РЕАЛЬНОГО результата, а не
   подделывать его заново на клиенте (`web_ui.html: openLootBoxModal`, сервер уже
   начислил ресурс к моменту ответа — анимация чисто косметическая).
-- Игровой UI (`web_ui.html: openQuestsModal`) — вкладка на каждую эру
-  (`questsActiveEra`, переживает переоткрытие модалки, как `prioritiesActiveTab`
-  у приоритетов). Внутри вкладки `renderQuestGraph(era)` рисует граф ТОЛЬКО
-  квестов этой эры, колонки — по локальной глубине зависимостей ВНУТРИ эры
-  (`computeQuestEraLevels`). `requires` на квест из ДРУГОЙ эры по-прежнему
-  реально гейтит доступность (проверяется `is_quest_available` как обычно) —
-  просто НЕ рисуется линией, раз тот узел физически не на этой вкладке
-  (`drawQuestEdges`: `nodeEls[reqId]` для чужой эры просто не находится, ребро
-  тихо пропускается); `renderQuestDetail` вместо этого подписывает такие
-  требования текстом с пометкой "(эра N)". Узел — `.quest-node` (НЕ `.tech-node`
-  — отдельный класс с декоративной обводкой: скошенный угол через `clip-path` +
-  двойная рамка цвета статуса + значок-жетон статуса в углу узла,
-  `QUEST_STATUS_ICON`), красится по `status` (`locked`/`available`/`completed`/
-  `claimed`, 4 состояния вместо 3 у техов, т.к. есть отдельный шаг "забрать
-  награду").
-- Редактор контента (`content_editor.html`, вкладка "Квесты", графовый вид) —
-  тоже вкладка на каждую эру (`questGraphEra`), каждая — свой независимый канвас
-  (`computeQuestPositions(era)`, offset колонок всегда с нуля, НЕ единый граф со
-  сквозной нумерацией колонок, как раньше). Перетаскивание узла мышью сохраняет
-  позицию в `quests.*.pos` (как `techs.*.pos`), таскание за кружок-хэндл создаёт
-  `requires`-связь МЕЖДУ ВИДИМЫМИ (т.е. одноэровыми) узлами (с проверкой цикла,
-  `wouldCreateQuestCycle`/`wouldCreateCycle` — не даёт создать цикл через уже
-  существующую цепочку, проверка идёт по ВСЕМ квестам, не только текущей эры),
-  клик по ребру удаляет связь, двойной клик по узлу открывает карточку в списке.
-  Requires НА ДРУГУЮ ЭРУ мышью не потянуть (целевой узел не на этой вкладке) —
-  выставляется чекбоксом в карточке списка (вкладка "Список" — там `requires` не
-  ограничен эрой). Список квестов и граф технологий держат ПОЛНОСТЬЮ раздельное
-  DOM/state (`questGraph` vs `techGraph`, `selectedQuestNode` vs
-  `selectedTechNode` и т.д.) — не общий код, а параллельная копия, чтобы
-  перетаскивание в одном графе не могло задеть состояние другого.
-  `find_requires_cycle` в `content_validation.py` — единственное реально общее
-  (не дублированное) звено: он не завязан на техов и не завязан на эры,
-  используется и для `techs.*.requires`, и для `quests.*.requires` (цикл через
-  requires на квест из другой эры так же запрещён, как и внутри одной).
+- Игровой UI (`web_ui.html: openQuestsModal`, макет «Новый квестбук», прямое
+  пожелание, 2026-09-30) — три колонки: эры (`renderQuestEraList`, выбор —
+  `questsActiveEra`) | шапка эры + граф (`renderQuestGraph`) | панель квеста
+  (`renderQuestDetail`: задачи с полосками, требования, лутбокс с шансами,
+  «Открыть лутбокс»). Закрытый квест на графе виден, но не выбирается. Граф
+  двигается мышью и масштабируется колесом тем же `enableGraphPanning`/
+  `enableGraphZoom`, что дерево технологий: узлы и связи — в одном слое под
+  transform (`.qb-layer`), фон эры едет следом (`questFxBackdropView`). **Вид
+  графа у каждой эры свой и сохраняется** (прямое пожелание): `questGraphView`
+  в `localStorage["questGraphViews"]`, переживает закрытие окна и перезапуск;
+  эра без сохранённого вида вписывается целиком (как кнопка «Весь граф»).
+  `requires` на квест из ДРУГОЙ эры гейтит как обычно (`is_quest_available`), но
+  рисуется меткой «⟵ Эра N: …» над узлом, а не линией. Условия в
+  `VIEW.quests[].conditions` — `{text, current, target}` (`web_ui.py:
+  _condition_progress`, в паре с `engine._condition_met`).
+- Редактор (`content_editor.html`, «Квесты» → «Граф»): эры с оформлением
+  (`renderQuestErasColumn`/`renderEraLookCard`, реордер `swapEras` меняет и
+  оформление, и `era` квестов; удалить можно только пустую эру) | граф
+  (`buildQuestGraph`: перетаскивание пишет `pos` с шагом 8px, связь — за
+  кружок на грани, клик по линии удаляет, «Показать как» — статус узлов для
+  превью) | инспектор (`renderQuestInspector`: «Оформление» с превью узла во
+  всех статусах и «Взять у…» — иконка любого ресурса/постройки/моба, «Квест» —
+  поля, требования из любой эры, условия, награда). Раскладка вкладки шире
+  `main` (`.qg-layout`). `find_requires_cycle` в `content_validation.py` — общий
+  для `techs.*.requires` и `quests.*.requires`, цикл через другую эру тоже запрещён.
 
 ## Веб-UI (`web_ui.html`): общие паттерны
 

@@ -179,6 +179,58 @@ class AttackEncounterTests(FixtureTestCase):
         self.assertEqual(s.resources["test_soul"], 1)
 
 
+class MobKilledQuestTests(FixtureTestCase):
+    """state.mobs_killed и условие квеста mob_killed: только факт «добит хоть раз»."""
+
+    QUEST = {
+        "name": "Первая кровь", "description": "Добей моба и поставь постройку.", "era": 1,
+        "conditions": [
+            {"type": "mob_killed", "mob": "test_mob"},
+            {"type": "total_buildings_at_least", "amount": 1},
+        ],
+        "reward_case": "test_case",
+    }
+
+    def test_only_the_finishing_blow_marks_the_mob(self):
+        s = GameState()
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        engine.attack_encounter(s)  # урон 3 - моб жив
+        self.assertEqual(s.mobs_killed, set())
+        s.skill_xp["combat"] = 10
+        engine.attack_encounter(s)
+        self.assertEqual(s.mobs_killed, {"test_mob"})
+
+    def test_boss_kill_is_marked_too(self):
+        s = GameState(skill_xp={"combat": 10}, resources={"raw_a": 5})
+        engine.summon_boss(s, "test_boss")
+        engine.attack_encounter(s)
+        self.assertEqual(s.mobs_killed, {"test_boss"})
+
+    def test_retreat_or_abandon_does_not_count(self):
+        s = GameState(player_hp=1)
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        self.assertTrue(engine.attack_encounter(s).combat["defeated"])
+        s.active_encounter = {"mob_id": "test_mob", "remaining_hp": 10}
+        engine.abandon_encounter(s)
+        self.assertEqual(s.mobs_killed, set())
+
+    def test_quest_needs_that_mob_and_every_other_condition(self):
+        s = GameState(buildings={"gen": 1})
+        with mock.patch.dict(engine.QUESTS, {"first_blood": self.QUEST}):
+            s.mobs_killed.add("test_boss")  # другой моб не считается
+            self.assertNotIn("first_blood", engine.check_quests(s))
+            s.mobs_killed.add("test_mob")
+            s.buildings.clear()  # условия через И - без постройки не выполнен
+            self.assertNotIn("first_blood", engine.check_quests(s))
+            s.buildings["gen"] = 1
+            self.assertIn("first_blood", engine.check_quests(s))
+
+    def test_save_round_trip_and_old_save_without_field(self):
+        s = GameState(mobs_killed={"test_mob", "test_boss"})
+        self.assertEqual(GameState.from_dict(s.to_dict()).mobs_killed, {"test_mob", "test_boss"})
+        self.assertEqual(GameState.from_dict({}).mobs_killed, set())
+
+
 class AttackPreviewTests(FixtureTestCase):
     """engine.attack_preview - точный прогноз удара для UI (штриховка на полосах HP,
     число на кнопке приёма). Тот же _strike, что у attack_encounter, поэтому здесь

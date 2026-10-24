@@ -379,10 +379,6 @@
 
   .view-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
   .view-toggle button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-  .era-toggle button.active { background: none; color: var(--era-accent, var(--accent)); border-color: var(--era-accent, var(--accent)); }
-  .era-manager { margin-bottom: 12px; }
-  .era-manager-row { align-items: center; gap: 8px; }
-  .era-manager-row input[type="color"] { width: 36px; height: 28px; padding: 0; border: none; background: none; cursor: pointer; }
 
   .graph-scroll {
     overflow: auto;
@@ -440,46 +436,59 @@
   .tech-node-handle.handle-bottom { top: auto; bottom: -8px; left: 50%; right: auto; transform: translateX(-50%); }
   .tech-node-handle.handle-left { left: -8px; right: auto; top: 50%; transform: translateY(-50%); }
 
-  /* Квадратный узел графа квестов - 1:1 превью того, что увидит игрок в
-     web_ui.html (.quest-node/.quest-node-icon/.quest-node-tip) - та же тёмная
-     "чертёжная" палитра, независимо от светлой темы остального редактора,
-     чтобы значок/оформление/подсказка были видны БЕЗ запуска игры (см.
-     renderQuestGraphView). Игрового статуса тут нет (черновик, не состояние
-     сохранения) - узел всегда нейтрального цвета, тон "молчащего" узла в
-     игре (совпадает с .quest-node.locked - см. web_ui.html), q.bg/q.border
-     override переопределяют его ТОЧНО так же, как в игре. */
-  .tech-node.quest-node-square {
-    width: 64px; height: 64px; padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    background: #14191f; border: 1px solid #2b333b; border-radius: 6px;
-    box-shadow: none;
+  /* ---------- Квесты → Граф (макет «Новый квестбук», 2026-09-30) ----------
+     Эры и их оформление | граф | инспектор. Узлы, связи, фон эры и карточку эры рисует
+     общий с игрой tools/quest_fx.js; здесь раскладка вкладки и то, чего в игре нет:
+     подпись id, ручки связей, подсветка связей выбранного узла. */
+  /* main у редактора 980px - графу с двумя боковыми колонками тесно, поэтому раскладка
+     вкладки выходит за main на ширину окна (по центру, не шире 1640px). */
+  .qg-layout {
+    display: grid; grid-template-columns: 280px minmax(0, 1fr) 360px; gap: 12px; align-items: start;
+    width: min(1640px, calc(100vw - 48px)); margin-left: calc((100% - min(1640px, calc(100vw - 48px))) / 2);
   }
-  .tech-node.quest-node-square:hover { border-color: #5fd0e8; }
-  .tech-node.quest-node-square.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-  .quest-node-square-icon { display: flex; }
-  /* id квеста - единственное, чего НЕТ в игре на самом узле - подпись только
-     для автора, вынесена ЗА пределы квадрата (снизу), чтобы не мешать
-     превью самого игрового узла. */
-  .quest-node-square-caption {
-    position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px;
-    font-size: 10px; color: var(--muted); white-space: nowrap; max-width: 120px;
-    overflow: hidden; text-overflow: ellipsis; text-align: center; pointer-events: none;
-  }
-  /* Буквальная копия .quest-node-tip из web_ui.html (шрифт/размер/цвет) - цвет
-     текста ПЕР-КВЕСТОВЫЙ (quests.*.tooltip_color, поле "Свой цвет текста
-     подсказки" в карточке квеста на вкладке "Список"), выставляется инлайн-
-     стилем на конкретном узле (см. renderQuestGraphView) - тут в CSS только
-     дефолт на случай, если квест свой цвет не задал. */
-  .quest-node-tip {
-    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-    background: #10151bf0; border: 1px solid #2b333b; border-radius: 4px; padding: 5px 9px;
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 13px; font-weight: 600; line-height: 1.3; letter-spacing: .01em;
-    white-space: nowrap; pointer-events: none; z-index: 20;
-    display: none;
-    color: #dbe7ec;
-  }
-  .tech-node.quest-node-square:hover .quest-node-tip { display: block; }
+  .qg-eras .card, .qg-inspector .card { margin: 0 0 12px; }
+  .qg-era-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
+  .qg-era-row:hover { background: var(--bg); }
+  .qg-era-row.active { border-color: var(--era-c); background: color-mix(in srgb, var(--era-c) 10%, var(--panel)); }
+  .qg-era-emb { width: 34px; height: 34px; border-radius: 5px; background: #1a2026; border: 2px solid var(--era-c); display: grid; place-items: center; }
+  .qg-era-text { min-width: 0; }
+  .qg-era-name { font-weight: 600; font-size: 13px; }
+  .qg-era-count { font-weight: 400; font-size: 11px; color: var(--muted); }
+  .qg-era-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qg-era-actions { display: flex; gap: 2px; }
+  .qg-field { margin-top: 10px; }
+  .qg-field > label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .qg-field > input[type=text], .qg-field > textarea, .qg-field > select { width: 100%; }
+  .qg-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .qg-row input[type=range] { flex: 1; }
+  .qg-seg { margin: 0; flex-wrap: wrap; }
+  .qg-seg button { padding: 4px 9px; font-size: 12px; }
+  .qg-dark { background: #0e1318; border-radius: 6px; padding: 12px; }
+  .qg-era-preview .qfx-era { cursor: default; }
+  .qg-ipick { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; margin-top: 8px; padding: 8px; background: #0e1318; border-radius: 6px; max-height: 190px; overflow-y: auto; }
+  .qg-ipick button { aspect-ratio: 1; padding: 3px; background: #151c22; border: 1px solid #263039; border-radius: 4px; display: grid; place-items: center; cursor: pointer; }
+  .qg-ipick button:hover { border-color: #f0a030; }
+  .qg-tile { width: 48px; height: 48px; border-radius: 6px; border: 1px solid var(--border); background-color: #0d1216; image-rendering: pixelated; flex-shrink: 0; }
+  .qg-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 10px; padding: 20px 12px 12px; background: #0e1318; border-radius: 6px; }
+  .qg-preview-cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .qg-preview-box { position: relative; }
+  .qg-preview-box .qfx-n { left: 0; top: 0; transform-origin: 0 0; }
+  .qg-preview-lbl { font: 10px Consolas, monospace; letter-spacing: 1px; text-transform: uppercase; color: #6f858f; }
+  .qg-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .qg-hint { margin: 6px 0 8px; }
+  .qg-scroll { background: #0d1216; }
+  .qg-graph .qg-node { cursor: grab; }
+  .qg-graph .qg-node.dim { opacity: .3; }
+  .qg-graph .qg-node .tech-node-handle { opacity: 0; transition: opacity .12s; z-index: 4; }
+  .qg-graph .qg-node:hover .tech-node-handle, .qg-graph .qg-node.sel .tech-node-handle { opacity: 1; }
+  .qg-caption { position: absolute; top: calc(100% + 5px); left: 0; right: 0; text-align: center; font: 10px Consolas, monospace; color: #5c6f78; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qfx-n--milestone .qg-caption { top: calc(100% + 8px); }
+  .qg-graph g.qfx-e.dim { opacity: .2; }
+  .qg-graph g.qfx-e.related .qfx-e-line { stroke-width: 3; }
+  .qg-reqs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .qg-req { display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; }
+  .qg-req em { font-style: normal; font-size: 10px; color: #fff; border-radius: 999px; padding: 0 6px; }
+  .qg-req button { border: 0; background: none; padding: 0 4px; color: var(--muted); cursor: pointer; }
 
   .tech-edge { stroke: var(--muted); stroke-width: 2; fill: none; pointer-events: none; }
   .tech-edge.related { stroke: var(--accent); stroke-width: 3; }
@@ -512,6 +521,14 @@
   }
   .pattern-cell:hover { border-color: var(--accent); }
   .pattern-cell.filled { border: 1px solid var(--accent); }
+  /* Узор механизма со свободной расстановкой (appearance.layout) - ячейки там же, где в игре. */
+  .pattern-grid.pattern-grid-free { display: block; position: relative; box-sizing: content-box; padding: 0; }
+  .pattern-grid-free .pattern-cell, .pattern-grid-free .pattern-free-output { position: absolute; }
+  .pattern-cell-icon { position: relative; z-index: 2; display: flex; }
+  .pattern-free-output {
+    display: flex; align-items: center; justify-content: center; border: 1px dashed var(--border);
+    border-radius: 6px; font-size: 11px; color: var(--muted); pointer-events: none;
+  }
   .pattern-cost-row { display: flex; align-items: center; gap: 8px; }
   .pattern-cost-row .amount { margin-left: auto; font-weight: 700; color: var(--accent); }
   .pattern-note { border-radius: 6px; padding: 9px 11px; font-size: 12px; line-height: 1.45; }
@@ -546,6 +563,32 @@
   .mfx-seed { display: inline-flex; align-items: center; gap: 5px; }
   .mfx-swatch { width: 54px; height: 54px; flex: none; border: 1px solid var(--border); border-radius: 3px; background-color: #14171b; }
   .mfx-swatch.mini { width: 22px; height: 22px; }
+  /* Холст свободной расстановки (appearance.layout) - в натуральную величину сцены игры;
+     пунктирная рамка - то, что увидит игрок (занятая область с полями). */
+  .mfx-layout-wrap { overflow-x: auto; }
+  .mfx-layout-canvas {
+    position: relative; margin: 0 auto; border-radius: 4px; user-select: none; touch-action: none;
+    background-color: #0c0e11; background-image: radial-gradient(rgba(255,255,255,.08) 1px, transparent 1px);
+    background-size: 20px 20px; box-shadow: inset 0 0 0 1px rgba(240,160,48,.22);
+  }
+  .mfx-layout-frame { position: absolute; background-color: #14171b; outline: 1px dashed rgba(240,160,48,.5); pointer-events: none; }
+  .mfx-layout-item { position: absolute; cursor: grab; }
+  .mfx-layout-canvas .mfx-preview-output { display: flex; align-items: center; justify-content: center; }
+  .mfx-layout-item:active { cursor: grabbing; }
+  .mfx-layout-item.selected { outline: 2px solid #5fd0e8; outline-offset: 3px; }
+  .mfx-layout-icon { position: relative; z-index: 2; display: flex; pointer-events: none; }
+  .mfx-layout-idx {
+    position: absolute; left: 4px; top: 2px; z-index: 3; pointer-events: none;
+    font: 700 10px Consolas, monospace; color: rgba(255,255,255,.6); text-shadow: 0 0 2px #000;
+  }
+  .mfx-layout-progress { display: flex; align-items: center; justify-content: center; }
+  .mfx-layout-rot { display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .mfx-layout-ring { position: absolute; pointer-events: none; }
+  .mfx-layout-guide { position: absolute; display: none; background: rgba(95,208,232,.75); pointer-events: none; z-index: 5; }
+  .mfx-layout-guide.v { top: 0; bottom: 0; width: 1px; }
+  .mfx-layout-guide.h { left: 0; right: 0; height: 1px; }
+  .mfx-layout-props { display: flex; flex-direction: column; gap: 6px; min-height: 34px; font-size: 12px; }
+  .mfx-layout-props-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   /* Окна «Бой» (моб), «Сцена охоты» (локация), превью удара (приём) - сцена из tools/hunt_fx.js. */
   .modal.settings-modal.hunt-fx-modal { max-width: 780px; }
   .hunt-fx-preview { height: 300px; margin: 4px 0 8px; border-radius: 4px; }
@@ -611,6 +654,8 @@
 <script src="/mechanism_fx.js"></script>
 <!-- Сцена схватки - превью «Бой»/«Сцена охоты», тот же код, что в игре (tools/hunt_fx.js). -->
 <script src="/hunt_fx.js"></script>
+<!-- Граф квестбука - вкладка «Квесты» → «Граф», тот же код, что в игре (tools/quest_fx.js). -->
+<script src="/quest_fx.js"></script>
 <script>
 let DATA = null;
 // Шаблоны повторяющихся "лестниц" карточек (тиры склада/инструмента, улучшения
@@ -833,13 +878,8 @@ const DEFAULT_ICONS = {
     "AAAAAAAAAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
   ], palette: { A: "#6b6f7a", B: "#1f2226" } },
 
-  // ДЕРЖАТЬ В ПАРЕ с ICONS.quest в tools/web_ui.html - фоллбэк для quests.*.icon
-  // без своей кастомной иконки (свиток с двумя строками "текста", см.
-  // defaultQuestIcon ниже).
-  quest: { grid: [
-    "..AAAAAA..", ".AAAAAAAA.", "AABBBBBBAA", "AABBBBBBAA",
-    "AABAAAABAA", "AABBBBBBAA", "AABAAAABAA", ".AAAAAAAA.", "..AAAAAA..",
-  ], palette: { A: "#e3c98a", B: "#8a5a34" } },
+  // Фоллбэк для quests.*.icon без своей иконки - общий с игрой (tools/quest_fx.js).
+  quest: QUEST_FX_DEFAULT_ICON,
 
   // ДЕРЖАТЬ В ПАРЕ с ICONS.enchant в tools/web_ui.html - фоллбэк для
   // enchantments.*.icon без своей кастомной иконки (см. defaultEnchantIcon ниже).
@@ -1620,6 +1660,7 @@ function toast(kind, title, details) {
 async function load() {
   const [contentRes] = await Promise.all([fetch("/api/content"), loadTemplates()]);
   DATA = await contentRes.json();
+  migrateQuestAppearance(DATA);
   renderAll();
 }
 
@@ -3121,9 +3162,18 @@ function craftingGridRow(loc, lid) {
   stacksInput.checked = !!(loc.crafting && loc.crafting.stacks);
   stacksLabel.append(stacksInput, el("span", { text: "сборщик: стопки без формы" }));
   sizeBox.appendChild(stacksLabel);
+  // crafting.fixed - узор привязан к ячейкам: рецепт ловится только там, где нарисован
+  // (без сдвига по сетке) - для свободной расстановки, где у ячейки свой смысл (бак).
+  const fixedLabel = el("label", { style: "display:inline-flex; align-items:center; gap:4px; margin-left:10px;",
+    title: "Узор не сдвигается по сетке: рецепт, нарисованный в левой ячейке, не соберётся в правой" });
+  const fixedInput = el("input", { type: "checkbox" });
+  fixedInput.checked = !!(loc.crafting && loc.crafting.fixed);
+  fixedLabel.append(fixedInput, el("span", { text: "узор привязан к ячейкам" }));
+  sizeBox.appendChild(fixedLabel);
   const withFlags = (crafting) => {
     if (batchInput.checked) crafting.batch = true;
     if (stacksInput.checked) crafting.stacks = true;
+    else if (fixedInput.checked) crafting.fixed = true;
     return crafting;
   };
   const syncSize = () => {
@@ -3133,12 +3183,15 @@ function craftingGridRow(loc, lid) {
     widthInput.value = w;
     heightInput.value = h;
     loc.crafting = withFlags({ width: w, height: h });
+    syncMechanismLayoutCells(loc); // свободная расстановка - по ячейке на каждую ячейку сетки
   };
   widthInput.addEventListener("change", syncSize);
   heightInput.addEventListener("change", syncSize);
   batchInput.addEventListener("change", syncSize);
+  fixedInput.addEventListener("change", syncSize);
   stacksInput.addEventListener("change", () => {
     syncSize();
+    applyEnabled();
     renderManual(); // узор у действий этой локации становится не нужен (или снова нужен)
     renderBuildings(); // и у построек, которые здесь собираются
   });
@@ -3147,6 +3200,8 @@ function craftingGridRow(loc, lid) {
     heightInput.disabled = !checkbox.checked;
     batchInput.disabled = !checkbox.checked;
     stacksInput.disabled = !checkbox.checked || lid === CONVERTER_LOCATION_ID;
+    // У сборщика узоров нет - привязывать нечего (валидатор это запрещает).
+    fixedInput.disabled = !checkbox.checked || stacksInput.checked;
   };
   checkbox.addEventListener("change", () => {
     if (checkbox.checked) {
@@ -3169,7 +3224,9 @@ function craftingGridRow(loc, lid) {
     + "игра открывает для неё модалку-верстак с сеткой такого размера (3×3 - верстак, 9×9 - ужасающий верстак, 2×1 - печь/мастерская). "
     + "Внутри такой локации каждое действие само решает, крафтится оно на сетке или остаётся обычной карточкой - см. «Крафт на сетке» у действия. "
     + "«Сборщик» - форма не важна: игрок кладёт в ячейки стопки, рецепт узнаётся по составу и количеству (ровно cost без энергии), "
-    + "узоры не нужны, а все действия локации собираются в модалке. Постройки выбирают механизм полем «Где собирается»"
+    + "узоры не нужны, а все действия локации собираются в модалке. Постройки выбирают механизм полем «Где собирается». "
+    + "«Узор привязан к ячейкам» - без галочки рисунок ловится в любом углу сетки (как в Minecraft), с ней - только в тех "
+    + "ячейках, где нарисован; нужно, когда ячейки расставлены по-своему (окно «Оформление»: круг, бак в стороне)"
     + (lid === CONVERTER_LOCATION_ID
       ? ". У «Преобразователя» в сетке собираются рецепты крафта за энергию (вкладка «Рецепты за энергию», узор = consumes)"
       : "") }));
@@ -3497,12 +3554,14 @@ const MECHANISM_PROGRESS_SEEDS = {
 function mechanismAppearanceSummary(loc) {
   const look = loc.appearance || {};
   const parts = [];
+  if (look.layout) parts.push(look.layout.progress === "ring" ? "свободная расстановка, прогресс кольцом" : "свободная расстановка");
   if (look.texture) parts.push("фон");
   if (look.progress_icon) parts.push(`прогресс (${MECH_FX_FILLS[look.progress_fill || "right"]})`);
   if (look.motion) parts.push(MECH_FX_MOTIONS[look.motion] ? MECH_FX_MOTIONS[look.motion].name : look.motion);
   if (look.particles) parts.push(MECH_FX_PARTICLES[look.particles] ? MECH_FX_PARTICLES[look.particles].name : look.particles);
+  if (look.gather) parts.push(`сбор: ${MECH_FX_GATHERS[look.gather] ? MECH_FX_GATHERS[look.gather].name : look.gather}`);
   if (look.sound) parts.push("звук");
-  return parts.length ? parts.join(" · ") : "по умолчанию (без фона, стрелка, стандартные искры)";
+  return parts.length ? parts.join(" · ") : "по умолчанию (сетка, без фона, стрелка, стандартные искры)";
 }
 
 function mechanismAppearanceRow(loc, lid) {
@@ -3528,9 +3587,97 @@ function mechanismPreviewArrowSvg(color) {
   return svg;
 }
 
+// ---------- Свободная расстановка слотов (locations.*.appearance.layout) ----------
+// Центры элементов - в координатах холста MECH_FX_LAYOUT_W×H (tools/mechanism_fx.js),
+// в игре сцена обрезается по занятой области. Ячейка cells[i] - ячейка i узора
+// (построчно): движок про расстановку не знает, это только вид той же сетки.
+
+function clampLayoutPoint(p) {
+  p.x = Math.round(Math.max(0, Math.min(MECH_FX_LAYOUT_W, p.x)));
+  p.y = Math.round(Math.max(0, Math.min(MECH_FX_LAYOUT_H, p.y)));
+  return p;
+}
+
+// Заготовка «как сетка»: ровно то, что игра рисует без расстановки (сетка -> стрелка
+// -> результат), - с неё удобно начинать и отодвигать один слот в сторону.
+function mechanismLayoutGridPreset(crafting) {
+  const W = MECH_FX_LAYOUT_W, H = MECH_FX_LAYOUT_H;
+  const w = crafting.width, h = crafting.height;
+  const arrowW = 38, outS = MECH_FX_OUTPUT_SIZE;
+  let s = MECH_FX_CELL_SIZE, gap = 6, arrowGap = 22;
+  const fullWidth = () => w * s + (w - 1) * gap + arrowGap * 2 + arrowW + outS;
+  const fullHeight = () => h * s + (h - 1) * gap;
+  while (s > MECH_FX_SLOT_SIZE_RANGE[0] && (fullWidth() > W - 36 || fullHeight() > H - 36)) s -= 2;
+  if (fullWidth() > W - 36) { gap = 4; arrowGap = 10; }
+  const x0 = (W - fullWidth()) / 2, y0 = (H - fullHeight()) / 2;
+  const cells = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const cell = { x: x0 + x * (s + gap) + s / 2, y: y0 + y * (s + gap) + s / 2 };
+      if (s !== MECH_FX_CELL_SIZE) cell.size = s;
+      cells.push(clampLayoutPoint(cell));
+    }
+  }
+  const gridRight = x0 + w * s + (w - 1) * gap;
+  return {
+    cells,
+    output: clampLayoutPoint({ x: gridRight + arrowGap * 2 + arrowW + outS / 2, y: H / 2 }),
+    progress: clampLayoutPoint({ x: gridRight + arrowGap + arrowW / 2, y: H / 2 }),
+  };
+}
+
+// Заготовка «по кругу»: чаши кольцом по часовой стрелке от верхней (в порядке ячеек
+// узора), результат в центре, прогресс - кольцом вокруг него, каналы к центру.
+function mechanismLayoutCirclePreset(crafting) {
+  const W = MECH_FX_LAYOUT_W, H = MECH_FX_LAYOUT_H;
+  const n = crafting.width * crafting.height;
+  const cx = W / 2, cy = H / 2;
+  let s = n <= 6 ? 72 : n <= 9 ? 64 : n <= 12 ? 56 : 46;
+  let R;
+  for (;;) {
+    const byChord = n > 1 ? (s + 12) / (2 * Math.sin(Math.PI / n)) : 0;
+    R = Math.max(byChord, MECH_FX_OUTPUT_SIZE / 2 + s / 2 + 36, 128);
+    if (R <= H / 2 - s / 2 - 10 || s <= MECH_FX_SLOT_SIZE_RANGE[0]) break;
+    s -= 2;
+  }
+  R = Math.min(R, H / 2 - s / 2 - 10);
+  const cells = [];
+  for (let i = 0; i < n; i++) {
+    const a = (-90 + (360 / n) * i) * Math.PI / 180;
+    cells.push(clampLayoutPoint({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), shape: "round", size: s }));
+  }
+  return { cells, output: { x: cx, y: cy, shape: "round" }, progress: "ring", links: true };
+}
+
+// Сетку механизма поменяли (width/height) - в расстановке по элементу на каждую
+// ячейку: уже стоящие сохраняются, новые встают туда, где их поставила бы сетка.
+function syncMechanismLayoutCells(loc) {
+  const layout = loc.appearance && loc.appearance.layout;
+  if (!layout || !loc.crafting) return;
+  const n = loc.crafting.width * loc.crafting.height;
+  if ((layout.cells || []).length === n) return;
+  const preset = mechanismLayoutGridPreset(loc.crafting);
+  layout.cells = preset.cells.map((c, i) => (layout.cells || [])[i] || c);
+}
+
+// Стрелки направления прогресса (layout.progress.angle, градусы по часовой).
+const MECHANISM_PROGRESS_ANGLES = [
+  [0, "→ вправо"], [45, "↘ вправо-вниз"], [90, "↓ вниз"], [135, "↙ влево-вниз"],
+  [180, "← влево"], [-135, "↖ влево-вверх"], [-90, "↑ вверх"], [-45, "↗ вправо-вверх"],
+];
+
+// Предметы-образцы для превью (ячейка i - образец i по кругу), результат - доски.
+const MECHANISM_PREVIEW_SAMPLES = ["wood", "stone", "ore", "charcoal", "metal", "planks"];
+
 function openMechanismAppearanceModal(loc, lid, onChange) {
   const overlay = el("div", { class: "modal-overlay" });
-  const close = () => { overlay.remove(); onChange(); };
+  // Галочку «узор привязан к ячейкам» можно переключить и отсюда - тогда карточку
+  // локации (там та же галочка) перерисовываем целиком при закрытии.
+  let locationsStale = false;
+  const close = () => {
+    overlay.remove();
+    if (locationsStale) renderLocations(); else onChange();
+  };
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   const modal = el("div", { class: "modal settings-modal appearance-modal" });
   const head = el("div", { class: "modal-head" });
@@ -3540,10 +3687,10 @@ function openMechanismAppearanceModal(loc, lid, onChange) {
   const content = el("div", { class: "appearance-body" });
   modal.appendChild(content);
   content.appendChild(el("p", { class: "hint", text:
-    "Как выглядит модалка этого механизма в игре: фон сцены (сетка → прогресс → результат), прогресс-бар долгого "
-    + "крафта, его движение, частицы при готовом крафте и звук. Меняется только сцена - колонки по бокам и рамка "
-    + "окна у всех механизмов общие. Работает у локации с крафт-сеткой. Кнопки под превью проигрывают крафт так же, "
-    + "как в игре: долгий крафт - «1 ход = 1 удар»." }));
+    "Как выглядит модалка этого механизма в игре: где стоят ячейки и результат (сеткой или свободно - по кругу, "
+    + "бак в стороне), фон сцены, прогресс долгого крафта, его движение, как ингредиенты улетают в механизм, частицы "
+    + "и звук. Меняется только сцена - колонки по бокам и рамка окна у всех механизмов общие. Работает у локации с "
+    + "крафт-сеткой. Кнопки под превью проигрывают крафт так же, как в игре: долгий крафт - «1 ход = 1 удар»." }));
   if (!loc.crafting) {
     content.appendChild(el("div", { class: "pattern-note warn", text:
       "У этой локации нет крафт-сетки - модалки механизма в игре у неё нет, оформление не покажется, пока сетку не включат." }));
@@ -3557,91 +3704,406 @@ function openMechanismAppearanceModal(loc, lid, onChange) {
     if (!Object.keys(loc.appearance).length) delete loc.appearance;
     renderBody();
   };
+  const cellCount = () => (loc.crafting ? loc.crafting.width * loc.crafting.height : 4);
+  const sampleIcon = (i) => {
+    const id = MECHANISM_PREVIEW_SAMPLES[i % MECHANISM_PREVIEW_SAMPLES.length];
+    return DEFAULT_ICONS[id] || DEFAULT_ICONS.wood;
+  };
+  const outputIcon = DEFAULT_ICONS.planks;
+  // Выбранный на холсте элемент: {kind: "cell"|"output"|"progress", index?}.
+  let selected = null;
+  // Расстановка, снятая переключателем «сеткой», - вернётся при обратном переключении.
+  let stashedLayout = null;
 
   // ---- превью сцены ----
   const preview = el("div", { class: "mfx-preview" });
   let progress = 0;
-  let previewArrow = null;
-  let previewArt = null;
-  let previewFill = null;
-  let previewOutput = null;
   let resetTimer = null;
+  // Узлы текущего превью: cells - ячейки с образцами, output, arrow - узел удара,
+  // art/setFill - прогресс, links - svg каналов, ring - прогресс кольцом.
+  let pv = {};
 
   function buildPreviewStage() {
     const a = look();
     preview.innerHTML = "";
-    const stage = el("div", { class: "mfx-preview-stage" });
-    const textureStyle = mechFxTextureStyle(a);
-    if (textureStyle) Object.assign(stage.style, textureStyle);
-    const grid = el("div", { class: "mfx-preview-grid" });
-    [DEFAULT_ICONS.wood, DEFAULT_ICONS.stone, DEFAULT_ICONS.planks, null].forEach(icon => {
-      const cell = el("div", { class: "mfx-preview-cell" });
-      if (icon) cell.appendChild(pixelIcon(icon.grid, icon.palette, 30));
-      grid.appendChild(cell);
-    });
-    stage.appendChild(grid);
-    previewArrow = el("div", { class: "mfx-preview-arrow" });
-    if (a.progress_icon) {
-      const built = mechFxProgressArt(a.progress_icon, a.motion);
-      previewArt = built.art;
-      previewFill = built.fill;
-    } else {
-      const base = mechanismPreviewArrowSvg("#f0a030");
-      base.classList.add("mfx-base");
-      previewFill = el("div", { class: "mfx-fill" }, [mechanismPreviewArrowSvg("#ffc861")]);
-      previewArt = mechFxMotionWrap([base, previewFill], a.motion);
-    }
-    previewArrow.appendChild(previewArt);
-    stage.appendChild(previewArrow);
-    previewOutput = el("div", { class: "mfx-preview-output" });
-    stage.appendChild(previewOutput);
-    preview.appendChild(stage);
+    pv = { cells: [], icons: [] };
+    if (a.layout && loc.crafting) buildFreeStage(a);
+    else buildGridStage(a);
     applyProgress(progress, progress);
 
     const controls = el("div", { class: "mfx-preview-controls" });
     controls.appendChild(el("button", { class: "small", type: "button", text: "▶ Мгновенный крафт", onclick: () => {
-      hit(false);
-      burst();
+      const arrive = gatherInto(pv.output, false);
+      setTimeout(() => { hit(false); burst(); }, look().motion ? arrive : 0);
     }}));
     controls.appendChild(el("button", { class: "small", type: "button", text: "▶ Ход долгого крафта (+25%)", onclick: () => {
       if (resetTimer) return;
       const from = progress;
       progress = Math.min(1, progress + 0.25);
-      applyProgress(from, progress);
-      hit(true);
-      if (progress >= 1) {
-        burst();
-        resetTimer = setTimeout(() => { resetTimer = null; progress = 0; applyProgress(0, 0); }, 450);
-      }
+      // Запуск долгого крафта: ингредиенты уходят в прогресс, дальше - только удары.
+      const arrive = from === 0 ? gatherInto(pv.arrow, true) : 0;
+      setTimeout(() => {
+        applyProgress(from, progress);
+        hit(true);
+        if (progress >= 1) {
+          burst();
+          resetTimer = setTimeout(() => { resetTimer = null; progress = 0; applyProgress(0, 0); }, 450);
+        }
+      }, arrive);
     }}));
-    controls.appendChild(el("span", { class: "hint", text: progress > 0 && progress < 1
-      ? `идёт долгий крафт: ${Math.round(progress * 100)}%` : "механизм свободен" }));
+    controls.appendChild(el("span", { class: "hint mfx-progress-hint" }));
     preview.appendChild(controls);
+    updateProgressHint();
+  }
+
+  // Обычная сетка (без расстановки): как было - 2×2 образца, стрелка, результат.
+  function buildGridStage(a) {
+    const stage = el("div", { class: "mfx-preview-stage" });
+    const textureStyle = mechFxTextureStyle(a);
+    if (textureStyle) Object.assign(stage.style, textureStyle);
+    const grid = el("div", { class: "mfx-preview-grid" });
+    [0, 1, 2, null].forEach(i => {
+      const cell = el("div", { class: "mfx-preview-cell" });
+      if (i !== null) {
+        const icon = sampleIcon(i);
+        const pic = pixelIcon(icon.grid, icon.palette, 30);
+        cell.appendChild(pic);
+        pv.cells.push(pic);
+        pv.icons.push(icon);
+      }
+      grid.appendChild(cell);
+    });
+    stage.appendChild(grid);
+    const arrowBox = el("div", { class: "mfx-preview-arrow" });
+    buildArrowArt(a, arrowBox);
+    stage.appendChild(arrowBox);
+    pv.output = el("div", { class: "mfx-preview-output" });
+    stage.appendChild(pv.output);
+    preview.appendChild(stage);
+  }
+
+  // Прогресс-бар (стрелка или своя картинка) внутрь box; box - узел удара.
+  function buildArrowArt(a, box) {
+    let fill;
+    if (a.progress_icon) {
+      const built = mechFxProgressArt(a.progress_icon, a.motion);
+      pv.art = built.art;
+      fill = built.fill;
+    } else {
+      const base = mechanismPreviewArrowSvg("#f0a030");
+      base.classList.add("mfx-base");
+      fill = el("div", { class: "mfx-fill" }, [mechanismPreviewArrowSvg("#ffc861")]);
+      pv.art = mechFxMotionWrap([base, fill], a.motion);
+    }
+    pv.setFill = (from, to) => mechFxSetFill(fill, a.progress_icon ? a.progress_fill : "right", from, to);
+    box.appendChild(pv.art);
+    pv.arrow = box;
+  }
+
+  // Свободная расстановка: холст редактора в натуральную величину, всё тащится мышью.
+  // Пунктирная рамка - сцена, которую увидит игрок (занятая область с полями).
+  function buildFreeStage(a) {
+    const lay = a.layout;
+    const W = MECH_FX_LAYOUT_W, H = MECH_FX_LAYOUT_H;
+    const wrap = el("div", { class: "mfx-layout-wrap" });
+    const canvas = el("div", { class: "mfx-layout-canvas", style: `width:${W}px;height:${H}px;` });
+    const frame = el("div", { class: "mfx-layout-frame" });
+    const textureStyle = mechFxTextureStyle(a);
+    if (textureStyle) Object.assign(frame.style, textureStyle);
+    canvas.appendChild(frame);
+    const guideV = el("div", { class: "mfx-layout-guide v" });
+    const guideH = el("div", { class: "mfx-layout-guide h" });
+    const geo0 = mechFxLayoutGeometry(lay, cellCount());
+    const width = loc.crafting.width;
+
+    geo0.cells.forEach((c, i) => {
+      const icon = sampleIcon(i);
+      const node = el("div", {
+        class: "mfx-preview-cell mfx-layout-item",
+        title: `Ячейка узора: ряд ${Math.floor(i / width) + 1}, столбец ${(i % width) + 1} - тащи мышью, клик - настройки`,
+      });
+      mechFxDecorateSlot(node, c.shape, { color: mechFxIconMainColor(icon), level: 1 });
+      const pic = el("span", { class: "mfx-layout-icon" }, [pixelIcon(icon.grid, icon.palette, Math.max(16, Math.round(Math.min(c.w, c.h) * 0.5)))]);
+      node.appendChild(pic);
+      node.appendChild(el("span", { class: "mfx-layout-idx", text: `${Math.floor(i / width) + 1}·${(i % width) + 1}` }));
+      bindDrag(node, { kind: "cell", index: i });
+      canvas.appendChild(node);
+      pv.cells.push(pic);
+      pv.icons.push(icon);
+    });
+
+    pv.output = el("div", { class: "mfx-preview-output mfx-layout-item", title: "Слот результата - тащи мышью, клик - настройки" });
+    mechFxDecorateSlot(pv.output, geo0.output.shape, { color: mechFxIconMainColor(outputIcon), level: 1 });
+    pv.output.appendChild(el("span", { class: "mfx-layout-icon" }, [pixelIcon(outputIcon.grid, outputIcon.palette, 40)]));
+    bindDrag(pv.output, { kind: "output" });
+    canvas.appendChild(pv.output);
+
+    let progressBox = null, rot = null;
+    if (geo0.progress.ring) {
+      const ring = mechFxRingProgress(geo0.progress.d);
+      pv.ring = el("div", { class: "mfx-layout-ring" }, [ring.art]);
+      pv.art = ring.art;
+      pv.setFill = ring.setFill;
+      pv.arrow = pv.ring;
+      canvas.appendChild(pv.ring);
+    } else {
+      progressBox = el("div", { class: "mfx-layout-item mfx-layout-progress", title: "Прогресс-бар - тащи мышью, клик - поворот" });
+      rot = el("div", { class: "mfx-layout-rot" });
+      const arrowBox = el("div", { class: "mfx-preview-arrow" });
+      buildArrowArt(a, arrowBox);
+      rot.appendChild(arrowBox);
+      progressBox.appendChild(rot);
+      bindDrag(progressBox, { kind: "progress" });
+      canvas.appendChild(progressBox);
+    }
+    canvas.append(guideV, guideH);
+    wrap.appendChild(canvas);
+    preview.appendChild(wrap);
+    const props = el("div", { class: "mfx-layout-props" });
+    preview.appendChild(props);
+
+    const nodeOf = (t) => (t.kind === "cell" ? canvas.querySelectorAll(".mfx-preview-cell")[t.index]
+      : t.kind === "output" ? pv.output : progressBox);
+
+    // Перерасставить по текущему layout (во время перетаскивания - без пересборки,
+    // иначе захват указателя потерялся бы вместе с узлом).
+    function place() {
+      const geo = mechFxLayoutGeometry(lay, cellCount());
+      canvas.querySelectorAll(".mfx-preview-cell").forEach((node, i) => mechFxPlace(node, geo.cells[i]));
+      mechFxPlace(pv.output, geo.output);
+      if (pv.ring) {
+        mechFxPlace(pv.ring, { x: geo.progress.x, y: geo.progress.y, w: geo.progress.d, h: geo.progress.d });
+      } else {
+        mechFxPlace(progressBox, { x: geo.progress.x, y: geo.progress.y, w: MECH_FX_PROGRESS_BOX, h: MECH_FX_PROGRESS_BOX });
+        rot.style.transform = geo.progress.angle ? `rotate(${geo.progress.angle}deg)` : "";
+      }
+      const b = geo.bounds;
+      Object.assign(frame.style, { left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
+      if (pv.links) pv.links.remove();
+      pv.links = null;
+      if (geo.links) {
+        pv.links = mechFxLinksSvg(geo);
+        pv.links.setAttribute("width", W);
+        pv.links.setAttribute("height", H);
+        frame.after(pv.links);
+      }
+      canvas.querySelectorAll(".mfx-layout-item.selected").forEach(n => n.classList.remove("selected"));
+      const sel = selected && nodeOf(selected);
+      if (sel) sel.classList.add("selected");
+    }
+
+    // Элемент layout, который двигает цель: ячейка, результат или прогресс (объект).
+    const itemOf = (t) => (t.kind === "cell" ? lay.cells[t.index] : t.kind === "output" ? lay.output : lay.progress);
+
+    // Прилипание к центрам других элементов и к центру холста (Alt - без него).
+    function snapAxis(value, others) {
+      let best = null;
+      others.forEach(v => { if (Math.abs(v - value) <= 6 && (best === null || Math.abs(v - value) < Math.abs(best - value))) best = v; });
+      return best;
+    }
+
+    function bindDrag(node, target) {
+      node.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const item = itemOf(target);
+        if (!item || typeof item !== "object") return;
+        const start = { x: item.x, y: item.y, px: e.clientX, py: e.clientY };
+        let moved = false;
+        node.setPointerCapture(e.pointerId);
+        selected = target;
+        place();
+        const geo = mechFxLayoutGeometry(lay, cellCount());
+        const others = [...geo.cells.filter((c, i) => !(target.kind === "cell" && target.index === i)),
+          ...(target.kind === "output" ? [] : [geo.output]),
+          ...(target.kind === "progress" || geo.progress.ring ? [] : [geo.progress])];
+        const xs = [W / 2, ...others.map(o => o.x)], ys = [H / 2, ...others.map(o => o.y)];
+        const move = (ev) => {
+          const dx = ev.clientX - start.px, dy = ev.clientY - start.py;
+          if (!moved && Math.hypot(dx, dy) < 3) return;
+          moved = true;
+          let x = start.x + dx, y = start.y + dy;
+          const sx = ev.altKey ? null : snapAxis(x, xs);
+          const sy = ev.altKey ? null : snapAxis(y, ys);
+          if (sx !== null) x = sx;
+          if (sy !== null) y = sy;
+          item.x = x;
+          item.y = y;
+          clampLayoutPoint(item);
+          guideV.style.display = sx !== null ? "block" : "none";
+          guideV.style.left = `${item.x}px`;
+          guideH.style.display = sy !== null ? "block" : "none";
+          guideH.style.top = `${item.y}px`;
+          place();
+        };
+        const up = () => {
+          node.removeEventListener("pointermove", move);
+          node.removeEventListener("pointerup", up);
+          node.removeEventListener("pointercancel", up);
+          guideV.style.display = guideH.style.display = "none";
+          renderProps();
+        };
+        node.addEventListener("pointermove", move);
+        node.addEventListener("pointerup", up);
+        node.addEventListener("pointercancel", up);
+      });
+    }
+
+    function numberInput(value, min, max, onInput) {
+      const input = el("input", { type: "number", min: String(min), max: String(max), step: "1", style: "width:64px", value: String(value) });
+      input.addEventListener("change", () => {
+        const v = Number(input.value);
+        if (!Number.isFinite(v)) return;
+        onInput(Math.max(min, Math.min(max, v)));
+      });
+      return input;
+    }
+
+    function slotControls(item, base, isCell) {
+      const box = el("div", { class: "mfx-layout-props-row" });
+      box.appendChild(el("span", { text: "Моделька" }));
+      const shapeSelect = el("select");
+      Object.entries(MECH_FX_SLOTS).forEach(([id, s]) => {
+        const opt = el("option", { value: id, text: s.name });
+        if ((item.shape || "square") === id) opt.selected = true;
+        shapeSelect.appendChild(opt);
+      });
+      shapeSelect.addEventListener("change", () => {
+        if (shapeSelect.value === "square") delete item.shape; else item.shape = shapeSelect.value;
+        buildPreviewStage();
+      });
+      box.appendChild(shapeSelect);
+      box.appendChild(el("span", { text: "Размер" }));
+      const [low, high] = MECH_FX_SLOT_SIZE_RANGE;
+      const size = typeof item.size === "number" ? item.size : base;
+      const sizeInput = el("input", { type: "range", min: String(low), max: String(high), step: "2", value: String(size) });
+      const sizeLabel = el("span", { class: "hint", text: `${size}px${typeof item.size === "number" ? "" : " (обычный)"}` });
+      sizeInput.addEventListener("input", () => {
+        const v = Number(sizeInput.value);
+        if (v === base) delete item.size; else item.size = v;
+        sizeLabel.textContent = `${v}px${v === base ? " (обычный)" : ""}`;
+        place();
+      });
+      sizeInput.addEventListener("change", () => buildPreviewStage()); // детали модельки - под новый размер
+      box.append(sizeInput, sizeLabel);
+      if (isCell) {
+        box.appendChild(el("button", { class: "small", type: "button", text: "Всем ячейкам так же", onclick: () => {
+          lay.cells.forEach(c => {
+            if (item.shape) c.shape = item.shape; else delete c.shape;
+            if (typeof item.size === "number") c.size = item.size; else delete c.size;
+          });
+          buildPreviewStage();
+        }}));
+      }
+      return box;
+    }
+
+    function coordControls(item) {
+      const box = el("div", { class: "mfx-layout-props-row" });
+      box.appendChild(el("span", { text: "x" }));
+      box.appendChild(numberInput(item.x, 0, W, (v) => { item.x = Math.round(v); place(); }));
+      box.appendChild(el("span", { text: "y" }));
+      box.appendChild(numberInput(item.y, 0, H, (v) => { item.y = Math.round(v); place(); }));
+      return box;
+    }
+
+    function renderProps() {
+      props.innerHTML = "";
+      const item = selected ? itemOf(selected) : null;
+      if (!item || typeof item !== "object") {
+        props.appendChild(el("span", { class: "hint", text:
+          "Тащи ячейки, результат и прогресс мышью (прилипают к соседям и центру, Alt - без прилипания). "
+          + "Клик по элементу - его моделька, размер и точные координаты. Подпись «ряд·столбец» - какая это ячейка узора." }));
+        return;
+      }
+      if (selected.kind === "cell") {
+        props.appendChild(el("strong", { text: `Ячейка узора: ряд ${Math.floor(selected.index / width) + 1}, столбец ${(selected.index % width) + 1}` }));
+        props.appendChild(slotControls(item, MECH_FX_CELL_SIZE, true));
+      } else if (selected.kind === "output") {
+        props.appendChild(el("strong", { text: "Слот результата" }));
+        props.appendChild(slotControls(item, MECH_FX_OUTPUT_SIZE, false));
+      } else {
+        props.appendChild(el("strong", { text: "Прогресс-бар" }));
+        const row = el("div", { class: "mfx-layout-props-row" });
+        row.appendChild(el("span", { text: "Направление" }));
+        const angleSelect = el("select");
+        const current = typeof item.angle === "number" ? item.angle : 0;
+        MECHANISM_PROGRESS_ANGLES.forEach(([deg, name]) => {
+          const opt = el("option", { value: String(deg), text: name });
+          if (deg === current) opt.selected = true;
+          angleSelect.appendChild(opt);
+        });
+        if (!MECHANISM_PROGRESS_ANGLES.some(([deg]) => deg === current)) {
+          const opt = el("option", { value: String(current), text: `${current}°` });
+          opt.selected = true;
+          angleSelect.appendChild(opt);
+        }
+        angleSelect.addEventListener("change", () => {
+          const v = Number(angleSelect.value);
+          if (v) item.angle = v; else delete item.angle;
+          place();
+        });
+        row.appendChild(angleSelect);
+        row.appendChild(el("span", { class: "hint", text: "поворачивается вся картинка прогресса вместе с заливкой" }));
+        props.appendChild(row);
+      }
+      props.appendChild(coordControls(item));
+    }
+
+    place();
+    renderProps();
+  }
+
+  // Ингредиенты-образцы улетают в цель тем же сбором, что в игре (mechFxGather).
+  function gatherInto(target, into) {
+    if (!target) return 0;
+    const origins = pv.cells.map((pic, i) => ({
+      rect: pic.getBoundingClientRect(), index: i,
+      make: (size) => pixelIcon(pv.icons[i].grid, pv.icons[i].palette, size),
+    }));
+    const stage = preview.querySelector(".mfx-layout-frame, .mfx-preview-stage");
+    const sr = stage ? stage.getBoundingClientRect() : null;
+    return mechFxGather(origins, target.getBoundingClientRect(), look().gather, {
+      into, links: pv.links || null, shockRadius: sr ? Math.max(sr.width, sr.height) * 0.6 : 160,
+    });
+  }
+
+  function updateProgressHint() {
+    const hintEl = preview.querySelector(".mfx-progress-hint");
+    if (hintEl) hintEl.textContent = progress > 0 && progress < 1 ? `идёт долгий крафт: ${Math.round(progress * 100)}%` : "механизм свободен";
   }
 
   function applyProgress(from, to) {
-    const a = look();
-    mechFxSetState(previewArt, { active: to > 0, running: to > 0 && to < 1 });
-    mechFxSetFill(previewFill, a.progress_icon ? a.progress_fill : "right", from, to);
-    const hintEl = preview.querySelector(".mfx-preview-controls .hint");
-    if (hintEl) hintEl.textContent = to > 0 && to < 1 ? `идёт долгий крафт: ${Math.round(to * 100)}%` : "механизм свободен";
+    if (!pv.art) return;
+    mechFxSetState(pv.art, { active: to > 0, running: to > 0 && to < 1 });
+    pv.setFill(from, to);
+    updateProgressHint();
   }
 
   function hit(puff) {
     const a = look();
-    if (a.motion) mechFxHit(previewArrow, a.motion);
-    else previewArrow.animate([
-      { transform: "none" }, { transform: "translateX(5px) scale(1.18)", filter: "brightness(1.7)", offset: 0.4 }, { transform: "none" },
-    ], { duration: 320, easing: "ease-out" });
+    const node = pv.arrow;
+    if (!node) return;
+    if (pv.ring) {
+      node.classList.remove("mfx-ring-hit");
+      void node.offsetWidth;
+      node.classList.add("mfx-ring-hit");
+    } else if (a.motion) {
+      mechFxHit(node, a.motion);
+    } else {
+      node.animate([
+        { transform: "none" }, { transform: "translateX(5px) scale(1.18)", filter: "brightness(1.7)", offset: 0.4 }, { transform: "none" },
+      ], { duration: 320, easing: "ease-out" });
+    }
     if (puff && a.particles) {
-      const r = previewArrow.getBoundingClientRect();
+      const r = node.getBoundingClientRect();
       mechFxEmit(null, r.left + r.width / 2, r.top + r.height / 2, a.particles, { scale: 0.4 });
     }
   }
 
   function burst() {
-    const r = previewOutput.getBoundingClientRect();
-    previewOutput.animate([
+    const r = pv.output.getBoundingClientRect();
+    pv.output.animate([
       { boxShadow: "inset 0 0 0 2px #ffe3a8, 0 0 48px 8px rgba(255,200,90,.85)" },
       { boxShadow: "inset 0 0 0 2px rgba(240,160,48,.55), 0 0 22px -6px rgba(240,160,48,.6)" },
     ], { duration: 550, easing: "ease-out" });
@@ -3669,9 +4131,111 @@ function openMechanismAppearanceModal(loc, lid, onChange) {
     return box;
   }
 
+  // Расстановка слотов: сеткой (как было) или свободно - холст превью становится
+  // редактором, заготовки «как сетка»/«по кругу», прогресс отдельно или кольцом.
+  function renderLayoutRows(a) {
+    const modeRow = el("div", { class: "field-row" });
+    modeRow.appendChild(el("label", { text: "Расстановка слотов" }));
+    const modeSelect = el("select");
+    [["grid", "Сеткой: ячейки → стрелка → результат"], ["free", "Свободная: слоты тащатся мышью"]].forEach(([id, name]) => {
+      const opt = el("option", { value: id, text: name });
+      if ((a.layout ? "free" : "grid") === id) opt.selected = true;
+      modeSelect.appendChild(opt);
+    });
+    modeSelect.disabled = !loc.crafting;
+    modeSelect.addEventListener("change", () => {
+      selected = null;
+      if (modeSelect.value === "free") {
+        const restored = stashedLayout && stashedLayout.cells.length === cellCount() ? stashedLayout : null;
+        setLook("layout", restored || mechanismLayoutGridPreset(loc.crafting));
+      } else {
+        stashedLayout = a.layout;
+        setLook("layout", null);
+      }
+    });
+    modeRow.appendChild(modeSelect);
+    modeRow.appendChild(el("span", { class: "hint", text: a.layout
+      ? "движку всё равно: это та же сетка узора, ячейки просто нарисованы в других местах"
+      : "свободная - поставить ячейки по кругу, результат в центр, один слот отодвинуть и сделать баком" }));
+    body.appendChild(modeRow);
+    if (!a.layout || !loc.crafting) return;
+
+    const presetRow = el("div", { class: "field-row" });
+    presetRow.appendChild(el("label", { text: "Заготовки расстановки" }));
+    const presets = el("div", { class: "mfx-seed-row" });
+    presets.appendChild(el("button", { class: "small", type: "button", text: "Как сетка", onclick: () => {
+      selected = null;
+      setLook("layout", mechanismLayoutGridPreset(loc.crafting));
+    }}));
+    presets.appendChild(el("button", { class: "small", type: "button", text: "По кругу, результат в центре", onclick: () => {
+      selected = null;
+      if (!look().gather) loc.appearance.gather = "vortex"; // круг - как ритуальный: затягивание воронкой
+      setLook("layout", mechanismLayoutCirclePreset(loc.crafting));
+    }}));
+    presetRow.appendChild(presets);
+    presetRow.appendChild(el("span", { class: "hint", text: "заменяют текущую расстановку целиком" }));
+    body.appendChild(presetRow);
+
+    const progRow = el("div", { class: "field-row" });
+    progRow.appendChild(el("label", { text: "Прогресс" }));
+    const progSelect = el("select");
+    [["free", "Отдельно: своя точка и поворот"], ["ring", "Кольцом вокруг результата"]].forEach(([id, name]) => {
+      const opt = el("option", { value: id, text: name });
+      if ((a.layout.progress === "ring" ? "ring" : "free") === id) opt.selected = true;
+      progSelect.appendChild(opt);
+    });
+    progSelect.addEventListener("change", () => {
+      if (progSelect.value === "ring") {
+        a.layout.progress = "ring";
+        if (selected && selected.kind === "progress") selected = null;
+      } else {
+        // Отдельный прогресс встаёт слева от результата - дальше его тащат мышью.
+        const geo = mechFxLayoutGeometry(a.layout, cellCount());
+        a.layout.progress = clampLayoutPoint({ x: geo.output.x - geo.output.w / 2 - 40, y: geo.output.y });
+      }
+      renderBody();
+    });
+    progRow.appendChild(progSelect);
+    progRow.appendChild(el("span", { class: "hint", text: a.layout.progress === "ring"
+      ? "дуга растёт по часовой вокруг результата; своя картинка прогресса и её движение тут не рисуются"
+      : "стрелка (или своя картинка ниже) в своей точке; поворот - клик по ней на холсте" }));
+    body.appendChild(progRow);
+
+    const linksRow = el("div", { class: "field-row" });
+    linksRow.appendChild(el("label", { text: "Каналы" }));
+    const linksInput = el("input", { type: "checkbox" });
+    linksInput.checked = !!a.layout.links;
+    linksInput.addEventListener("change", () => {
+      if (linksInput.checked) a.layout.links = true; else delete a.layout.links;
+      renderBody();
+    });
+    linksRow.append(linksInput, el("span", { class: "hint", text:
+      "пунктирные линии от ячеек к механизму (и от прогресса к результату); при крафте по ним бежит свечение летящего ингредиента" }));
+    body.appendChild(linksRow);
+
+    // Узор по умолчанию сдвигается по сетке - в свободной расстановке это значит, что
+    // рецепт из одной ячейки соберётся и в баке. Галочка - та же, что у крафт-сетки.
+    const fixed = !!loc.crafting.fixed;
+    const note = el("div", { class: "pattern-note " + (fixed ? "ok" : "warn") });
+    note.appendChild(el("div", { text: fixed
+      ? "Узоры привязаны к ячейкам: рецепт собирается только в тех ячейках, где нарисован."
+      : "Узоры сдвигаются по сетке (как в Minecraft): рецепт, занимающий не все ячейки, соберётся и в другом месте - "
+        + "например, руда ляжет в бак. Если у ячеек свой смысл, привяжи узоры к ячейкам." }));
+    if (!loc.crafting.stacks) {
+      note.appendChild(el("button", { class: "small", type: "button", text: fixed ? "Разрешить сдвиг" : "Привязать узоры к ячейкам", onclick: () => {
+        if (fixed) delete loc.crafting.fixed; else loc.crafting.fixed = true;
+        locationsStale = true;
+        renderBody();
+      }}));
+    }
+    body.appendChild(note);
+  }
+
   function renderBody() {
     body.innerHTML = "";
     const a = look();
+
+    renderLayoutRows(a);
 
     // Фон сцены
     const texRow = el("div", { class: "field-row" });
@@ -3710,6 +4274,7 @@ function openMechanismAppearanceModal(loc, lid, onChange) {
     body.appendChild(dimRow);
 
     // Прогресс
+    const ringProgress = !!(a.layout && a.layout.progress === "ring");
     const progRow = el("div", { class: "field-row" });
     progRow.appendChild(el("label", { text: "Прогресс-бар" }));
     if (a.progress_icon) progRow.appendChild(pixelIcon(a.progress_icon.grid, a.progress_icon.palette, 40));
@@ -3718,8 +4283,9 @@ function openMechanismAppearanceModal(loc, lid, onChange) {
       openIconEditor(`прогресс механизма «${loc.name}»`, a.progress_icon || null, null, (icon) => setLook("progress_icon", icon));
     }}));
     if (a.progress_icon) progRow.appendChild(el("button", { class: "small", type: "button", text: "Вернуть стрелку", onclick: () => setLook("progress_icon", null) }));
-    progRow.appendChild(el("span", { class: "hint", text:
-      "без своей картинки - обычная стрелка. Картинка заполняется яркой копией по мере долгого крафта; пустые поля вокруг рисунка обрезаются" }));
+    progRow.appendChild(el("span", { class: "hint", text: ringProgress
+      ? "сейчас прогресс - кольцо вокруг результата (см. «Прогресс» выше), картинка не рисуется"
+      : "без своей картинки - обычная стрелка. Картинка заполняется яркой копией по мере долгого крафта; пустые поля вокруг рисунка обрезаются" }));
     body.appendChild(progRow);
     const progSeedRow = el("div", { class: "field-row" });
     progSeedRow.appendChild(el("label", { text: "Заготовки прогресса" }));
@@ -3752,10 +4318,27 @@ function openMechanismAppearanceModal(loc, lid, onChange) {
     });
     motionSelect.addEventListener("change", () => setLook("motion", motionSelect.value || null));
     motionRow.appendChild(motionSelect);
-    motionRow.appendChild(el("span", { class: "hint", text: a.motion && MECH_FX_MOTIONS[a.motion]
-      ? `${MECH_FX_MOTIONS[a.motion].hint}; удар - при крафте и на каждом ходу долгого крафта, пока он идёт - фоновое движение`
-      : "удар при крафте и на каждом ходу долгого крафта, фоновое движение - пока крафт идёт" }));
+    motionRow.appendChild(el("span", { class: "hint", text: ringProgress
+      ? "у прогресса-кольца своё движение: на каждом ходу кольцо вспыхивает"
+      : a.motion && MECH_FX_MOTIONS[a.motion]
+        ? `${MECH_FX_MOTIONS[a.motion].hint}; удар - при крафте и на каждом ходу долгого крафта, пока он идёт - фоновое движение`
+        : "удар при крафте и на каждом ходу долгого крафта, фоновое движение - пока крафт идёт" }));
     body.appendChild(motionRow);
+
+    // Сбор ингредиентов
+    const gatherRow = el("div", { class: "field-row" });
+    gatherRow.appendChild(el("label", { text: "Сбор ингредиентов" }));
+    const gatherSelect = el("select");
+    Object.entries(MECH_FX_GATHERS).forEach(([id, g]) => {
+      const opt = el("option", { value: id, text: g.name });
+      if ((a.gather || "dash") === id) opt.selected = true;
+      gatherSelect.appendChild(opt);
+    });
+    gatherSelect.addEventListener("change", () => setLook("gather", gatherSelect.value === "dash" ? null : gatherSelect.value));
+    gatherRow.appendChild(gatherSelect);
+    gatherRow.appendChild(el("span", { class: "hint", text:
+      `${MECH_FX_GATHERS[a.gather || "dash"].hint}; при крафте ингредиенты из ячеек летят в результат (долгий крафт - в прогресс)` }));
+    body.appendChild(gatherRow);
 
     // Частицы
     const partRow = el("div", { class: "field-row" });
@@ -4015,13 +4598,38 @@ function openPatternModal(action, aid, onChange, opts) {
       });
   }
 
+  // Свободная расстановка механизма (appearance.layout) - узор рисуется там же, где
+  // ячейки стоят в игре (по кругу, бак в стороне), ужатым под окно.
+  const layout = loc.appearance && loc.appearance.layout;
+  const layoutGeo = layout ? mechFxLayoutGeometry(layout, width * height) : null;
+  const layoutK = layoutGeo ? Math.min(1, 440 / layoutGeo.bounds.width, 340 / layoutGeo.bounds.height) : 1;
+  if (layoutGeo) {
+    gridBox.className = "pattern-grid pattern-grid-free";
+    gridBox.style.cssText = `width:${Math.round(layoutGeo.bounds.width * layoutK)}px; height:${Math.round(layoutGeo.bounds.height * layoutK)}px;`;
+  }
+
   function renderGrid() {
     gridBox.innerHTML = "";
+    const b = layoutGeo && layoutGeo.bounds;
+    if (layoutGeo) {
+      if (layoutGeo.links) gridBox.appendChild(mechFxLinksSvg(layoutGeo, b.left, b.top, layoutK));
+      const out = el("div", { class: "pattern-free-output", text: "результат" });
+      mechFxPlace(out, layoutGeo.output, b.left, b.top, layoutK);
+      gridBox.appendChild(out);
+    }
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const cell = grid[y][x];
         const btn = el("button", { class: "pattern-cell" + (cell ? " filled" : ""), title: cell ? patternResourceName(cell) : "пусто" });
-        if (cell) btn.appendChild(patternIconEl(cell, Math.min(40, Math.floor(320 / Math.max(width, height)))));
+        let iconSize = Math.min(40, Math.floor(320 / Math.max(width, height)));
+        if (layoutGeo) {
+          const slot = layoutGeo.cells[y * width + x];
+          mechFxPlace(btn, slot, b.left, b.top, layoutK);
+          const def = cell ? patternResourceIcon(cell) : null;
+          mechFxDecorateSlot(btn, slot.shape, { color: mechFxIconMainColor(def), level: cell ? 1 : 0, mini: layoutK < 0.8 });
+          iconSize = Math.max(14, Math.round(Math.min(slot.w, slot.h) * layoutK * 0.55));
+        }
+        if (cell) btn.appendChild(el("span", { class: "pattern-cell-icon" }, [patternIconEl(cell, iconSize)]));
         btn.addEventListener("click", () => {
           // Клик тем же ресурсом (или ластиком) стирает - иначе выбранную ячейку
           // нельзя было бы очистить, не переключаясь на ластик каждый раз.
@@ -4112,9 +4720,12 @@ function openPatternModal(action, aid, onChange, opts) {
     });
     mirrorRow.append(mirrorCheckbox, el("label", { text: "Ловить зеркальный узор" }));
     costBox.appendChild(mirrorRow);
-    costBox.appendChild(el("p", { class: "hint", text:
-      "пустые края узора обрезаются перед сравнением, поэтому рисунок ловится в любом углу сетки, а рецепт верстака 3×3 "
-      + "срабатывает и на большей сетке. Два рецепта одного механизма не могут иметь одинаковую форму - это ошибка валидации" }));
+    costBox.appendChild(el("p", { class: "hint", text: crafting.fixed
+      ? "узор привязан к ячейкам (галочка у крафт-сетки механизма): рецепт собирается только в тех ячейках, где нарисован. "
+        + "Два рецепта одного механизма не могут занимать одинаковые ячейки одинаковыми ресурсами - это ошибка валидации"
+      : "пустые края узора обрезаются перед сравнением, поэтому рисунок ловится в любом углу сетки, а рецепт верстака 3×3 "
+        + "срабатывает и на большей сетке. Два рецепта одного механизма не могут иметь одинаковую форму - это ошибка валидации"
+        + (layout ? ". Ячейки механизма расставлены по-своему - если у них свой смысл (бак), привяжи узор к ячейкам галочкой у крафт-сетки" : "") }));
   }
 
   function renderAllPattern() {
@@ -8859,6 +9470,7 @@ const CONDITION_TYPES = {
   tool_tier_at_least: { label: "Прокачать инструмент до тира не ниже", fields: ["tool", "amount"] },
   species_discovered_at_least: { label: "Открыть видов существ не меньше", fields: ["amount"] },
   species_discovered: { label: "Вывести/поймать конкретный вид", fields: ["species"] },
+  mob_killed: { label: "Убить моба или босса (хотя бы раз)", fields: ["mob"] },
   manual_action_performed_at_least: { label: "Выполнить ручное действие не меньше раз", fields: ["action", "amount"] },
   building_upgrade_purchased: { label: "Купить улучшение постройки", fields: ["building", "upgrade"] },
   storage_tier_at_least: { label: "Прокачать склад ресурса до тира не ниже", fields: ["resource", "amount"] },
@@ -8900,6 +9512,11 @@ function requiredActionSelect(selected, onchange) {
   return genericPickerSelect(entries, selected, onchange, { title: "Выбрать действие", placeholder: "— выбрать действие —" });
 }
 
+function requiredMobSelect(selected, onchange) {
+  const entries = Object.entries(DATA.mobs || {}).map(([mid, m]) => ({ value: mid, label: m.is_boss ? `${m.name} (босс)` : m.name }));
+  return genericPickerSelect(entries, selected, onchange, { title: "Выбрать моба или босса", placeholder: "— выбрать моба —" });
+}
+
 // Зависимый от выбранной постройки список её же upgrades - в отличие от
 // requiredBuildingSelect/requiredTechSelect (плоское глобальное пространство id),
 // upgrade.id уникален только ВНУТРИ одной постройки (см. building_upgrade_purchased).
@@ -8923,6 +9540,7 @@ function defaultConditionOfType(type) {
   if (fields.includes("tool")) cond.tool = Object.keys(DATA.tools)[0];
   if (fields.includes("action")) cond.action = Object.keys(DATA.manual_actions)[0];
   if (fields.includes("species")) cond.species = Object.keys(DATA.species || {})[0];
+  if (fields.includes("mob")) cond.mob = Object.keys(DATA.mobs || {})[0];
   if (fields.includes("upgrade")) cond.upgrade = (DATA.buildings[cond.building]?.upgrades || [])[0]?.id;
   if (fields.includes("upgrade_type")) cond.upgrade_type = UPGRADE_TYPE_OPTIONS[0][0];
   return cond;
@@ -8986,6 +9604,10 @@ function renderConditions(container, conditions) {
     if (info.fields.includes("species")) {
       fieldsRow.appendChild(el("label", { text: "Вид" }));
       fieldsRow.appendChild(speciesSelect(cond.species, v => { cond.species = v; }));
+    }
+    if (info.fields.includes("mob")) {
+      fieldsRow.appendChild(el("label", { text: "Моб" }));
+      fieldsRow.appendChild(requiredMobSelect(cond.mob, v => { cond.mob = v; }));
     }
     if (info.fields.includes("upgrade")) {
       fieldsRow.appendChild(el("label", { text: "Улучшение" }));
@@ -9670,11 +10292,13 @@ function renderReactor() {
   root.appendChild(accidentsBox);
 }
 
-// Квестбук - буквально дерево технологий (renderTechs/renderTechGraphView ниже),
-// только "requires" ссылается на ДРУГОЙ КВЕСТ (а не технологию), а "era" - чисто
-// визуальная колонка графа (аналог "tier" у технологий), без завязки на технологии
-// вообще (см. game/engine.py:is_quest_available/check_quests: граф квестов
-// открывается волнами "один за другим" сам по себе, требуя выполнения requires).
+// Квестбук - граф требований, как дерево технологий, только "requires" ссылается на
+// ДРУГОЙ КВЕСТ, а "era" - отдельная вкладка-граф (см. game/engine.py:
+// is_quest_available/check_quests: граф квестов открывается волнами сам по себе).
+// Вкладка «Граф» (макет «Новый квестбук», прямое пожелание, 2026-09-30): эры и их
+// оформление | граф | инспектор выбранного квеста. Узлы, связи, фон эры и карточку
+// эры рисует tools/quest_fx.js - тот же код, что в игре, поэтому поле = то, что
+// увидит игрок. «Список» остаётся для массовой правки карточками.
 let questsViewMode = "graph"; // "graph" | "list"
 
 function renderQuests() {
@@ -9692,6 +10316,7 @@ function renderQuests() {
   if (questsViewMode === "graph") {
     renderQuestGraphView(root);
   } else {
+    questViewRefs = null;
     renderQuestListView(root);
   }
 }
@@ -9705,19 +10330,30 @@ function jumpToQuestCard(qid, options) {
 // эта обёртка сохраняет прокрутку там, где перестройка не должна двигать вид
 // (перетаскивание узла, добавление/удаление связи).
 function renderQuestsKeepScroll() {
-  const scrollEl = document.querySelector(".graph-scroll");
+  const scrollEl = document.querySelector("#tab-quests .graph-scroll");
   const left = scrollEl ? scrollEl.scrollLeft : null;
   const top = scrollEl ? scrollEl.scrollTop : null;
   renderQuests();
   if (left !== null) {
-    const newScrollEl = document.querySelector(".graph-scroll");
+    const newScrollEl = document.querySelector("#tab-quests .graph-scroll");
     if (newScrollEl) { newScrollEl.scrollLeft = left; newScrollEl.scrollTop = top; }
   }
 }
 
+// quests.*.bg/border/tooltip_color (до «Нового квестбука», 2026-09-30) -> один accent:
+// рамка важнее фона, цвет подсказки больше не нужен (название видно на карточке узла).
+// Зовётся при каждой загрузке content.json - сохранение пишет уже новый вид.
+function migrateQuestAppearance(data) {
+  Object.values(data.quests || {}).forEach(q => {
+    if (!q.accent && (q.border || q.bg)) q.accent = q.border || q.bg;
+    delete q.bg;
+    delete q.border;
+    delete q.tooltip_color;
+  });
+}
+
 // Необязательное per-объектное поле-цвет с чекбоксом "включено" (obj[key]
-// отсутствует = используется дефолт, задавать который тут не нужно - см.
-// eraThemeEditor/CSS по статусу в web_ui.html). Общий виджет для quests.*.bg/border.
+// отсутствует = используется дефолт). Общий виджет для quests.*.accent в «Списке».
 function optionalColorField(label, obj, key, onChange) {
   const row = el("div", { class: "field-row" });
   row.appendChild(el("label", { text: label }));
@@ -9736,14 +10372,42 @@ function optionalColorField(label, obj, key, onChange) {
   return row;
 }
 
+// Вид узла (quests.*.style) + надпись на ленте вехи (quests.*.ribbon) - общая пара
+// полей «Списка» и инспектора графа.
+function questStyleSelect(q, onChange) {
+  const sel = el("select");
+  Object.entries(QUEST_FX_STYLES).forEach(([id, s]) => {
+    const opt = el("option", { value: id, text: s.name });
+    if ((q.style || "normal") === id) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  sel.addEventListener("change", () => {
+    if (sel.value === "normal") delete q.style; else q.style = sel.value;
+    onChange();
+  });
+  return sel;
+}
+
+function questRibbonInput(q, onChange) {
+  const input = el("input", { type: "text", value: q.ribbon || "", placeholder: "ВЕХА", maxlength: String(QUEST_RIBBON_MAX_LEN) });
+  input.addEventListener("input", () => {
+    const v = input.value.trim();
+    if (v) q.ribbon = v; else delete q.ribbon;
+    onChange();
+  });
+  return input;
+}
+// Держать в паре с tools/content_validation.py: QUEST_RIBBON_MAX_LEN.
+const QUEST_RIBBON_MAX_LEN = 16;
+
 function renderQuestListView(root) {
   ensureErasForQuests();
   root.appendChild(el("p", { class: "hint", text:
     "Условия внутри одного квеста нужно выполнить ВСЕ сразу (через И). Квест выполняется один раз и не теряется; "
     + "награда - ВСЕГДА лутбокс (кейс с лутом ниже), который игрок открывает сам отдельным кликом в игре (анимация "
     + "прокрутки барабана). requires - какие другие квесты должны быть выполнены раньше (граф открывается волнами, "
-    + "как дерево технологий) - удобнее тянуть мышью на вкладке «Граф». era - чисто визуальная группировка в "
-    + "колонки графа, с технологиями никак не связана." }));
+    + "как дерево технологий) - удобнее тянуть мышью на вкладке «Граф». era - вкладка квестбука со своим графом, "
+    + "с технологиями никак не связана." }));
 
   const cardsBox = el("div");
   const filterBar = makeFilterBar("quests", cardsBox);
@@ -9784,7 +10448,7 @@ function renderQuestListView(root) {
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Описание" }), descriptionTextarea(q.description, "Описание квеста", (v) => { q.description = v; })]));
 
     const eraRow = el("div", { class: "field-row" });
-    eraRow.appendChild(el("label", { text: "Эра (колонка графа)" }));
+    eraRow.appendChild(el("label", { text: "Эра (вкладка квестбука)" }));
     const eraSelect = el("select");
     sortedEraIds().forEach(eraId => {
       const opt = el("option", { value: String(eraId), text: `#${eraId} ${DATA.eras[String(eraId)].name}` });
@@ -9793,30 +10457,19 @@ function renderQuestListView(root) {
     });
     eraSelect.addEventListener("change", () => { q.era = Number(eraSelect.value); });
     eraRow.appendChild(eraSelect);
-    eraRow.appendChild(el("span", { class: "hint", text: "новую эру заведи в блоке «Эры» на вкладке «Граф»" }));
+    eraRow.appendChild(el("span", { class: "hint", text: "новую эру заведи в списке эр на вкладке «Граф»" }));
     card.appendChild(eraRow);
 
-    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Свой значок (центр узла на графе, виден при ЛЮБОМ статусе, включая заблокированный)" })]));
-    card.appendChild(el("div", { class: "field-row" }, [
-      iconEditButton(q.name || qid, q, defaultQuestIcon(), () => renderQuestsKeepScroll()),
-    ]));
-
-    card.appendChild(optionalColorField("Свой фон узла на графе", q, "bg", () => renderQuestsKeepScroll()));
-    card.appendChild(optionalColorField("Своя рамка узла на графе", q, "border", () => renderQuestsKeepScroll()));
-    card.appendChild(optionalColorField("Свой цвет текста подсказки при наведении", q, "tooltip_color", () => renderQuestsKeepScroll()));
+    card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Значок узла" }), iconEditButton(q.name || qid, q, QUEST_FX_DEFAULT_ICON, () => {})]));
+    card.appendChild(optionalColorField("Свой цвет узла (без него - цвет эры)", q, "accent", () => {}));
+    const styleRow = el("div", { class: "field-row" }, [el("label", { text: "Вид узла" })]);
+    const ribbonWrap = el("span", { class: "field-row", style: "margin:0" }, [el("span", { class: "hint", text: "надпись на ленте" }), questRibbonInput(q, () => {})]);
+    ribbonWrap.style.display = q.style === "milestone" ? "" : "none";
+    styleRow.append(questStyleSelect(q, () => { ribbonWrap.style.display = q.style === "milestone" ? "" : "none"; }), ribbonWrap);
+    card.appendChild(styleRow);
 
     card.appendChild(el("div", { class: "field-row" }, [el("label", { text: "Требует квестов" })]));
-    const reqBox = el("div", { class: "req-list" });
-    Object.entries(DATA.quests).filter(([oqid]) => oqid !== qid).forEach(([oqid, other]) => {
-      const cb = el("input", { type: "checkbox" });
-      cb.checked = q.requires.includes(oqid);
-      cb.addEventListener("change", () => {
-        if (cb.checked) { if (!q.requires.includes(oqid)) q.requires.push(oqid); }
-        else { q.requires = q.requires.filter(x => x !== oqid); }
-      });
-      reqBox.appendChild(el("label", {}, [cb, document.createTextNode(other.name)]));
-    });
-    card.appendChild(reqBox);
+    card.appendChild(questRequiresEditor(qid, null));
 
     const rewardRow = el("div", { class: "field-row" });
     rewardRow.appendChild(el("label", { text: "Награда (кейс с лутом)" }));
@@ -9840,45 +10493,12 @@ function renderQuestListView(root) {
   root.appendChild(renderLootCasesSection());
 }
 
-// ---------- Квесты: граф ----------
-// Буквальная копия "Технологии: граф" (renderTechGraphView и соседний код) ниже -
-// свои DOM id/переменные состояния, чтобы перетаскивание в одном графе никогда не
-// задевало состояние другого (переключение вкладок посреди drag - редкий, но
-// дешёво избегаемый край).
+// ---------- Эры ----------
 
-// 64x64 - РОВНО тот же размер, что .quest-node в игре (tools/web_ui.html) -
-// узел графа тут больше не текстовая карточка, а 1:1 превью финального вида
-// (см. renderQuestGraphView ниже). ROW_GAP чуть больше, чем у остальных
-// графов редактора - под подпись-id, которая торчит ПОД квадратом.
-const QUEST_NODE_W = 64, QUEST_NODE_H = 64, QUEST_COL_GAP = 60, QUEST_ROW_GAP = 30, QUEST_PAD = 24;
-// Дефолтный цвет текста подсказки без q.tooltip_color - держать в паре с
-// QUEST_DEFAULT_TOOLTIP_COLOR в tools/web_ui.html.
-const QUEST_DEFAULT_TOOLTIP_COLOR = "#dbe7ec";
-// Квадратный узел квеста тянется за любую грань (в отличие от узла тех-дерева -
-// там только правая) - квесты не обязаны течь строго слева направо, см.
-// renderQuestGraphView/questEdgeAnchor.
-const QUEST_HANDLE_SIDES = ["top", "right", "bottom", "left"];
-
-let selectedQuestNode = null;
-let questConnectDragState = null;
-let questNodeDragState = null;
-// Активная вкладка-эра графового редактора (см. renderQuestGraphView) - каждая
-// эра теперь СВОЙ отдельный граф/канвас, а не колонка общего (см. комментарий
-// у renderQuestGraphView) - переживает перерисовки в течение сессии редактора.
-let questGraphEra = null;
-
-function questEraOf(id) {
-  return DATA.quests[id]?.era || 1;
-}
-
-// Оформление эр квестбука (content.json: eras[eraId] -> {name, color}) - хранит
-// имя и главный цвет каждой эры отдельно от самого номера era у квеста
-// (quests.*.era остаётся числом-ключом графа/сортировки, как раньше - см.
-// "Критичные инварианты" в CLAUDE.md про переиспользование позиции как id).
-// ensureEra идемпотентно заводит запись с дефолтным именем/цветом для любого
-// era, у которого её ещё нет (тот же приём, что _ensure_farm_instances в
-// engine.py) - вызывается при каждом обращении к эре в редакторе, поэтому у
-// любого номера, реально использованного квестом, всегда есть что редактировать.
+// Оформление эр квестбука (content.json: eras[eraId] -> {name, color, subtitle?, icon?,
+// backdrop?}) - номер era у квеста остаётся ключом-позицией (см. "Критичные инварианты"
+// в CLAUDE.md). ensureEra идемпотентно заводит запись с дефолтным именем/цветом для
+// любого era, у которого её ещё нет (тот же приём, что _ensure_farm_instances в engine.py).
 function ensureEra(eraId) {
   if (!DATA.eras) DATA.eras = {};
   const key = String(eraId);
@@ -9899,24 +10519,8 @@ function sortedEraIds() {
   return Object.keys(DATA.eras).map(Number).sort((a, b) => a - b);
 }
 
-function hexToRgbaEditor(hex, alpha) {
-  const m = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex || "");
-  if (!m) return hex;
-  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-// Тема эры для отрисовки (вкладка/фон графа) - буквальная копия eraTheme из
-// tools/web_ui.html, держать в паре (два независимых HTML-файла, общего JS-
-// модуля между ними нет - см. CLAUDE.md).
-function eraThemeEditor(eraId) {
-  const info = ensureEra(eraId);
-  return { bg: hexToRgbaEditor(info.color, 0.10), border: hexToRgbaEditor(info.color, 0.35), text: info.color, name: info.name };
-}
-
 // Следующий свободный номер era - максимум среди уже заведённых (и в eras, и у
-// квестов, на случай расхождения) + 1, чтобы "Добавить эру" никогда не
-// перезаписала уже занятый номер.
+// квестов, на случай расхождения) + 1, чтобы "+ Эра" никогда не перезаписала занятый номер.
 function nextFreeEraId() {
   const used = [
     ...Object.keys(DATA.eras || {}).map(Number),
@@ -9925,17 +10529,14 @@ function nextFreeEraId() {
   return (used.length ? Math.max(...used) : 0) + 1;
 }
 
-// Число квестов, использующих эту эру - определяет, можно ли её удалить
-// (удаление эры с квестами оставило бы их era висеть без оформления - не
-// запрещено валидатором, но осмысленнее не пускать это из UI молча).
+// Число квестов, использующих эту эру - определяет, можно ли её удалить.
 function eraUsageCount(eraId) {
   return Object.values(DATA.quests || {}).filter(q => (q.era || 1) === eraId).length;
 }
 
-// Обмен местами двух эр (реордер вкладок) - номер era квеста ХРАНИТ позицию
-// (тот же принцип, что тир инструмента/апгрейда, см. CLAUDE.md), поэтому
-// "передвинуть эру раньше" означает поменять местами её номер с соседним:
-// перевесить оформление eras[a]/eras[b] И перевести era всех квестов обеих эр.
+// Обмен местами двух эр (реордер) - номер era квеста ХРАНИТ позицию (тот же принцип,
+// что тир инструмента/апгрейда, см. CLAUDE.md), поэтому "передвинуть эру раньше" -
+// поменять местами оформление eras[a]/eras[b] И era всех квестов обеих эр.
 function swapEras(idA, idB) {
   const a = String(idA), b = String(idB);
   const tmp = DATA.eras[a];
@@ -9945,115 +10546,6 @@ function swapEras(idA, idB) {
     if (q.era === idA) q.era = idB;
     else if (q.era === idB) q.era = idA;
   });
-}
-
-function renderEraManager() {
-  ensureErasForQuests();
-  const box = el("div", { class: "card era-manager" });
-  box.appendChild(el("div", { class: "card-head" }, [el("strong", { text: "Эры" })]));
-  box.appendChild(el("p", { class: "hint", text:
-    "Название и главный цвет вкладки/фона графа для каждой эры. Удалить можно только эру, которой не пользуется ни один квест - "
-    + "перенеси их в другую эру на вкладке «Список» или в графе." }));
-
-  const eraIds = sortedEraIds();
-  eraIds.forEach((eraId, i) => {
-    const info = DATA.eras[String(eraId)];
-    const row = el("div", { class: "field-row era-manager-row" });
-    row.appendChild(el("span", { class: "hint", text: `#${eraId}` }));
-
-    const nameInput = el("input", { type: "text", value: info.name, style: "flex:1" });
-    nameInput.addEventListener("change", () => { info.name = nameInput.value || `Эра ${eraId}`; renderQuests(); });
-    row.appendChild(nameInput);
-
-    const colorInput = el("input", { type: "color", value: info.color });
-    colorInput.addEventListener("input", () => { info.color = colorInput.value; renderQuestsKeepScroll(); });
-    row.appendChild(colorInput);
-
-    const upBtn = el("button", { class: "small", text: "↑", disabled: i === 0 ? "true" : null });
-    upBtn.addEventListener("click", () => { swapEras(eraId, eraIds[i - 1]); renderQuests(); });
-    row.appendChild(upBtn);
-    const downBtn = el("button", { class: "small", text: "↓", disabled: i === eraIds.length - 1 ? "true" : null });
-    downBtn.addEventListener("click", () => { swapEras(eraId, eraIds[i + 1]); renderQuests(); });
-    row.appendChild(downBtn);
-
-    const usage = eraUsageCount(eraId);
-    const rmBtn = el("button", { class: "small danger", text: "Удалить", disabled: usage > 0 ? "true" : null,
-      title: usage > 0 ? `Эрой пользуются ${usage} квест(ов) - сначала перенеси их` : "" });
-    rmBtn.addEventListener("click", () => { delete DATA.eras[String(eraId)]; renderQuests(); });
-    row.appendChild(rmBtn);
-
-    box.appendChild(row);
-  });
-
-  const addBtn = el("button", { text: "+ Добавить эру", onclick: () => {
-    const id = nextFreeEraId();
-    ensureEra(id);
-    renderQuests();
-  }});
-  box.appendChild(addBtn);
-
-  return box;
-}
-
-// Локальная глубина зависимостей СРЕДИ id из `ids` (одна эра) - requires на
-// квест ВНЕ этого набора (другая эра) не увеличивает глубину: такой квест тут
-// физически не рисуется, см. renderQuestGraphView.
-function computeQuestLocalLevels(ids) {
-  const idSet = new Set(ids);
-  const localLevel = {};
-  function levelOf(id, stack) {
-    if (localLevel[id] !== undefined) return localLevel[id];
-    if (stack.has(id)) return 0; // цикл в данных - не должно происходить, но не зависаем
-    stack.add(id);
-    const q = DATA.quests[id];
-    const sameEraReqs = (q.requires || []).filter(r => idSet.has(r));
-    localLevel[id] = sameEraReqs.length ? 1 + Math.max(...sameEraReqs.map(r => levelOf(r, stack))) : 0;
-    return localLevel[id];
-  }
-  ids.forEach(id => levelOf(id, new Set()));
-  return localLevel;
-}
-
-// Раскладка графа ОДНОЙ эры (era) - в отличие от старой версии (все эры разом,
-// колонки идут одна за другой), тут offset колонок всегда начинается с нуля:
-// каждая вкладка - самостоятельный канвас.
-function computeQuestPositions(era) {
-  const ids = Object.keys(DATA.quests).filter(id => questEraOf(id) === era);
-  const localLevel = computeQuestLocalLevels(ids);
-
-  const byCol = {};
-  ids.forEach(id => { (byCol[localLevel[id]] = byCol[localLevel[id]] || []).push(id); });
-  Object.values(byCol).forEach(list => list.sort((a, b) => DATA.quests[a].name.localeCompare(DATA.quests[b].name, "ru")));
-
-  const maxCol = ids.length ? Math.max(...ids.map(id => localLevel[id])) : 0;
-  let maxAutoRows = 0;
-  const positions = {};
-  for (let col = 0; col <= maxCol; col++) {
-    const list = byCol[col] || [];
-    let row = 0;
-    list.forEach(id => {
-      const q = DATA.quests[id];
-      if (q.pos) {
-        positions[id] = { x: q.pos.x, y: q.pos.y, w: QUEST_NODE_W, h: QUEST_NODE_H };
-      } else {
-        positions[id] = {
-          x: QUEST_PAD + col * (QUEST_NODE_W + QUEST_COL_GAP),
-          y: QUEST_PAD + row * (QUEST_NODE_H + QUEST_ROW_GAP),
-          w: QUEST_NODE_W,
-          h: QUEST_NODE_H,
-        };
-        row++;
-      }
-    });
-    maxAutoRows = Math.max(maxAutoRows, row);
-  }
-  let width = QUEST_PAD * 2 + (maxCol + 1) * QUEST_NODE_W + maxCol * QUEST_COL_GAP;
-  let height = QUEST_PAD * 2 + maxAutoRows * QUEST_NODE_H + Math.max(0, maxAutoRows - 1) * QUEST_ROW_GAP;
-  Object.values(positions).forEach(p => {
-    width = Math.max(width, p.x + p.w + QUEST_PAD);
-    height = Math.max(height, p.y + p.h + QUEST_PAD);
-  });
-  return { positions, width: Math.max(width, 400), height: Math.max(height, 200), ids };
 }
 
 function dependsOnQuest(questId, targetId, visited) {
@@ -10071,227 +10563,309 @@ function wouldCreateQuestCycle(fromId, toId) {
   return dependsOnQuest(fromId, toId, new Set());
 }
 
-// Каждая эра - СВОЙ отдельный граф на своей вкладке (не колонка общего, как
-// было раньше) - requires ВНУТРИ одной эры рисуется линией, requires на квест
-// ИЗ ДРУГОЙ эры по-прежнему реально гейтит доступность в игре (см.
-// game/engine.py:is_quest_available), но линией тут не рисуется - того узла
-// физически нет на этой вкладке. Ставится/убирается такая межэровая связь
-// чекбоксом в карточке (вкладка «Список» - requires там не ограничен эрой).
-function renderQuestGraphView(root) {
-  const eras = [...new Set(Object.values(DATA.quests).map(q => q.era || 1))].sort((a, b) => a - b);
-  if (questGraphEra === null || !eras.includes(questGraphEra)) {
-    questGraphEra = eras[0] ?? 1;
+// quests.*.requires - чипы выбранных квестов (× убирает) + «+ требование», выпадающий
+// список с поиском (genericPickerSelect) по квестам ЛЮБОЙ эры; квест, который дал бы
+// цикл, не предлагается. Общий для карточки в «Списке» и инспектора «Графа».
+// onChange - перерисовка хозяина (граф должен перерисовать связи); без него виджет
+// перерисовывает только себя, не сбрасывая открытые карточки списка.
+function questRequiresEditor(qid, onChange) {
+  const wrap = el("div");
+  const render = () => {
+    const q = DATA.quests[qid];
+    if (!q.requires) q.requires = [];
+    const changed = () => { if (onChange) onChange(); else render(); };
+    wrap.innerHTML = "";
+    const reqs = el("div", { class: "qg-reqs" });
+    q.requires.forEach(rid => {
+      const r = DATA.quests[rid];
+      if (!r) return;
+      const chip = el("span", { class: "qg-req" }, [document.createTextNode(r.name)]);
+      if ((r.era || 1) !== (q.era || 1)) {
+        const tag = el("em", { text: ensureEra(r.era || 1).name });
+        tag.style.background = ensureEra(r.era || 1).color;
+        chip.appendChild(tag);
+      }
+      chip.appendChild(el("button", { type: "button", text: "×", title: "Убрать требование", onclick: () => { q.requires = q.requires.filter(x => x !== rid); changed(); } }));
+      reqs.appendChild(chip);
+    });
+    if (!q.requires.length) reqs.appendChild(el("span", { class: "hint", text: "нет - квест открыт с начала эры" }));
+    const candidates = Object.entries(DATA.quests)
+      .filter(([oid]) => oid !== qid && !q.requires.includes(oid) && !wouldCreateQuestCycle(oid, qid))
+      .map(([oid, o]) => ({ value: oid, label: `${o.name} (${ensureEra(o.era || 1).name})` }));
+    const addReq = genericPickerSelect(candidates, null, (v) => { if (v && !q.requires.includes(v)) { q.requires.push(v); changed(); } },
+      { title: "Требует квест (любой эры)", placeholder: "+ требование", emptyText: "Подходящих квестов нет." });
+    wrap.append(reqs, addReq);
+  };
+  render();
+  return wrap;
+}
+
+// ---------- Квесты: граф ----------
+
+let selectedQuestNode = null;
+let questConnectDragState = null;
+let questNodeDragState = null;
+// Активная эра графа - переживает перерисовки в течение сессии редактора.
+let questGraphEra = null;
+// Каким статусом показаны узлы на поле: start - как в начале игры (квест без
+// требований «в работе», остальные закрыты) или один статус на все узлы сразу.
+let questPreviewStatus = "start";
+const QUEST_PREVIEW_MODES = [["start", "Начало игры"], ["locked", "Закрыт"], ["available", "В работе"], ["completed", "Награда ждёт"], ["claimed", "Получено"]];
+let questInspectorTab = "look"; // "look" | "quest"
+let questIconPickerOpen = false;
+let eraIconPickerOpen = false;
+// Узел квеста тянется за любую грань - квесты не обязаны течь строго слева направо.
+const QUEST_HANDLE_SIDES = ["top", "right", "bottom", "left"];
+// Шаг сетки, к которой прилипает перетаскиваемый узел.
+const QUEST_SNAP = 8;
+// Куски вкладки, которые перерисовываются без полной пересборки (цвет, надпись на
+// ленте, девиз и т.п. - чтобы поле ввода не теряло фокус): см. refreshQuestVisuals.
+let questViewRefs = null;
+
+function questEraOf(id) {
+  return DATA.quests[id]?.era || 1;
+}
+
+function questPreviewStatusOf(qid) {
+  if (questPreviewStatus !== "start") return questPreviewStatus;
+  return (DATA.quests[qid].requires || []).length ? "locked" : "available";
+}
+
+function questEditorAccent(q) {
+  return q.accent || ensureEra(q.era || 1).color;
+}
+
+// Квесты эры в форме, которую ждут questFxLayout/questFxDrawEdges.
+function questEraItems(era) {
+  return Object.entries(DATA.quests)
+    .filter(([, q]) => (q.era || 1) === era)
+    .map(([id, q]) => ({ id, name: q.name, requires: q.requires || [], pos: q.pos, style: q.style }));
+}
+
+// Данные узла для questFxNode. Сохранения тут нет - прогресс «ничего не сделано».
+function questEditorNodeView(qid, status) {
+  const q = DATA.quests[qid];
+  const era = q.era || 1;
+  const reqs = (q.requires || []).filter(r => DATA.quests[r]);
+  const cross = reqs.filter(r => questEraOf(r) !== era);
+  const conds = q.conditions || [];
+  const progress = { frac: 0, label: conds.length === 1 ? `0/${conds[0].amount ?? 1}` : `0/${conds.length}` };
+  let crossView = null;
+  if (cross.length) {
+    const other = ensureEra(questEraOf(cross[0]));
+    crossView = {
+      label: `⟵ ${other.name}: ${DATA.quests[cross[0]].name}`, color: other.color,
+      title: `Требует: ${cross.map(r => `${DATA.quests[r].name} (${ensureEra(questEraOf(r)).name})`).join(", ")}`,
+    };
   }
+  return {
+    name: q.name, icon: q.icon || QUEST_FX_DEFAULT_ICON, style: q.style, ribbon: q.ribbon, accent: questEditorAccent(q),
+    status, progress, note: reqs.length ? `после: ${reqs.map(r => DATA.quests[r].name).join(", ")}` : "Закрыт",
+    cross: crossView, tip: null, selected: qid === selectedQuestNode, tipBelow: false,
+  };
+}
+
+// Уже нарисованные иконки контента - кнопка «Взять у…» (значок квеста, эмблема эры),
+// чтобы не рисовать заново то, что есть у ресурса, постройки или моба.
+function contentIconChoices() {
+  const out = [];
+  const add = (label, icon) => { if (icon && icon.grid) out.push({ label, icon }); };
+  (DATA.resources || []).forEach(r => add(`Ресурс: ${r.name}`, r.icon));
+  Object.values(DATA.buildings || {}).forEach(b => add(`Постройка: ${b.name}`, b.icon));
+  Object.values(DATA.mobs || {}).forEach(m => add(`Моб: ${m.name}`, m.icon));
+  Object.values(DATA.tools || {}).forEach(t => (t.tiers || []).forEach(tier => add(`Инструмент: ${tier.name}`, tier.icon)));
+  Object.values(DATA.eras || {}).forEach(e => add(`Эра: ${e.name}`, e.icon));
+  Object.values(DATA.quests || {}).forEach(q => add(`Квест: ${q.name}`, q.icon));
+  return out;
+}
+
+function contentIconPicker(onPick) {
+  const box = el("div", { class: "qg-ipick" });
+  const choices = contentIconChoices();
+  if (!choices.length) {
+    box.appendChild(el("span", { class: "hint", text: "В контенте пока нет нарисованных иконок." }));
+    return box;
+  }
+  choices.forEach(c => {
+    const btn = el("button", { type: "button", title: c.label });
+    btn.appendChild(pixelIcon(c.icon.grid, c.icon.palette, 24));
+    btn.addEventListener("click", () => onPick(cloneIcon(c.icon)));
+    box.appendChild(btn);
+  });
+  return box;
+}
+
+function qgField(label, control) {
+  return el("div", { class: "qg-field" }, [el("label", { text: label }), control]);
+}
+
+function qgSeg(options, value, onPick) {
+  const seg = el("div", { class: "view-toggle qg-seg" });
+  options.forEach(([id, label]) => seg.appendChild(el("button", {
+    type: "button", text: label, class: id === value ? "active" : "", onclick: () => onPick(id),
+  })));
+  return seg;
+}
+
+function renderQuestGraphView(root) {
+  const eraIds = sortedEraIds();
+  if (questGraphEra === null || !eraIds.includes(questGraphEra)) {
+    const used = Object.values(DATA.quests).map(q => q.era || 1);
+    questGraphEra = used.length ? Math.min(...used) : (eraIds[0] ?? 1);
+  }
+  ensureEra(questGraphEra);
 
   const addForm = idPromptAndAdd("квест", (id) => {
     const firstCase = Object.keys(DATA.loot_cases)[0] || null;
     DATA.quests[id] = { name: "Новый квест", description: "", era: questGraphEra, requires: [], conditions: [], reward_case: firstCase };
     selectedQuestNode = id;
-    // Узлы графа не редактируются inline (только перетаскивание/связи) - настоящие
-    // поля (название, описание, условия) живут в карточке списка, поэтому сразу туда.
-    jumpToQuestCard(id, { focusName: true });
+    questInspectorTab = "quest";
+    renderQuests();
   });
-  const resetBtn = el("button", { text: "Сбросить расположение этой эры", onclick: () => {
+  addForm.appendChild(el("button", { text: "Разложить заново", title: "Убрать ручные позиции квестов этой эры - они встанут колонками по глубине требований", onclick: () => {
     Object.values(DATA.quests).forEach(q => { if ((q.era || 1) === questGraphEra) delete q.pos; });
     renderQuests();
-  }});
-  addForm.appendChild(resetBtn);
-  // В отличие от техов (всегда линейно слева направо), квесты можно расставить
-  // как угодно (например "плюсом") - авто-раскладка по столбцам тогда покрывает
-  // только часть общей рамки графа, и дефолтный скролл в (0,0) может показать
-  // пустой угол. centerQuestGraphView (вызывается ниже при каждом рендере этой
-  // вкладки) уже центрирует вид по факту содержимого - кнопка нужна, только
-  // чтобы вернуться к центру вручную после того, как игрок сам поскроллил/
-  // попанорамил в сторону.
-  const centerBtn = el("button", { text: "Центрировать", onclick: () => centerQuestGraphView() });
-  addForm.appendChild(centerBtn);
-  const toolbar = el("div", { class: "tab-toolbar" }, [addForm]);
-  root.appendChild(toolbar);
+  }}));
+  addForm.appendChild(el("button", { text: "Центрировать", onclick: () => centerQuestGraphView() }));
+  root.appendChild(el("div", { class: "tab-toolbar" }, [addForm]));
 
-  root.appendChild(renderEraManager());
+  const layoutBox = el("div", { class: "qg-layout" });
+  const erasHost = el("div", { class: "qg-eras" });
+  const center = el("div", { class: "qg-center" });
+  const inspectorHost = el("div", { class: "qg-inspector" });
+  layoutBox.append(erasHost, center, inspectorHost);
+  root.appendChild(layoutBox);
 
-  root.appendChild(el("p", { class: "hint", text:
-    "Перетаскивай узел за тело карточки, чтобы разместить его где угодно в графе - позиция запоминается. " +
-    "Тяни за один из четырёх оранжевых кружков по граням узла к другому узлу ЭТОЙ ЖЕ эры - появится " +
-    "зависимость (узел-источник станет требуемым квестом для узла-цели); в отличие от техов, квесты не обязаны " +
-    "выстраиваться слева направо, поэтому грань для связи можно выбрать любую - линия сама подбирает, с какой " +
-    "стороны каждого узла ей удобнее выходить/входить, в зависимости от их взаимного расположения. Клик по линии " +
-    "удаляет связь. Клик по узлу (без перетаскивания) подсвечивает его связи. Двойной клик открывает карточку в " +
-    "списке для полного редактирования (название, условия, награда, оформление, а также requires НА ДРУГУЮ ЭРУ - " +
-    "там список не ограничен текущей вкладкой)." }));
+  const bar = el("div", { class: "qg-bar" }, [el("span", { class: "hint", text: "Показать как:" })]);
+  bar.appendChild(qgSeg(QUEST_PREVIEW_MODES, questPreviewStatus, (mode) => { questPreviewStatus = mode; renderQuestsKeepScroll(); }));
+  center.appendChild(bar);
+  center.appendChild(el("p", { class: "hint qg-hint", text:
+    "Узел двигается мышью, связь тянется за кружок на грани узла к другому квесту этой эры, клик по линии удаляет связь, "
+    + "колесо - масштаб, двойной клик - карточка в «Списке». Требование на квест другой эры ставится в инспекторе справа." }));
+  const graphHost = el("div");
+  center.appendChild(graphHost);
 
-  if (!Object.keys(DATA.quests).length) {
-    root.appendChild(el("p", { class: "hint", text: "Квестов пока нет - добавь их кнопкой выше." }));
-    return;
-  }
-
-  const tabs = el("div", { class: "view-toggle era-toggle" });
-  eras.forEach(era => {
-    const theme = eraThemeEditor(era);
-    const btn = el("button", { text: theme.name, class: era === questGraphEra ? "active" : "" });
-    btn.style.setProperty("--era-accent", theme.text);
-    btn.addEventListener("click", () => { questGraphEra = era; renderQuests(); });
-    tabs.appendChild(btn);
-  });
-  root.appendChild(tabs);
-
-  const { positions, width, height, ids } = computeQuestPositions(questGraphEra);
-
-  if (!ids.length) {
-    root.appendChild(el("p", { class: "hint", text: "В этой эре пока нет квестов." }));
-    return;
-  }
-
-  const scroll = el("div", { class: "graph-scroll graph-scroll-tab" });
-  const graph = el("div", { class: "tech-graph", id: "questGraph" });
-  graph.style.width = width + "px";
-  graph.style.height = height + "px";
-  const theme = eraThemeEditor(questGraphEra);
-  graph.style.background = theme.bg;
-
-  const svg = svgEl("svg", { class: "tech-graph-svg", width, height });
-  const defs = svgEl("defs");
-  const marker = svgEl("marker", {
-    id: "arrowhead-quest", viewBox: "0 0 10 10", refX: "9", refY: "5",
-    markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse",
-  });
-  marker.appendChild(svgEl("path", { d: "M 0 0 L 10 5 L 0 10 z" }));
-  defs.appendChild(marker);
-  svg.appendChild(defs);
-
-  ids.forEach(qid => {
-    const q = DATA.quests[qid];
-    (q.requires || []).forEach(reqId => {
-      const p1 = positions[reqId], p2 = positions[qid];
-      if (!p1 || !p2) return; // reqId из другой эры - на этой вкладке не рисуется
-      const { x1, y1, x2, y2 } = questEdgeAnchor(p1, p2);
-      const d = questEdgePathD(x1, y1, x2, y2);
-
-      const visible = svgEl("path", { d, class: "tech-edge" });
-      visible.setAttribute("marker-end", "url(#arrowhead-quest)");
-      visible.dataset.from = reqId;
-      visible.dataset.to = qid;
-
-      const hit = svgEl("path", { d, class: "tech-edge-hit" });
-      hit.dataset.from = reqId;
-      hit.dataset.to = qid;
-      hit.addEventListener("click", () => {
-        q.requires = q.requires.filter(x => x !== reqId);
-        renderQuestsKeepScroll();
-      });
-
-      svg.appendChild(visible);
-      svg.appendChild(hit);
-    });
-  });
-  graph.appendChild(svg);
-
-  ids.forEach(qid => {
-    const q = DATA.quests[qid];
-    const pos = positions[qid];
-    const node = el("div", { class: "tech-node quest-node-square", id: `questnode-${qid}` });
-    node.dataset.questId = qid;
-    node.style.left = pos.x + "px";
-    node.style.top = pos.y + "px";
-    node.style.width = pos.w + "px";
-    node.style.height = pos.h + "px";
-    // 1:1 превью игрового узла (web_ui.html:buildQuestNode) - большая пиксель-
-    // иконка (q.icon, дефолт defaultQuestIcon() - та же {grid,palette} форма,
-    // что у ресурсов/построек/мобов, рисуется через pixelIcon) виден при
-    // ЛЮБОМ статусе, включая locked, поэтому показываем его тут БЕЗУСЛОВНО
-    // (не только если q.icon задан). Подсказка с именем - та же самая, что
-    // всплывает в игре при наведении, тем же шрифтом/цветом - включая
-    // q.tooltip_color, если задан (та же per-квестовая настройка, что
-    // icon/bg/border, не общая на все квесты сразу).
-    const iconDef = q.icon || defaultQuestIcon();
-    const iconWrap = el("div", { class: "quest-node-square-icon" });
-    iconWrap.appendChild(pixelIcon(iconDef.grid, iconDef.palette, 34));
-    node.appendChild(iconWrap);
-    const tip = el("div", { class: "quest-node-tip", text: q.name });
-    tip.style.color = q.tooltip_color || QUEST_DEFAULT_TOOLTIP_COLOR;
-    node.appendChild(tip);
-    node.appendChild(el("div", { class: "quest-node-square-caption", text: qid }));
-    if (q.bg) node.style.background = q.bg;
-    if (q.border) node.style.borderColor = q.border;
-
-    // Квадратный узел квеста тянется за любую из четырёх граней (в отличие от
-    // узла тех-дерева - там только правая, см. handle выше в renderTechGraphView) -
-    // квесты не обязаны течь строго слева направо.
-    QUEST_HANDLE_SIDES.forEach(side => {
-      const handle = el("div", { class: `tech-node-handle handle-${side}` });
-      handle.addEventListener("mousedown", (e) => startQuestConnectDrag(qid, side, e));
-      node.appendChild(handle);
-    });
-
-    // Обычный клик (без движения мыши) выделяет узел; клик с движением - перетаскивание.
-    node.addEventListener("mousedown", (e) => {
-      if (e.target.closest(".tech-node-handle") || e.button !== 0) return;
-      startQuestNodeDrag(qid, e);
-    });
-    node.addEventListener("dblclick", (e) => {
-      if (e.target.closest(".tech-node-handle")) return;
-      jumpToQuestCard(qid);
-    });
-
-    graph.appendChild(node);
-  });
-
-  scroll.appendChild(graph);
-  root.appendChild(scroll);
-  enableGraphZoomEditor(scroll, graph, questGraphZoom);
-  applyQuestSelectionHighlight();
-  // Раскладка по столбцам покрывает не всю рамку графа, если квесты расставлены
-  // вручную не по прямой (см. кнопку "Центрировать" выше) - без этого дефолтный
-  // скролл (0,0) может показать пустой угол вместо содержимого. Синхронно (не
-  // requestAnimationFrame) - иначе перебивало бы восстановление позиции в
-  // renderQuestsKeepScroll (та тоже синхронная, выполняется СРАЗУ после
-  // renderQuests(), см. её код), из-за которого любой клик по ребру/перетаскивание
-  // узла откидывали бы вид обратно к центру вместо сохранения текущего скролла.
+  questViewRefs = { erasHost, graphHost, inspectorHost, previewHost: null, eraPreviewHost: null };
+  renderQuestErasColumn();
+  buildQuestGraph();
+  renderQuestInspector();
   centerQuestGraphView();
 }
 
-// Центрирует .graph-scroll на фактической рамке уже отрисованных узлов
-// (а не на позициях из DATA - читает live DOM, чтобы работать что для
-// авто-раскладки, что для узлов с ручным pos, одинаково). Вызывается и
-// автоматически при каждом рендере вкладки "Граф" (renderQuestsKeepScroll
-// сразу после неё синхронно восстанавливает прежний скролл, если он был -
-// см. комментарий выше), и вручную кнопкой "Центрировать".
+// Перерисовать поле, превью узла и превью эры, не трогая поля ввода (фокус остаётся).
+function refreshQuestVisuals() {
+  if (!questViewRefs) return;
+  const scrollEl = questViewRefs.graphHost.querySelector(".graph-scroll");
+  const left = scrollEl ? scrollEl.scrollLeft : 0, top = scrollEl ? scrollEl.scrollTop : 0;
+  buildQuestGraph();
+  const newScroll = questViewRefs.graphHost.querySelector(".graph-scroll");
+  if (newScroll) { newScroll.scrollLeft = left; newScroll.scrollTop = top; }
+  renderQuestPreview();
+  renderEraPreview();
+}
+
+function buildQuestGraph() {
+  const host = questViewRefs.graphHost;
+  host.innerHTML = "";
+  const items = questEraItems(questGraphEra);
+  if (!items.length) {
+    host.appendChild(el("p", { class: "hint", text: "В этой эре пока нет квестов - добавь их кнопкой выше." }));
+    return;
+  }
+  const layout = questFxLayout(items);
+  const width = Math.max(layout.width, 900), height = Math.max(layout.height, 600);
+  const scroll = el("div", { class: "graph-scroll graph-scroll-tab qg-scroll" });
+  const graph = el("div", { class: "tech-graph qg-graph", id: "questGraph" });
+  graph.style.width = width + "px";
+  graph.style.height = height + "px";
+  questFxApplyBackdrop(graph, ensureEra(questGraphEra));
+  graph.appendChild(svgEl("svg", { class: "tech-graph-svg qg-svg", width, height }));
+  items.forEach(it => {
+    const rect = layout.rects[it.id];
+    const node = questFxNode(questEditorNodeView(it.id, questPreviewStatusOf(it.id)));
+    node.classList.add("qg-node");
+    node.id = `questnode-${it.id}`;
+    node.dataset.questId = it.id;
+    node.style.left = rect.x + "px";
+    node.style.top = rect.y + "px";
+    // id - единственное, чего нет на узле в игре: подпись для автора под карточкой.
+    node.appendChild(el("div", { class: "qg-caption", text: it.id }));
+    QUEST_HANDLE_SIDES.forEach(side => {
+      const handle = el("div", { class: `tech-node-handle handle-${side}` });
+      handle.addEventListener("mousedown", (e) => startQuestConnectDrag(it.id, side, e));
+      node.appendChild(handle);
+    });
+    // Обычный клик (без движения мыши) выбирает узел; клик с движением - перетаскивание.
+    node.addEventListener("mousedown", (e) => {
+      if (e.target.closest(".tech-node-handle") || e.button !== 0) return;
+      startQuestNodeDrag(it.id, e);
+    });
+    node.addEventListener("dblclick", (e) => {
+      if (e.target.closest(".tech-node-handle")) return;
+      jumpToQuestCard(it.id);
+    });
+    graph.appendChild(node);
+  });
+  drawQuestEditorEdges(graph);
+  scroll.appendChild(graph);
+  host.appendChild(scroll);
+  enableGraphZoomEditor(scroll, graph, questGraphZoom);
+  applyQuestSelectionHighlight();
+}
+
+function questNodeRect(graph, qid) {
+  const nodeEl = graph.querySelector(`.qg-node[data-quest-id="${qid}"]`);
+  if (!nodeEl) return null;
+  const s = questFxStyle(DATA.quests[qid].style);
+  return { x: parseFloat(nodeEl.style.left) || 0, y: parseFloat(nodeEl.style.top) || 0, w: s.w, h: s.h };
+}
+
+// Связи - общий questFxDrawEdges (как в игре) + невидимая толстая линия поверх каждой
+// для клика-удаления.
+function drawQuestEditorEdges(graph) {
+  const svg = graph.querySelector(".qg-svg");
+  svg.querySelectorAll("g.qfx-e").forEach(g => g.remove());
+  const items = questEraItems(questGraphEra);
+  const rects = {};
+  items.forEach(it => { const r = questNodeRect(graph, it.id); if (r) rects[it.id] = r; });
+  const groups = questFxDrawEdges(svg, items, rects, questPreviewStatusOf, id => questEditorAccent(DATA.quests[id]));
+  groups.forEach(g => {
+    const hit = svgEl("path", { d: g.d, class: "tech-edge-hit" });
+    hit.addEventListener("click", () => {
+      const q = DATA.quests[g.to];
+      q.requires = q.requires.filter(x => x !== g.from);
+      renderQuestsKeepScroll();
+    });
+    g.el.appendChild(hit);
+  });
+}
+
+// Центрирует .graph-scroll на рамке отрисованных узлов (и авто-, и ручная раскладка).
 function centerQuestGraphView() {
-  const scrollEl = document.querySelector(".graph-scroll");
+  const scrollEl = document.querySelector("#tab-quests .graph-scroll");
   const graph = document.getElementById("questGraph");
   if (!scrollEl || !graph) return;
-  const nodeEls = graph.querySelectorAll(".tech-node.quest-node-square");
-  if (!nodeEls.length) return;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  nodeEls.forEach(n => {
-    const x = parseFloat(n.style.left) || 0, y = parseFloat(n.style.top) || 0;
-    const w = n.offsetWidth || QUEST_NODE_W, h = n.offsetHeight || QUEST_NODE_H;
-    minX = Math.min(minX, x); minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
-  });
-  // scrollLeft/scrollTop живут в отмасштабированном (экранном) пространстве -
-  // центр рамки, посчитанный в немасштабированных x/y, нужно домножить на zoom.
+  const rects = [...graph.querySelectorAll(".qg-node")].map(n => questNodeRect(graph, n.dataset.questId)).filter(Boolean);
+  if (!rects.length) return;
+  const minX = Math.min(...rects.map(r => r.x)), minY = Math.min(...rects.map(r => r.y));
+  const maxX = Math.max(...rects.map(r => r.x + r.w)), maxY = Math.max(...rects.map(r => r.y + r.h));
+  // scrollLeft/scrollTop - в отмасштабированных (экранных) пикселях, центр рамки - нет.
   const zoom = questGraphZoom.value;
   scrollEl.scrollLeft = Math.max(0, ((minX + maxX) / 2) * zoom - scrollEl.clientWidth / 2);
   scrollEl.scrollTop = Math.max(0, ((minY + maxY) / 2) * zoom - scrollEl.clientHeight / 2);
 }
 
+// Выбранный узел - уголки (.sel, как в игре), его связи ярче, остальное приглушено.
 function applyQuestSelectionHighlight() {
   const graph = document.getElementById("questGraph");
   if (!graph) return;
-  const nodes = graph.querySelectorAll(".tech-node");
-  const edges = graph.querySelectorAll(".tech-edge, .tech-edge-hit");
-
-  // selectedQuestNode может принадлежать эре, для которой сейчас показана НЕ
-  // ТА вкладка (выбор пережил переключение вкладки) - в этом случае в ТЕКУЩЕМ
-  // графе его просто нет, и без этой проверки все узлы этой эры ошибочно
-  // помечались бы "dim" (ни один не совпал бы с selectedQuestNode).
+  const nodes = graph.querySelectorAll(".qg-node");
+  const edges = graph.querySelectorAll("g.qfx-e");
   if (!selectedQuestNode || !DATA.quests[selectedQuestNode] || questEraOf(selectedQuestNode) !== questGraphEra) {
-    nodes.forEach(n => n.classList.remove("dim", "selected"));
+    nodes.forEach(n => n.classList.remove("dim", "sel"));
     edges.forEach(e => e.classList.remove("dim", "related"));
     return;
   }
-
   const related = new Set([selectedQuestNode]);
   edges.forEach(e => {
     if (e.dataset.from === selectedQuestNode || e.dataset.to === selectedQuestNode) {
@@ -10299,11 +10873,9 @@ function applyQuestSelectionHighlight() {
       related.add(e.dataset.to);
     }
   });
-
   nodes.forEach(n => {
-    const id = n.dataset.questId;
-    n.classList.toggle("selected", id === selectedQuestNode);
-    n.classList.toggle("dim", !related.has(id));
+    n.classList.toggle("sel", n.dataset.questId === selectedQuestNode);
+    n.classList.toggle("dim", !related.has(n.dataset.questId));
   });
   edges.forEach(e => {
     const isRelated = e.dataset.from === selectedQuestNode || e.dataset.to === selectedQuestNode;
@@ -10312,21 +10884,21 @@ function applyQuestSelectionHighlight() {
   });
 }
 
-// Точка на конкретной грани узла (в координатах viewport, как getBoundingClientRect)
-// - какую грань тянуть, решает игрок (см. QUEST_HANDLE_SIDES), в отличие от
-// questEdgeAnchor ниже, которая для УЖЕ построенных рёбер выбирает грань сама.
+// Точка на конкретной грани узла (экранные координаты, как getBoundingClientRect) -
+// грань, за которую тянут связь, выбирает автор; у готовой связи грань выбирает
+// questFxEdgeGeom сам по взаимному положению узлов.
 function questHandlePoint(rect, side) {
   if (side === "top") return [rect.left + rect.width / 2, rect.top];
   if (side === "bottom") return [rect.left + rect.width / 2, rect.bottom];
   if (side === "left") return [rect.left, rect.top + rect.height / 2];
-  return [rect.right, rect.top + rect.height / 2]; // right (дефолт)
+  return [rect.right, rect.top + rect.height / 2];
 }
 
 function startQuestConnectDrag(fromId, side, evt) {
   evt.preventDefault();
   evt.stopPropagation();
   const graph = document.getElementById("questGraph");
-  const svg = graph.querySelector(".tech-graph-svg");
+  const svg = graph.querySelector(".qg-svg");
   const line = svgEl("line", { class: "tech-edge-drag" });
   svg.appendChild(line);
   questConnectDragState = { fromId, side, line, graph, zoom: questGraphZoom.value };
@@ -10338,11 +10910,9 @@ function startQuestConnectDrag(fromId, side, evt) {
 function updateQuestDragLine(evt) {
   const { fromId, side, line, graph, zoom } = questConnectDragState;
   const graphRect = graph.getBoundingClientRect();
-  const fromNode = document.getElementById(`questnode-${fromId}`);
-  const fromRect = fromNode.getBoundingClientRect();
+  const fromRect = document.getElementById(`questnode-${fromId}`).getBoundingClientRect();
   const [hx, hy] = questHandlePoint(fromRect, side);
-  // См. комментарий в updateDragLine (тех-граф) - те же экранные координаты,
-  // делим на zoom, чтобы попасть в немасштабированную систему координат svg.
+  // Экранные координаты делим на zoom - так они попадают в немасштабированную систему svg.
   line.setAttribute("x1", (hx - graphRect.left) / zoom);
   line.setAttribute("y1", (hy - graphRect.top) / zoom);
   line.setAttribute("x2", (evt.clientX - graphRect.left) / zoom);
@@ -10362,11 +10932,10 @@ function onQuestConnectDragEnd(evt) {
   questConnectDragState = null;
 
   const targetEl = document.elementFromPoint(evt.clientX, evt.clientY);
-  const nodeEl = targetEl && targetEl.closest(".tech-node");
+  const nodeEl = targetEl && targetEl.closest(".qg-node");
   if (!nodeEl) return;
   const toId = nodeEl.dataset.questId;
   if (!toId || toId === fromId) return;
-
   const toQuest = DATA.quests[toId];
   if (toQuest.requires.includes(fromId)) return; // уже связаны
   if (wouldCreateQuestCycle(fromId, toId)) {
@@ -10377,71 +10946,10 @@ function onQuestConnectDragEnd(evt) {
   renderQuestsKeepScroll();
 }
 
-function questNodeRect(qid) {
-  const nodeEl = document.getElementById(`questnode-${qid}`);
-  if (!nodeEl) return null;
-  return {
-    x: parseFloat(nodeEl.style.left) || 0,
-    y: parseFloat(nodeEl.style.top) || 0,
-    w: nodeEl.offsetWidth || QUEST_NODE_W,
-    h: nodeEl.offsetHeight || QUEST_NODE_H,
-  };
-}
-
-// Для УЖЕ существующего ребра (fromId.requires содержит toId) сама выбирает,
-// с какой из четырёх граней каждого узла ей входить/выходить - по направлению
-// между их центрами (доминирует горизонталь -> боковые грани, вертикаль ->
-// верх/низ), а не по тому, за какую грань его тянул игрок при создании связи
-// (это разово, дальше узлы могут переехать перетаскиванием - см.
-// updateQuestEdgesForNode/onQuestNodeDragMove). Тем самым ЛЮБАЯ грань доступна
-// без ручного выбора при каждой перерисовке - ровно то, что нужно для
-// нелинейных по форме квестовых графов (в отличие от edgePathD/дерева
-// технологий, которые всегда текут строго слева направо).
-function questEdgeAnchor(p1, p2) {
-  const c1x = p1.x + p1.w / 2, c1y = p1.y + p1.h / 2;
-  const c2x = p2.x + p2.w / 2, c2y = p2.y + p2.h / 2;
-  const dx = c2x - c1x, dy = c2y - c1y;
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx >= 0
-      ? { x1: p1.x + p1.w, y1: c1y, x2: p2.x, y2: c2y }
-      : { x1: p1.x, y1: c1y, x2: p2.x + p2.w, y2: c2y };
-  }
-  return dy >= 0
-    ? { x1: c1x, y1: p1.y + p1.h, x2: c2x, y2: p2.y }
-    : { x1: c1x, y1: p1.y, x2: c2x, y2: p2.y + p2.h };
-}
-
-// Как edgePathD, но кривая бульжится в сторону, реально ведущую от x1,y1 к
-// x2,y2 (тот всегда предполагает движение слева направо) - нужно для рёбер,
-// которые questEdgeAnchor мог направить вертикально или даже справа налево.
-function questEdgePathD(x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    const off = Math.max(30, Math.abs(dx) / 2) * (dx < 0 ? -1 : 1);
-    return `M ${x1} ${y1} C ${x1 + off} ${y1}, ${x2 - off} ${y2}, ${x2} ${y2}`;
-  }
-  const off = Math.max(30, Math.abs(dy) / 2) * (dy < 0 ? -1 : 1);
-  return `M ${x1} ${y1} C ${x1} ${y1 + off}, ${x2} ${y2 - off}, ${x2} ${y2}`;
-}
-
-function updateQuestEdgesForNode(qid) {
-  const graph = document.getElementById("questGraph");
-  const svg = graph.querySelector(".tech-graph-svg");
-  svg.querySelectorAll("path[data-from]").forEach(p => {
-    if (p.dataset.from !== qid && p.dataset.to !== qid) return;
-    const r1 = questNodeRect(p.dataset.from);
-    const r2 = questNodeRect(p.dataset.to);
-    if (!r1 || !r2) return;
-    const { x1, y1, x2, y2 } = questEdgeAnchor(r1, r2);
-    p.setAttribute("d", questEdgePathD(x1, y1, x2, y2));
-  });
-}
-
-function ensureQuestCanvasSize(x, y, w, h) {
-  const graph = document.getElementById("questGraph");
-  const svg = graph.querySelector(".tech-graph-svg");
-  const neededW = x + w + QUEST_PAD;
-  const neededH = y + h + QUEST_PAD;
+function ensureQuestCanvasSize(graph, x, y, w, h) {
+  const svg = graph.querySelector(".qg-svg");
+  const neededW = x + w + QUEST_FX_PAD_X;
+  const neededH = y + h + QUEST_FX_PAD_Y;
   if (neededW > graph.offsetWidth) { graph.style.width = neededW + "px"; svg.setAttribute("width", neededW); }
   if (neededH > graph.offsetHeight) { graph.style.height = neededH + "px"; svg.setAttribute("height", neededH); }
 }
@@ -10450,7 +10958,7 @@ function startQuestNodeDrag(qid, evt) {
   evt.preventDefault();
   const nodeEl = document.getElementById(`questnode-${qid}`);
   questNodeDragState = {
-    qid, nodeEl,
+    qid, nodeEl, graph: document.getElementById("questGraph"),
     startX: evt.clientX, startY: evt.clientY,
     startLeft: parseFloat(nodeEl.style.left) || 0,
     startTop: parseFloat(nodeEl.style.top) || 0,
@@ -10462,32 +10970,264 @@ function startQuestNodeDrag(qid, evt) {
 }
 
 function onQuestNodeDragMove(evt) {
-  if (!questNodeDragState) return;
-  const dx = (evt.clientX - questNodeDragState.startX) / questNodeDragState.zoom;
-  const dy = (evt.clientY - questNodeDragState.startY) / questNodeDragState.zoom;
-  if (!questNodeDragState.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
-  questNodeDragState.moved = true;
-  const x = Math.max(0, questNodeDragState.startLeft + dx);
-  const y = Math.max(0, questNodeDragState.startTop + dy);
-  questNodeDragState.nodeEl.style.left = x + "px";
-  questNodeDragState.nodeEl.style.top = y + "px";
-  ensureQuestCanvasSize(x, y, questNodeDragState.nodeEl.offsetWidth, questNodeDragState.nodeEl.offsetHeight);
-  updateQuestEdgesForNode(questNodeDragState.qid);
+  const st = questNodeDragState;
+  if (!st) return;
+  const dx = (evt.clientX - st.startX) / st.zoom;
+  const dy = (evt.clientY - st.startY) / st.zoom;
+  if (!st.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+  st.moved = true;
+  const x = Math.max(0, Math.round((st.startLeft + dx) / QUEST_SNAP) * QUEST_SNAP);
+  const y = Math.max(0, Math.round((st.startTop + dy) / QUEST_SNAP) * QUEST_SNAP);
+  st.nodeEl.style.left = x + "px";
+  st.nodeEl.style.top = y + "px";
+  const s = questFxStyle(DATA.quests[st.qid].style);
+  ensureQuestCanvasSize(st.graph, x, y, s.w, s.h);
+  drawQuestEditorEdges(st.graph);
+  applyQuestSelectionHighlight();
 }
 
 function onQuestNodeDragEnd() {
   document.removeEventListener("mousemove", onQuestNodeDragMove);
   document.removeEventListener("mouseup", onQuestNodeDragEnd);
-  if (!questNodeDragState) return;
-  const { qid, nodeEl, moved } = questNodeDragState;
+  const st = questNodeDragState;
   questNodeDragState = null;
-  if (moved) {
-    DATA.quests[qid].pos = { x: parseFloat(nodeEl.style.left) || 0, y: parseFloat(nodeEl.style.top) || 0 };
+  if (!st) return;
+  if (st.moved) {
+    DATA.quests[st.qid].pos = { x: parseFloat(st.nodeEl.style.left) || 0, y: parseFloat(st.nodeEl.style.top) || 0 };
     renderQuestsKeepScroll();
-  } else {
-    selectedQuestNode = selectedQuestNode === qid ? null : qid;
+  } else if (selectedQuestNode !== st.qid) {
+    selectedQuestNode = st.qid;
+    questIconPickerOpen = false;
     applyQuestSelectionHighlight();
+    renderQuestInspector();
   }
+}
+
+// ---------- Квесты: колонка эр ----------
+
+function renderQuestErasColumn() {
+  const host = questViewRefs.erasHost;
+  host.innerHTML = "";
+  const eraIds = sortedEraIds();
+  const listCard = el("div", { class: "card" });
+  listCard.appendChild(el("div", { class: "card-head" }, [
+    el("strong", { text: "Эры" }), el("div", { class: "spacer" }),
+    el("button", { class: "small", text: "+ Эра", onclick: () => { const id = nextFreeEraId(); ensureEra(id); questGraphEra = id; renderQuests(); } }),
+  ]));
+  eraIds.forEach((eraId, i) => {
+    const info = DATA.eras[String(eraId)];
+    const usage = eraUsageCount(eraId);
+    const row = el("div", { class: `qg-era-row${eraId === questGraphEra ? " active" : ""}`, title: `Эра #${eraId}` });
+    row.style.setProperty("--era-c", info.color);
+    const emb = el("div", { class: "qg-era-emb" });
+    const embIcon = info.icon || QUEST_FX_DEFAULT_ICON;
+    emb.appendChild(pixelIcon(embIcon.grid, embIcon.palette, 22));
+    const text = el("div", { class: "qg-era-text" }, [
+      el("div", { class: "qg-era-name" }, [document.createTextNode(info.name), el("span", { class: "qg-era-count", text: ` ${usage} кв.` })]),
+      el("div", { class: "qg-era-sub", text: info.subtitle || "без девиза" }),
+    ]);
+    const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
+    const actions = el("div", { class: "qg-era-actions" }, [
+      el("button", { class: "small", text: "↑", title: "Раньше", disabled: i === 0 ? "true" : null, onclick: stop(() => { swapEras(eraId, eraIds[i - 1]); if (questGraphEra === eraId) questGraphEra = eraIds[i - 1]; else if (questGraphEra === eraIds[i - 1]) questGraphEra = eraId; renderQuests(); }) }),
+      el("button", { class: "small", text: "↓", title: "Позже", disabled: i === eraIds.length - 1 ? "true" : null, onclick: stop(() => { swapEras(eraId, eraIds[i + 1]); if (questGraphEra === eraId) questGraphEra = eraIds[i + 1]; else if (questGraphEra === eraIds[i + 1]) questGraphEra = eraId; renderQuests(); }) }),
+      el("button", { class: "small danger", text: "✕", disabled: usage > 0 ? "true" : null,
+        title: usage > 0 ? `Эрой пользуются ${usage} квест(ов) - сначала перенеси их` : "Удалить эру",
+        onclick: stop(() => { delete DATA.eras[String(eraId)]; renderQuests(); }) }),
+    ]);
+    row.append(emb, text, actions);
+    row.addEventListener("click", () => { if (questGraphEra !== eraId) { questGraphEra = eraId; renderQuests(); } });
+    listCard.appendChild(row);
+  });
+  host.appendChild(listCard);
+  host.appendChild(renderEraLookCard());
+}
+
+function renderEraLookCard() {
+  const eraId = questGraphEra;
+  const info = ensureEra(eraId);
+  const card = el("div", { class: "card" });
+  card.appendChild(el("div", { class: "card-head" }, [el("strong", { text: "Оформление эры" })]));
+
+  const name = el("input", { type: "text", value: info.name });
+  name.addEventListener("change", () => { info.name = name.value.trim() || `Эра ${eraId}`; renderQuestsKeepScroll(); });
+  card.appendChild(qgField("Название", name));
+  const subtitle = el("input", { type: "text", value: info.subtitle || "", placeholder: "Например: Камень и бронза" });
+  subtitle.addEventListener("input", () => { const v = subtitle.value.trim(); if (v) info.subtitle = v; else delete info.subtitle; renderEraPreview(); });
+  subtitle.addEventListener("change", () => renderQuestErasColumn());
+  card.appendChild(qgField("Девиз (под названием в игре)", subtitle));
+  const color = el("input", { type: "color", value: info.color });
+  color.addEventListener("input", () => { info.color = color.value; refreshQuestVisuals(); });
+  color.addEventListener("change", () => renderQuestErasColumn());
+  card.appendChild(qgField("Главный цвет", color));
+
+  const embRow = el("div", { class: "qg-row" }, [
+    iconEditButton(`эмблема эры «${info.name}»`, info, QUEST_FX_DEFAULT_ICON, () => renderQuestsKeepScroll()),
+    el("button", { class: "small", type: "button", text: eraIconPickerOpen ? "Скрыть" : "Взять у…", onclick: () => { eraIconPickerOpen = !eraIconPickerOpen; renderQuestErasColumn(); } }),
+  ]);
+  card.appendChild(qgField("Эмблема", embRow));
+  if (eraIconPickerOpen) card.appendChild(contentIconPicker((icon) => { info.icon = icon; eraIconPickerOpen = false; renderQuestsKeepScroll(); }));
+
+  const backdrop = info.backdrop || {};
+  const pattern = QUEST_FX_BACKDROPS[backdrop.pattern] ? backdrop.pattern : "grid";
+  card.appendChild(qgField("Фон графа", qgSeg(Object.entries(QUEST_FX_BACKDROPS).map(([id, b]) => [id, b.name]), pattern, (id) => {
+    info.backdrop = { ...(info.backdrop || {}), pattern: id };
+    renderQuestsKeepScroll();
+  })));
+  if (pattern === "tile") {
+    const tile = backdrop.tile && backdrop.tile.grid ? backdrop.tile : QUEST_FX_DEFAULT_TILE;
+    const swatch = el("span", { class: "qg-tile" });
+    swatch.style.backgroundImage = questFxTileUrl(tile);
+    const tileRow = el("div", { class: "qg-row" }, [swatch,
+      el("button", { class: "small", type: "button", text: "Нарисовать…", onclick: () => {
+        openIconEditor(`плитка фона эры «${info.name}» (повторяется)`, cloneIcon(tile), null, (icon) => {
+          if (icon) info.backdrop.tile = icon; else delete info.backdrop.tile;
+          renderQuestsKeepScroll();
+        });
+      }}),
+    ]);
+    if (backdrop.tile) tileRow.appendChild(el("button", { class: "small", type: "button", text: "Каменная", title: "Вернуть плитку по умолчанию", onclick: () => { delete info.backdrop.tile; renderQuestsKeepScroll(); } }));
+    card.appendChild(qgField("Плитка", tileRow));
+    const seeds = el("div", { class: "qg-row" });
+    Object.values(MECHANISM_TEXTURE_SEEDS).forEach(seed => {
+      const btn = el("button", { class: "small", type: "button", title: `Взять за основу: ${seed.name}`, text: seed.name });
+      btn.addEventListener("click", () => { info.backdrop.tile = cloneIcon(seed.icon); renderQuestsKeepScroll(); });
+      seeds.appendChild(btn);
+    });
+    card.appendChild(qgField("Заготовки плитки", seeds));
+  }
+  if (pattern !== "none") {
+    const opacity = typeof backdrop.opacity === "number" ? backdrop.opacity : QUEST_FX_DEFAULT_OPACITY;
+    const range = el("input", { type: "range", min: "10", max: "100", step: "5", value: String(Math.round(opacity * 100)) });
+    const label = el("span", { class: "hint", text: `${Math.round(opacity * 100)}%` });
+    range.addEventListener("input", () => {
+      info.backdrop = { ...(info.backdrop || { pattern }), opacity: Number(range.value) / 100 };
+      label.textContent = `${range.value}%`;
+      refreshQuestVisuals();
+    });
+    card.appendChild(qgField("Яркость узора", el("div", { class: "qg-row" }, [range, label])));
+  }
+
+  const previewHost = el("div", { class: "qg-dark qg-era-preview" });
+  questViewRefs.eraPreviewHost = previewHost;
+  card.appendChild(qgField("Так эра выглядит в игре", previewHost));
+  renderEraPreview();
+  return card;
+}
+
+function renderEraPreview() {
+  const host = questViewRefs && questViewRefs.eraPreviewHost;
+  if (!host) return;
+  host.innerHTML = "";
+  const info = ensureEra(questGraphEra);
+  const items = questEraItems(questGraphEra);
+  const statuses = items.map(it => questPreviewStatusOf(it.id));
+  host.appendChild(questFxEraItem({
+    name: info.name, subtitle: info.subtitle, color: info.color, icon: info.icon || QUEST_FX_DEFAULT_ICON,
+    done: statuses.filter(s => s === "completed" || s === "claimed").length, total: items.length,
+    gifts: statuses.filter(s => s === "completed").length, statuses, active: true, dim: false,
+  }, "div"));
+}
+
+// ---------- Квесты: инспектор выбранного квеста ----------
+
+function renderQuestInspector() {
+  const host = questViewRefs.inspectorHost;
+  host.innerHTML = "";
+  questViewRefs.previewHost = null;
+  const qid = selectedQuestNode;
+  const q = qid && DATA.quests[qid];
+  if (!q || (q.era || 1) !== questGraphEra) {
+    host.appendChild(el("div", { class: "card" }, [el("p", { class: "hint", text: "Выбери квест на графе - здесь будут его поля и оформление." })]));
+    return;
+  }
+  if (q.requires === undefined) q.requires = [];
+  if (q.conditions === undefined) q.conditions = [];
+  const card = el("div", { class: "card" });
+  const icon = q.icon || QUEST_FX_DEFAULT_ICON;
+  const headName = el("strong", { text: q.name });
+  card.appendChild(el("div", { class: "card-head" }, [pixelIcon(icon.grid, icon.palette, 22), headName, el("div", { class: "spacer" }), el("code", { text: qid })]));
+  card.appendChild(qgSeg([["look", "Оформление"], ["quest", "Квест"]], questInspectorTab, (tab) => { questInspectorTab = tab; renderQuestInspector(); }));
+
+  if (questInspectorTab === "look") {
+    const iconRow = el("div", { class: "qg-row" }, [
+      iconEditButton(q.name || qid, q, QUEST_FX_DEFAULT_ICON, () => renderQuestsKeepScroll()),
+      el("button", { class: "small", type: "button", text: questIconPickerOpen ? "Скрыть" : "Взять у ресурса, постройки, моба…", onclick: () => { questIconPickerOpen = !questIconPickerOpen; renderQuestInspector(); } }),
+    ]);
+    card.appendChild(qgField("Значок", iconRow));
+    if (questIconPickerOpen) card.appendChild(contentIconPicker((picked) => { q.icon = picked; questIconPickerOpen = false; renderQuestsKeepScroll(); }));
+
+    card.appendChild(qgField("Вид узла", qgSeg(Object.entries(QUEST_FX_STYLES).map(([id, s]) => [id, s.name]), q.style || "normal", (id) => {
+      if (id === "normal") delete q.style; else q.style = id;
+      renderQuestsKeepScroll();
+    })));
+    if (q.style === "milestone") {
+      const quick = el("div", { class: "qg-row" });
+      ["Веха", "Босс", "Финал"].forEach(text => quick.appendChild(el("button", { class: "small", type: "button", text, onclick: () => { q.ribbon = text; renderQuestsKeepScroll(); } })));
+      card.appendChild(qgField("Надпись на ленте", el("div", {}, [questRibbonInput(q, () => refreshQuestVisuals()), quick])));
+    }
+
+    const colorBox = el("div", { class: "qg-row" });
+    colorBox.appendChild(qgSeg([["era", "Цвет эры"], ["own", "Свой"]], q.accent ? "own" : "era", (mode) => {
+      if (mode === "era") delete q.accent; else q.accent = q.accent || "#e0524a";
+      renderQuestsKeepScroll();
+    }));
+    if (q.accent) {
+      const color = el("input", { type: "color", value: q.accent });
+      color.addEventListener("input", () => { q.accent = color.value; refreshQuestVisuals(); });
+      colorBox.appendChild(color);
+    }
+    card.appendChild(qgField("Цвет узла", colorBox));
+
+    const previewHost = el("div", { class: "qg-preview" });
+    questViewRefs.previewHost = previewHost;
+    card.appendChild(qgField("Так узел выглядит в игре", previewHost));
+    renderQuestPreview();
+  } else {
+    const name = el("input", { type: "text", value: q.name });
+    name.addEventListener("input", () => { q.name = name.value; headName.textContent = q.name; refreshQuestVisuals(); });
+    card.appendChild(qgField("Название", name));
+    const eraSelect = el("select");
+    sortedEraIds().forEach(eraId => {
+      const opt = el("option", { value: String(eraId), text: `#${eraId} ${DATA.eras[String(eraId)].name}` });
+      if (eraId === (q.era || 1)) opt.selected = true;
+      eraSelect.appendChild(opt);
+    });
+    eraSelect.addEventListener("change", () => { q.era = Number(eraSelect.value); delete q.pos; questGraphEra = q.era; renderQuests(); });
+    card.appendChild(qgField("Эра", eraSelect));
+    card.appendChild(qgField("Описание", descriptionTextarea(q.description, "Описание квеста", (v) => { q.description = v; })));
+
+    card.appendChild(qgField("Требует квестов", questRequiresEditor(qid, renderQuestsKeepScroll)));
+
+    const condBox = el("div");
+    renderConditions(condBox, q.conditions);
+    card.appendChild(qgField("Условия (все обязательны)", condBox));
+    card.appendChild(qgField("Награда (лутбокс)", Object.keys(DATA.loot_cases).length
+      ? lootCaseSelect(q.reward_case, (v) => { q.reward_case = v; })
+      : el("span", { class: "hint", text: "сначала добавь кейс с лутом во вкладке «Список»" })));
+    card.appendChild(el("div", { class: "qg-field" }, [el("button", { class: "small", type: "button", text: "Открыть карточку в «Списке»", onclick: () => jumpToQuestCard(qid) })]));
+  }
+  host.appendChild(card);
+}
+
+// Узел выбранного квеста во всех четырёх статусах - превью оформления.
+function renderQuestPreview() {
+  const host = questViewRefs && questViewRefs.previewHost;
+  const q = selectedQuestNode && DATA.quests[selectedQuestNode];
+  if (!host || !q) return;
+  host.innerHTML = "";
+  const s = questFxStyle(q.style);
+  const k = q.style === "milestone" ? 0.66 : 0.72;
+  ["locked", "available", "completed", "claimed"].forEach(status => {
+    const view = questEditorNodeView(selectedQuestNode, status);
+    view.selected = false;
+    view.cross = null;
+    const node = questFxNode(view);
+    node.style.transform = `scale(${k})`;
+    const box = el("div", { class: "qg-preview-box" }, [node]);
+    box.style.width = `${s.w * k}px`;
+    box.style.height = `${s.h * k}px`;
+    host.appendChild(el("div", { class: "qg-preview-cell" }, [box, el("div", { class: "qg-preview-lbl", text: QUEST_FX_STATUS_LABELS[status] })]));
+  });
 }
 
 // Барабан призов лутбокса (content.json loot_cases.*.prizes = [{resource, amount,

@@ -126,6 +126,12 @@ class ContentEditorHttpTests(unittest.TestCase):
             self.assertEqual(r.status, 200)
             self.assertIn(b"MECH_FX_PARTICLES", r.read())
 
+    def test_quest_fx_js_is_served(self):
+        # Вкладка «Квесты» → «Граф» - тот же файл, что у игры (tools/quest_fx.js).
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/quest_fx.js", timeout=5) as r:
+            self.assertEqual(r.status, 200)
+            self.assertIn(b"QUEST_FX_BACKDROPS", r.read())
+
     def test_hunt_fx_js_is_served(self):
         # Превью «Бой»/«Сцена охоты» - тот же файл, что у игры (tools/hunt_fx.js).
         with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/hunt_fx.js", timeout=5) as r:

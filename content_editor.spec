@@ -26,6 +26,7 @@ a = Analysis(
         # Общий с игрой код оформления механизма (превью «Оформление»), тот же приём.
         (os.path.join(ROOT, "tools", "mechanism_fx.js"), "."),
         (os.path.join(ROOT, "tools", "hunt_fx.js"), "."),
+        (os.path.join(ROOT, "tools", "quest_fx.js"), "."),
     ],
     hiddenimports=[],
     hookspath=[],

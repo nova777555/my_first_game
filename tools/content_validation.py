@@ -18,9 +18,16 @@ _ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _SOUND_FILENAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.(wav|mp3|ogg)$")
 
 # Цвет темы эры квестбука (data["eras"][...]["color"]) и необязательный
-# per-квестовый оверрайд фона/рамки узла графа (quests.*.bg/border) - строго
-# '#rrggbb', тот же формат, что отдаёт HTML <input type="color">.
+# per-квестовый цвет узла графа (quests.*.accent) - строго '#rrggbb', тот же
+# формат, что отдаёт HTML <input type="color">.
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+# Граф квестбука: вид узла (quests.*.style) и узор фона эры (eras.*.backdrop.pattern).
+# Держать в паре с tools/quest_fx.js (QUEST_FX_STYLES/QUEST_FX_BACKDROPS) - JS не
+# импортирует Python; совпадение проверяет tests/test_content_validation.py.
+QUEST_STYLES = ("normal", "milestone")
+QUEST_BACKDROP_PATTERNS = ("grid", "dots", "tile", "none")
+QUEST_RIBBON_MAX_LEN = 16
 
 # Оформление модалки механизма (locations.*.appearance). id вариантов держать в
 # паре с tools/mechanism_fx.js (MECH_FX_MOTIONS/MECH_FX_PARTICLES/MECH_FX_FILLS) -
@@ -28,7 +35,19 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MECHANISM_MOTIONS = ("strike", "saw", "press", "spin", "flicker", "pulse")
 MECHANISM_PARTICLES = ("sparks", "sawdust", "shards", "drops", "steam", "smoke", "magic", "electric")
 MECHANISM_PROGRESS_FILLS = ("right", "left", "up", "down")
-_APPEARANCE_KEYS = {"texture", "texture_dim", "progress_icon", "progress_fill", "motion", "particles", "sound"}
+# Свободная расстановка слотов (appearance.layout) и сбор ингредиентов (appearance.gather):
+# модельки слотов MECH_FX_SLOTS, стили MECH_FX_GATHERS, холст MECH_FX_LAYOUT_W/H и размер
+# слота MECH_FX_SLOT_SIZE_RANGE в tools/mechanism_fx.js - держать в паре.
+MECHANISM_SLOT_SHAPES = ("square", "round", "tank")
+MECHANISM_GATHERS = ("dash", "vortex", "arc")
+MECHANISM_LAYOUT_W = 560
+MECHANISM_LAYOUT_H = 400
+MECHANISM_SLOT_SIZE_RANGE = (40, 140)
+_APPEARANCE_KEYS = {"texture", "texture_dim", "progress_icon", "progress_fill", "motion", "particles", "sound",
+                    "layout", "gather"}
+_LAYOUT_KEYS = {"cells", "output", "progress", "links"}
+_LAYOUT_SLOT_KEYS = {"x", "y", "shape", "size"}
+_LAYOUT_PROGRESS_KEYS = {"x", "y", "angle"}
 
 # Сцена схватки (mobs.*.combat_fx, combat_moves.*.fx, locations.*.hunt_scene). id
 # вариантов держать в паре с tools/hunt_fx.js (HUNT_ATTACK_STYLES/HUNT_MOVE_STYLES/
@@ -92,6 +111,7 @@ CONDITION_FIELDS = {
     "tool_tier_at_least": ["tool", "amount"],
     "species_discovered_at_least": ["amount"],
     "species_discovered": ["species"],
+    "mob_killed": ["mob"],
     "manual_action_performed_at_least": ["action", "amount"],
     "building_upgrade_purchased": ["building", "upgrade"],
     "storage_tier_at_least": ["resource", "amount"],
@@ -230,9 +250,25 @@ def pattern_shape(pattern: dict) -> tuple[tuple[str | None, ...], ...]:
     )
 
 
+def pattern_grid(pattern: dict) -> tuple[tuple[str | None, ...], ...]:
+    """Узор целиком, БЕЗ обрезки краёв - форма для механизма с crafting.fixed (узор
+    привязан к ячейкам: рецепт в левой ячейке не ловится в правой). Копия -
+    game/engine.py: _pattern_grid (держать в паре)."""
+    key = pattern.get("key") or {}
+    grid = tuple(
+        tuple(None if ch == "." else key.get(ch) for ch in row)
+        for row in pattern.get("rows") or []
+    )
+    return grid if any(c is not None for row in grid for c in row) else ()
+
+
 def mirror_shape(shape: tuple[tuple[str | None, ...], ...]) -> tuple[tuple[str | None, ...], ...]:
     """Та же форма, отражённая по горизонтали - для pattern_mirror."""
     return tuple(tuple(reversed(row)) for row in shape)
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def validate(data: dict) -> list[str]:
@@ -358,6 +394,60 @@ def validate(data: dict) -> list[str]:
         for key in ("ground_color", "silhouette_color", "fog_color"):
             if scene.get(key) is not None:
                 check_hex(scene[key], f"{where}.{key}")
+
+    def check_layout_point(point, where: str, keys: set) -> bool:
+        """Центр элемента расстановки {x, y, ...} на холсте редактора
+        MECHANISM_LAYOUT_W × MECHANISM_LAYOUT_H. False - если это вообще не объект."""
+        if not isinstance(point, dict):
+            errors.append(f"{where}: должен быть объектом {{x, y, ...}}")
+            return False
+        check_unknown_keys(point, keys, where)
+        for axis, limit in (("x", MECHANISM_LAYOUT_W), ("y", MECHANISM_LAYOUT_H)):
+            value = point.get(axis)
+            if not _is_number(value) or not (0 <= value <= limit):
+                errors.append(f"{where}.{axis}: должен быть числом от 0 до {limit}")
+        return True
+
+    def check_layout_slot(slot, where: str) -> None:
+        if not check_layout_point(slot, where, _LAYOUT_SLOT_KEYS):
+            return
+        shape = slot.get("shape")
+        if shape is not None and shape not in MECHANISM_SLOT_SHAPES:
+            errors.append(f"{where}.shape: неизвестная моделька '{shape}' (есть: {', '.join(MECHANISM_SLOT_SHAPES)})")
+        size = slot.get("size")
+        low, high = MECHANISM_SLOT_SIZE_RANGE
+        if size is not None and (not _is_number(size) or not (low <= size <= high)):
+            errors.append(f"{where}.size: должен быть числом от {low} до {high}")
+
+    def check_mechanism_layout(layout, where: str, crafting) -> None:
+        """appearance.layout - свободная расстановка слотов модалки механизма
+        (tools/mechanism_fx.js: mechFxLayoutGeometry). Только вид: движок и узоры
+        по-прежнему видят сетку width×height, ячейка cells[i] - это ячейка i узора
+        (построчно). Без layout модалка рисует обычную сетку -> стрелка -> результат."""
+        if layout is None:
+            return
+        if not isinstance(layout, dict):
+            errors.append(f"{where}: должен быть объектом {{cells, output, progress, links}} или отсутствовать")
+            return
+        check_unknown_keys(layout, _LAYOUT_KEYS, where)
+        cells = layout.get("cells")
+        if not isinstance(cells, list):
+            errors.append(f"{where}.cells: должен быть списком - по элементу на каждую ячейку сетки")
+        else:
+            for i, slot in enumerate(cells):
+                check_layout_slot(slot, f"{where}.cells[{i}]")
+            if crafting is not None:
+                w, h = crafting.get("width"), crafting.get("height")
+                if isinstance(w, int) and isinstance(h, int) and len(cells) != w * h:
+                    errors.append(f"{where}.cells: расставлено {len(cells)} ячеек, а в сетке {w}×{h} их {w * h}")
+        check_layout_slot(layout.get("output"), f"{where}.output")
+        progress = layout.get("progress")
+        if progress != "ring" and check_layout_point(progress, f"{where}.progress", _LAYOUT_PROGRESS_KEYS):
+            angle = progress.get("angle")
+            if angle is not None and (not _is_number(angle) or not (-180 <= angle <= 180)):
+                errors.append(f"{where}.progress.angle: должен быть числом от -180 до 180 (градусы)")
+        if "links" in layout and not isinstance(layout["links"], bool):
+            errors.append(f"{where}.links: должен быть true/false или отсутствовать")
 
     def check_id(kind: str, value: str) -> None:
         if not isinstance(value, str) or not _ID_RE.match(value):
@@ -892,6 +982,12 @@ def validate(data: dict) -> list[str]:
                     errors.append(f"{where}.stacks: должен быть true/false или отсутствовать")
                 elif crafting.get("stacks") and lid == _CONVERTER_LOCATION_ID:
                     errors.append(f"{where}.stacks: у преобразователя рецепты собираются только узором")
+                # fixed - узор привязан к ячейкам: без сдвига по сетке (обрезки пустых
+                # краёв), см. game/engine.py: match_grid_target и pattern_grid ниже.
+                if "fixed" in crafting and not isinstance(crafting["fixed"], bool):
+                    errors.append(f"{where}.fixed: должен быть true/false или отсутствовать")
+                elif crafting.get("fixed") and crafting.get("stacks"):
+                    errors.append(f"{where}.fixed: у сборщика узоров нет - фиксировать нечего")
         # shows_building_mechanisms - в этой локации (обычно «Механизмы») появляются
         # кнопки открытия построек-механизмов (автоматизатор, синтезатор душ,
         # ритуальный круг, реактор), см. web_ui.html: buildingMechanismsAt.
@@ -924,7 +1020,12 @@ def validate(data: dict) -> list[str]:
                 particles = appearance.get("particles")
                 if particles is not None and particles not in MECHANISM_PARTICLES:
                     errors.append(f"{where}.particles: неизвестные частицы '{particles}' (есть: {', '.join(MECHANISM_PARTICLES)})")
+                gather = appearance.get("gather")
+                if gather is not None and gather not in MECHANISM_GATHERS:
+                    errors.append(f"{where}.gather: неизвестный сбор '{gather}' (есть: {', '.join(MECHANISM_GATHERS)})")
                 check_sound(appearance.get("sound"), where)
+                check_mechanism_layout(appearance.get("layout"), f"{where}.layout",
+                                       crafting if isinstance(crafting, dict) else None)
     if _MINE_LOCATION_ID not in locations:
         errors.append(f"Локация '{_MINE_LOCATION_ID}' (Шахта) обязательна - к ней привязан поиск и добыча жил")
     if _CONVERTER_LOCATION_ID not in locations:
@@ -991,7 +1092,11 @@ def validate(data: dict) -> list[str]:
         pattern = entity.get("pattern")
         if not isinstance(pattern, dict) or loc_id not in locations:
             return
-        shape = pattern_shape(pattern)
+        # Механизм с crafting.fixed не сдвигает узор - одинаковый рисунок в разных
+        # ячейках там разные рецепты.
+        crafting = locations[loc_id].get("crafting")
+        fixed = isinstance(crafting, dict) and crafting.get("fixed") is True
+        shape = pattern_grid(pattern) if fixed else pattern_shape(pattern)
         if not shape:
             return
         taken = shapes_by_location.setdefault(loc_id, {})
@@ -2393,6 +2498,8 @@ def validate(data: dict) -> list[str]:
                 errors.append(f"{where}: неизвестный инструмент '{c['tool']}'")
             if "species" in c and c["species"] not in species:
                 errors.append(f"{where}: неизвестный вид '{c['species']}'")
+            if "mob" in c and c["mob"] not in mobs:
+                errors.append(f"{where}: неизвестный моб '{c['mob']}'")
             if "action" in c and c["action"] not in manual_actions:
                 errors.append(f"{where}: неизвестное ручное действие '{c['action']}'")
             if "upgrade" in c and "building" in c and c["building"] in buildings:
@@ -2497,20 +2604,34 @@ def validate(data: dict) -> list[str]:
             color = era_info.get("color")
             if not isinstance(color, str) or not _HEX_COLOR_RE.match(color):
                 errors.append(f"{where}: color должен быть цветом вида '#rrggbb'")
+            # Оформление эры в квестбуке (tools/quest_fx.js): девиз, эмблема, фон графа.
+            subtitle = era_info.get("subtitle")
+            if subtitle is not None and not isinstance(subtitle, str):
+                errors.append(f"{where}: subtitle должен быть строкой (или отсутствовать)")
+            check_icon(era_info.get("icon"), where)
+            backdrop = era_info.get("backdrop")
+            if backdrop is not None:
+                if not isinstance(backdrop, dict):
+                    errors.append(f"{where}: backdrop должен быть объектом {{pattern, tile, opacity}}")
+                else:
+                    unknown = set(backdrop) - {"pattern", "tile", "opacity"}
+                    if unknown:
+                        errors.append(f"{where}: неизвестные поля backdrop: {', '.join(sorted(unknown))}")
+                    if backdrop.get("pattern") not in QUEST_BACKDROP_PATTERNS:
+                        errors.append(f"{where}: backdrop.pattern должен быть одним из {list(QUEST_BACKDROP_PATTERNS)} (сейчас: {backdrop.get('pattern')!r})")
+                    check_icon(backdrop.get("tile"), where, "backdrop.tile")
+                    opacity = backdrop.get("opacity")
+                    if opacity is not None and (not isinstance(opacity, (int, float)) or isinstance(opacity, bool) or not 0 <= opacity <= 1):
+                        errors.append(f"{where}: backdrop.opacity должен быть числом от 0 до 1 (или отсутствовать)")
 
-    # era квеста - ЧИСТО визуальная колонка графа (как tier у техов), никак не
-    # связана с технологиями - валидируется только как положительное целое (само
+    # era квеста - вкладка-граф квестбука (как tier у техов), никак не связана с
+    # технологиями - валидируется только как положительное целое (само
     # оформление этой era - см. eras выше). requires - граф, буквально как
     # techs.*.requires (см. find_requires_cycle ниже) - только ссылается на
-    # ДРУГОЙ КВЕСТ, а не на технологию. icon/bg/border/tooltip_color -
-    # необязательные per-квестовые оверрайды оформления узла графа (icon -
-    # {grid,palette}, та же пиксель-иконка, что у ресурсов/построек/мобов, см.
-    # check_icon; подменяет центральный значок узла ЛЮБОГО статуса, включая
-    # locked - жетон статуса в углу узла отдельным значком остаётся всегда,
-    # см. web_ui.html:buildQuestNode; bg/border подменяют цвет узла целиком
-    # вместо цвета эры; tooltip_color - цвет текста всплывающей подсказки с
-    # именем квеста, НЕ общая настройка - каждый квест красит свою подсказку
-    # сам).
+    # ДРУГОЙ КВЕСТ, а не на технологию. Оформление узла (tools/quest_fx.js), всё
+    # необязательно: icon - пиксель-иконка {grid,palette}, как у ресурсов; accent -
+    # цвет узла (без него - цвет эры); style - обычный узел или веха; ribbon -
+    # надпись на ленте вехи; pos - место узла на графе (без него - авторасстановка).
     quests = data.get("quests", {})
     for qid, q in quests.items():
         record_id(qid, "квест")
@@ -2524,10 +2645,26 @@ def validate(data: dict) -> list[str]:
         if not isinstance(era, int) or isinstance(era, bool) or era < 1:
             errors.append(f"{where}: era должен быть положительным целым числом")
         check_icon(q.get("icon"), where)
-        for field in ("bg", "border", "tooltip_color"):
-            val = q.get(field)
-            if val is not None and (not isinstance(val, str) or not _HEX_COLOR_RE.match(val)):
-                errors.append(f"{where}: {field} должен быть цветом вида '#rrggbb' (или отсутствовать)")
+        accent = q.get("accent")
+        if accent is not None and (not isinstance(accent, str) or not _HEX_COLOR_RE.match(accent)):
+            errors.append(f"{where}: accent должен быть цветом вида '#rrggbb' (или отсутствовать)")
+        # Прежнее оформление узла (фон, рамка, цвет подсказки) заменено одним accent -
+        # редактор переносит его сам при загрузке, в файле его остаться не должно.
+        legacy = [f for f in ("bg", "border", "tooltip_color") if f in q]
+        if legacy:
+            errors.append(f"{where}: поля {', '.join(legacy)} больше не используются - цвет узла задаёт accent")
+        style = q.get("style")
+        if style is not None and style not in QUEST_STYLES:
+            errors.append(f"{where}: style должен быть одним из {list(QUEST_STYLES)} (сейчас: {style!r})")
+        ribbon = q.get("ribbon")
+        if ribbon is not None and (not isinstance(ribbon, str) or len(ribbon) > QUEST_RIBBON_MAX_LEN):
+            errors.append(f"{where}: ribbon должен быть строкой не длиннее {QUEST_RIBBON_MAX_LEN} символов (или отсутствовать)")
+        pos = q.get("pos")
+        if pos is not None and not (
+            isinstance(pos, dict)
+            and all(isinstance(pos.get(k), (int, float)) and not isinstance(pos.get(k), bool) for k in ("x", "y"))
+        ):
+            errors.append(f"{where}: pos должен быть объектом {{x, y}} с числами (или отсутствовать)")
         requires = q.get("requires", [])
         if not isinstance(requires, list):
             errors.append(f"{where}: requires должен быть списком id квестов (или отсутствовать)")

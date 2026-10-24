@@ -112,6 +112,36 @@ class MatchGridTests(FixtureTestCase):
         self.assertIsNone(engine.match_grid(s, "yard", ["raw_a"]))
 
 
+class FixedGridMatchTests(FixtureTestCase):
+    """crafting.fixed - узор привязан к ячейкам: без сдвига по сетке (для свободной
+    расстановки appearance.layout, где у ячейки свой смысл - например, бак)."""
+
+    def setUp(self):
+        super().setUp()
+        crafting = engine.LOCATIONS["grid_loc"]["crafting"]
+        crafting["fixed"] = True
+        self.addCleanup(crafting.pop, "fixed", None)
+
+    def test_pattern_matches_in_its_own_cells(self):
+        self.assertTrue(engine.location_fixed("grid_loc"))
+        self.assertEqual(engine.match_grid(GameState(), "grid_loc", ["raw_a", "raw_a", None, None]), "grid_line")
+
+    def test_shifted_pattern_does_not_match(self):
+        # Без fixed тот же узор ловится и в нижнем ряду (test_match_shifted_to_bottom_row).
+        self.assertIsNone(engine.match_grid(GameState(), "grid_loc", [None, None, "raw_a", "raw_a"]))
+
+    def test_mirror_is_taken_across_the_whole_grid(self):
+        # Узор "AB" в верхнем ряду 2x2: зеркало целой сетки - "BA" там же.
+        self.assertEqual(engine.match_grid(GameState(), "grid_loc", ["raw_b", "raw_a", None, None]), "grid_mirror")
+        self.assertIsNone(engine.match_grid(GameState(), "grid_loc", [None, None, "raw_b", "raw_a"]))
+
+    def test_empty_grid_still_does_not_match(self):
+        self.assertIsNone(engine.match_grid(GameState(), "grid_loc", [None, None, None, None]))
+
+    def test_plain_location_is_not_fixed(self):
+        self.assertFalse(engine.location_fixed("yard"))
+
+
 class TogglePinnedRecipeTests(FixtureTestCase):
     def test_pinning_a_grid_recipe_adds_it(self):
         s = GameState()

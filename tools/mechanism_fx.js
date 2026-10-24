@@ -52,9 +52,38 @@ const MECH_FX_FILLS = {
   down: "сверху вниз",
 };
 
+// Модельки слотов свободной расстановки (appearance.layout.cells[].shape и
+// output.shape): w/h - пропорции коробки к size слота (бак вытянут вверх).
+const MECH_FX_SLOTS = {
+  square: { name: "Квадрат", w: 1, h: 1 },
+  round: { name: "Чаша (круг)", w: 1, h: 1 },
+  tank: { name: "Бак для жидкости", w: 0.8, h: 1.3 },
+};
+
+// Как ингредиенты улетают в механизм при крафте (appearance.gather) - в любой
+// расстановке, и сеткой, и свободной.
+const MECH_FX_GATHERS = {
+  dash: { name: "Рывок", hint: "все разом отскакивают назад и летят в результат" },
+  vortex: { name: "Воронка (как ритуальный круг)", hint: "по очереди затягиваются по спирали, по прилёту - ударная волна" },
+  arc: { name: "Дугой", hint: "по очереди перелетают дугой, как в котёл" },
+};
+
 const MECH_FX_TEXTURE_PX = 3;        // css-пикселей на пиксель текстуры фона
 const MECH_FX_DEFAULT_DIM = 0.55;    // затемнение текстуры, если texture_dim не задан
 const MECH_FX_PROGRESS_SIZE = 50;    // длинная сторона пиксельного прогресса, px
+
+// Свободная расстановка (appearance.layout): центры элементов (x, y) хранятся в
+// координатах холста редактора; в игре сцена - только занятая область с полями
+// (mechFxLayoutGeometry: bounds). Держать в паре с tools/content_validation.py
+// (MECHANISM_LAYOUT_W/H, MECHANISM_SLOT_SIZE_RANGE).
+const MECH_FX_LAYOUT_W = 560;
+const MECH_FX_LAYOUT_H = 400;
+const MECH_FX_CELL_SIZE = 78;        // сторона ячейки по умолчанию (как .cg-cell игры)
+const MECH_FX_OUTPUT_SIZE = 92;      // сторона слота результата (как .cg-output)
+const MECH_FX_SLOT_SIZE_RANGE = [40, 140];
+const MECH_FX_PROGRESS_BOX = 56;     // место под прогресс-бар (стрелка или картинка)
+const MECH_FX_LAYOUT_PAD = 18;       // поля сцены вокруг занятой области
+const MECH_FX_DASH_MS = 280;         // полёт «рывком» (прежний эффект модалки механизма)
 
 function mechFxReducedMotion() {
   return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -141,8 +170,73 @@ ${origins}
   35% { transform: scale(1.22); filter: brightness(1.5) drop-shadow(0 0 10px rgba(140,220,255,.95)); }
 }
 
+/* ---- модельки слотов (mechFxDecorateSlot); цвета состояний (занята, призрак) - у страницы ---- */
+.mfx-slot.mfx-slot-round { border-radius: 50%; }
+.mfx-slot.mfx-slot-tank { border-radius: 16px / 12px; }
+.mfx-deco { position: absolute; pointer-events: none; }
+.mfx-rim { inset: 6px; border-radius: 50%; border: 1px dashed rgba(240,160,48,.35); }
+.mfx-tank-inner { inset: 9px 6px 9px 6px; border-radius: 8px / 6px; overflow: hidden; }
+.mfx-tank-liquid { left: 0; right: 0; bottom: 0; transition: height .3s ease-out; }
+.mfx-tank-wave {
+  position: absolute; left: -50%; width: 200%; top: -3px; height: 7px; border-radius: 50%;
+  animation: mfx-wave 2.6s ease-in-out infinite alternate;
+}
+.mfx-tank-bubble {
+  position: absolute; bottom: 0; width: 4px; height: 4px; border-radius: 50%;
+  background: rgba(255,255,255,.6); animation: mfx-bubble 2.4s linear infinite;
+}
+.mfx-tank-glass { top: 12px; bottom: 14px; left: 9px; width: 5px; border-radius: 3px; background: linear-gradient(rgba(255,255,255,.26), rgba(255,255,255,.04)); }
+.mfx-tank-ticks { top: 18px; bottom: 18px; right: 8px; width: 5px; background: repeating-linear-gradient(to bottom, rgba(255,255,255,.2) 0 1px, transparent 1px 9px); }
+.mfx-tank-cap { left: 3px; right: 3px; height: 5px; border-radius: 3px; background: linear-gradient(#66707b, #2d3238); }
+.mfx-tank-cap.top { top: 2px; }
+.mfx-tank-cap.bottom { bottom: 2px; }
+.mfx-slot-mini .mfx-tank-inner { inset: 5px 3px; }
+.mfx-slot-mini .mfx-tank-cap { height: 3px; left: 2px; right: 2px; top: 1px; }
+.mfx-slot-mini .mfx-tank-cap.bottom { top: auto; bottom: 1px; }
+.mfx-slot-mini .mfx-rim { inset: 3px; }
+@keyframes mfx-wave { from { transform: translateX(-12%); } to { transform: translateX(12%); } }
+@keyframes mfx-bubble {
+  0% { transform: translateY(0); opacity: 0; } 15% { opacity: .9; }
+  100% { transform: translateY(-46px); opacity: 0; }
+}
+
+/* ---- каналы от ячеек к механизму (layout.links) ---- */
+.mfx-links { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.mfx-link { fill: none; stroke: rgba(240,160,48,.3); stroke-width: 2; stroke-dasharray: 5 6; }
+.mfx-link.mfx-lit {
+  stroke: #ffd27a; stroke-width: 3; filter: drop-shadow(0 0 4px rgba(255,200,90,.9));
+  animation: mfx-link-flow .45s linear infinite;
+}
+@keyframes mfx-link-flow { to { stroke-dashoffset: -22; } }
+
+/* ---- прогресс кольцом вокруг результата (layout.progress = "ring") ---- */
+.mfx-ring > svg { position: absolute; inset: 0; overflow: visible; }
+.mfx-ring-base { fill: none; stroke: rgba(240,160,48,.22); stroke-width: 3; }
+.mfx-ring-fill {
+  fill: none; stroke: #ffc861; stroke-width: 4; stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(255,200,90,.8)); opacity: 0; transition: opacity .25s;
+}
+.mfx-art.mfx-active .mfx-ring-fill { opacity: 1; }
+.mfx-running.mfx-ring { animation: mfx-ring-breathe 1.8s ease-in-out infinite; }
+@keyframes mfx-ring-breathe { 0%, 100% { filter: none; } 50% { filter: drop-shadow(0 0 8px rgba(255,200,90,.7)); } }
+.mfx-ring-hit { animation: mfx-ring-hit .5s ease-out; }
+@keyframes mfx-ring-hit {
+  0%, 100% { transform: none; filter: none; }
+  35% { transform: scale(1.1); filter: brightness(1.6) drop-shadow(0 0 10px rgba(255,210,120,.95)); }
+}
+
+/* ---- сбор ингредиентов (mechFxGather) и ударная волна ---- */
+.mfx-fly {
+  position: absolute; display: flex; align-items: center; justify-content: center;
+  filter: drop-shadow(0 0 6px rgba(255,190,80,.8)); will-change: transform; pointer-events: none;
+}
+.mfx-shock {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  border: 2px solid rgba(255,222,160,.85); box-shadow: 0 0 18px 4px rgba(255,190,90,.45), inset 0 0 14px rgba(255,210,130,.4);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .mfx-art.mfx-running, [class*="mfx-hit-"] { animation: none !important; }
+  .mfx-art.mfx-running, [class*="mfx-hit-"], .mfx-ring-hit, .mfx-tank-wave, .mfx-tank-bubble, .mfx-link.mfx-lit { animation: none !important; }
 }
 `;
   document.head.appendChild(style);
@@ -404,4 +498,320 @@ function mechFxFrames(cfg, k, count, reach, duration) {
       { transform: `translate(${(Math.cos(angle) * dist).toFixed(1)}px, ${(Math.sin(angle) * dist).toFixed(1)}px)${rot} scale(.3)`, opacity: 0 },
     ],
   };
+}
+
+// ---- свободная расстановка слотов (appearance.layout) ----
+// layout = {cells: [{x, y, shape?, size?}] (по одной на ячейку сетки, построчно - индекс
+// тот же, что у узора), output: {x, y, shape?, size?}, progress: {x, y, angle?} | "ring",
+// links?: bool}. Движок про расстановку не знает: это только вид той же сетки width×height.
+
+function mechFxSlotBox(item, base) {
+  const shape = item && MECH_FX_SLOTS[item.shape] ? item.shape : "square";
+  const size = item && typeof item.size === "number" ? item.size : base;
+  return { shape, w: Math.round(size * MECH_FX_SLOTS[shape].w), h: Math.round(size * MECH_FX_SLOTS[shape].h) };
+}
+
+// Геометрия расстановки в координатах холста: центры и коробки ячеек, результата и
+// прогресса + bounds - занятая область с полями (ровно она и есть сцена в игре).
+// count - число ячеек сетки механизма (width×height); недостающие в layout ячейки
+// (сетку увеличили, а расстановку не обновили) встают в угол, а не роняют сцену.
+function mechFxLayoutGeometry(layout, count) {
+  const cells = [];
+  for (let i = 0; i < count; i++) {
+    const c = (layout.cells || [])[i] || { x: MECH_FX_CELL_SIZE / 2, y: MECH_FX_CELL_SIZE / 2 };
+    cells.push({ x: c.x, y: c.y, ...mechFxSlotBox(c, MECH_FX_CELL_SIZE) });
+  }
+  const o = layout.output || { x: MECH_FX_LAYOUT_W / 2, y: MECH_FX_LAYOUT_H / 2 };
+  const output = { x: o.x, y: o.y, ...mechFxSlotBox(o, MECH_FX_OUTPUT_SIZE) };
+  let progress;
+  if (layout.progress === "ring") {
+    progress = { ring: true, x: output.x, y: output.y, angle: 0, d: Math.max(output.w, output.h) + 22 };
+  } else {
+    const p = layout.progress && typeof layout.progress === "object" ? layout.progress : null;
+    const cx = cells.length ? cells.reduce((s, c) => s + c.x, 0) / cells.length : output.x;
+    const cy = cells.length ? cells.reduce((s, c) => s + c.y, 0) / cells.length : output.y;
+    progress = {
+      ring: false,
+      x: p ? p.x : (cx + output.x) / 2,
+      y: p ? p.y : (cy + output.y) / 2,
+      angle: p && typeof p.angle === "number" ? p.angle : 0,
+    };
+  }
+  const boxes = [...cells, output].map(b => [b.x - b.w / 2, b.y - b.h / 2, b.x + b.w / 2, b.y + b.h / 2]);
+  const half = progress.ring ? progress.d / 2 : MECH_FX_PROGRESS_BOX / 2;
+  boxes.push([progress.x - half, progress.y - half, progress.x + half, progress.y + half]);
+  const left = Math.min(...boxes.map(b => b[0])) - MECH_FX_LAYOUT_PAD;
+  const top = Math.min(...boxes.map(b => b[1])) - MECH_FX_LAYOUT_PAD;
+  const right = Math.max(...boxes.map(b => b[2])) + MECH_FX_LAYOUT_PAD;
+  const bottom = Math.max(...boxes.map(b => b[3])) + MECH_FX_LAYOUT_PAD;
+  return {
+    cells, output, progress, links: !!layout.links,
+    bounds: { left, top, width: Math.round(right - left), height: Math.round(bottom - top) },
+  };
+}
+
+// Коробка элемента (центр x/y, размер w/h) в координатах сцены со сдвигом ox/oy и
+// масштабом k - для style.left/top/width/height.
+function mechFxPlace(node, item, ox = 0, oy = 0, k = 1) {
+  node.style.left = `${Math.round((item.x - item.w / 2 - ox) * k)}px`;
+  node.style.top = `${Math.round((item.y - item.h / 2 - oy) * k)}px`;
+  node.style.width = `${Math.round(item.w * k)}px`;
+  node.style.height = `${Math.round(item.h * k)}px`;
+}
+
+// Каналы: линии от каждой ячейки к механизму (прогресс-бар; если прогресс - кольцо,
+// то сразу к результату) и от прогресс-бара к результату. data-cell - индекс ячейки,
+// по нему mechFxGather подсвечивает канал летящего ингредиента.
+function mechFxLinksSvg(geo, ox = 0, oy = 0, k = 1) {
+  mechFxInjectStyles();
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "mfx-links");
+  svg.setAttribute("width", Math.round(geo.bounds.width * k));
+  svg.setAttribute("height", Math.round(geo.bounds.height * k));
+  const hub = geo.progress.ring ? geo.output : geo.progress;
+  const line = (a, b, tag) => {
+    const l = document.createElementNS(ns, "line");
+    l.setAttribute("class", "mfx-link");
+    l.setAttribute("x1", ((a.x - ox) * k).toFixed(1));
+    l.setAttribute("y1", ((a.y - oy) * k).toFixed(1));
+    l.setAttribute("x2", ((b.x - ox) * k).toFixed(1));
+    l.setAttribute("y2", ((b.y - oy) * k).toFixed(1));
+    if (k < 1) l.style.strokeWidth = "1.5";
+    l.dataset.cell = tag;
+    svg.appendChild(l);
+  };
+  geo.cells.forEach((c, i) => line(c, hub, String(i)));
+  if (!geo.progress.ring) line(geo.progress, geo.output, "out");
+  return svg;
+}
+
+function mechFxLightLink(svg, tag, ms) {
+  const link = svg && svg.querySelector(`.mfx-link[data-cell="${tag}"]`);
+  if (!link) return;
+  link.classList.add("mfx-lit");
+  clearTimeout(link._mfxTimer);
+  link._mfxTimer = setTimeout(() => link.classList.remove("mfx-lit"), ms);
+}
+
+// Главный цвет пиксельной иконки - самый частый не тёмный цвет палитры (жидкость
+// в баке красится предметом, который в нём лежит).
+function mechFxIconMainColor(icon) {
+  if (!icon || !icon.grid) return null;
+  const counts = {};
+  icon.grid.forEach(row => { for (const ch of row) if (ch !== ".") counts[ch] = (counts[ch] || 0) + 1; });
+  let best = null, bestCount = -1, fallback = null;
+  Object.entries(counts).forEach(([ch, n]) => {
+    const color = icon.palette[ch];
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color || ""));
+    if (!m) return;
+    fallback = fallback || color;
+    const hex = m[1].length === 3 ? m[1].split("").map(c => c + c).join("") : m[1];
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
+    if (0.299 * r + 0.587 * g + 0.114 * b < 60) return;
+    if (n > bestCount) { best = color; bestCount = n; }
+  });
+  return best || fallback;
+}
+
+// Смешать #rrggbb (или #rgb) с белым (t > 0) или чёрным (t < 0).
+function mechFxShade(hex, t) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return hex;
+  const full = m[1].length === 3 ? m[1].split("").map(c => c + c).join("") : m[1];
+  const mix = (v) => Math.round(t >= 0 ? v + (255 - v) * t : v * (1 + t));
+  const [r, g, b] = [0, 2, 4].map(i => mix(parseInt(full.slice(i, i + 2), 16)));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// Моделька слота поверх обычной ячейки страницы: класс формы + детали. Вызывать
+// ДО того, как страница положит в слот иконку предмета, - детали рисуются под ней.
+// opts: {color - цвет жидкости бака, level - 0..1 насколько он полон, mini - слот
+// в миниатюре справочника (без пузырьков и делений)}.
+function mechFxDecorateSlot(node, shape, opts = {}) {
+  mechFxInjectStyles();
+  shape = MECH_FX_SLOTS[shape] ? shape : "square";
+  node.classList.add("mfx-slot", `mfx-slot-${shape}`);
+  if (opts.mini) node.classList.add("mfx-slot-mini");
+  const deco = (cls) => {
+    const d = document.createElement("div");
+    d.className = `mfx-deco ${cls}`;
+    node.appendChild(d);
+    return d;
+  };
+  if (shape === "round") deco("mfx-rim");
+  if (shape !== "tank") return;
+  const inner = deco("mfx-tank-inner");
+  const level = Math.max(0, Math.min(1, opts.level || 0));
+  if (opts.color && level > 0) {
+    const liquid = document.createElement("div");
+    liquid.className = "mfx-deco mfx-tank-liquid";
+    liquid.style.height = `${Math.round(level * 100)}%`;
+    liquid.style.background = `linear-gradient(${mechFxShade(opts.color, 0.18)}, ${mechFxShade(opts.color, -0.35)})`;
+    liquid.style.opacity = "0.82";
+    const wave = document.createElement("div");
+    wave.className = "mfx-tank-wave";
+    wave.style.background = mechFxShade(opts.color, 0.45);
+    liquid.appendChild(wave);
+    if (!opts.mini) {
+      [[22, 0], [55, 0.9], [74, 1.7]].forEach(([left, delay]) => {
+        const b = document.createElement("div");
+        b.className = "mfx-tank-bubble";
+        b.style.left = `${left}%`;
+        b.style.animationDelay = `${delay}s`;
+        liquid.appendChild(b);
+      });
+    }
+    inner.appendChild(liquid);
+  }
+  deco("mfx-tank-glass");
+  if (!opts.mini) deco("mfx-tank-ticks");
+  deco("mfx-tank-cap top");
+  deco("mfx-tank-cap bottom");
+}
+
+// Прогресс кольцом вокруг результата: тусклое кольцо + яркая дуга, которая
+// дорастает по часовой стрелке от верхней точки. Возвращает {art, setFill(from, to)}.
+function mechFxRingProgress(diameter) {
+  mechFxInjectStyles();
+  const ns = "http://www.w3.org/2000/svg";
+  const art = document.createElement("div");
+  art.className = "mfx-art mfx-ring";
+  art.style.width = `${diameter}px`;
+  art.style.height = `${diameter}px`;
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${diameter} ${diameter}`);
+  svg.setAttribute("width", diameter);
+  svg.setAttribute("height", diameter);
+  const c = diameter / 2, r = c - 3, len = 2 * Math.PI * r;
+  const circle = (cls) => {
+    const node = document.createElementNS(ns, "circle");
+    node.setAttribute("class", cls);
+    node.setAttribute("cx", c);
+    node.setAttribute("cy", c);
+    node.setAttribute("r", r);
+    svg.appendChild(node);
+    return node;
+  };
+  circle("mfx-ring-base");
+  const fill = circle("mfx-ring-fill");
+  fill.setAttribute("transform", `rotate(-90 ${c} ${c})`);
+  fill.style.strokeDasharray = `${len}`;
+  fill.style.strokeDashoffset = `${len}`;
+  art.appendChild(svg);
+  const offset = (ratio) => `${(len * (1 - Math.max(0, Math.min(1, ratio)))).toFixed(1)}`;
+  const setFill = (from, to) => {
+    fill.style.transition = "none";
+    fill.style.strokeDashoffset = offset(from);
+    if (from === to || mechFxReducedMotion()) { fill.style.strokeDashoffset = offset(to); return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.transition = "stroke-dashoffset .45s ease-out, opacity .25s";
+      fill.style.strokeDashoffset = offset(to);
+    }));
+  };
+  return { art, setFill };
+}
+
+// ---- сбор ингредиентов в механизм (appearance.gather) ----
+
+// Кадры полёта одного ингредиента: dx/dy - от центра его ячейки до цели, k - его
+// номер из n (у «воронки» и «дуги» летят по очереди), into - исчезает внутри
+// (долгий крафт: ингредиенты уходят в прогресс-бар, результата ещё нет).
+function mechFxGatherPlan(style, dx, dy, k, n, into) {
+  if (style === "vortex") {
+    const step = n > 1 ? Math.min(120, 900 / (n - 1)) : 0;
+    const r0 = Math.hypot(dx, dy) || 1;
+    const a0 = Math.atan2(-dy, -dx);
+    const steps = 14, keyframes = [];
+    for (let i = 0; i <= steps; i++) {
+      const p = i / steps;
+      if (p <= 0.15) {
+        keyframes.push({ transform: `translate(0px, 0px) rotate(0deg) scale(${(1 + p * 1.2).toFixed(3)})`, opacity: 1, offset: p });
+        continue;
+      }
+      const q = (p - 0.15) / 0.85;
+      const radius = r0 * Math.pow(1 - q, 1.35);
+      const angle = a0 + q * Math.PI * 1.5;
+      const x = dx + radius * Math.cos(angle), y = dy + radius * Math.sin(angle);
+      const scale = 1.18 + ((into ? 0.1 : 0.3) - 1.18) * q;
+      keyframes.push({
+        transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${(q * 300).toFixed(0)}deg) scale(${scale.toFixed(3)})`,
+        opacity: i === steps ? (into ? 0 : 0.85) : 1, offset: p,
+      });
+    }
+    return { delay: k * step, duration: 760, easing: "cubic-bezier(.45,0,.85,.75)", keyframes };
+  }
+  if (style === "arc") {
+    const step = n > 1 ? Math.min(80, 600 / (n - 1)) : 0;
+    const h = -(50 + 0.25 * Math.hypot(dx, dy));
+    const steps = 12, keyframes = [];
+    for (let i = 0; i <= steps; i++) {
+      const p = i / steps;
+      const x = dx * p, y = dy * p + h * 4 * p * (1 - p);
+      const scale = 1 + ((into ? 0.2 : 0.5) - 1) * p;
+      keyframes.push({
+        transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${(220 * p).toFixed(0)}deg) scale(${scale.toFixed(3)})`,
+        opacity: i === steps ? (into ? 0 : 0.9) : 1,
+      });
+    }
+    return { delay: k * step, duration: 560, easing: "cubic-bezier(.35,0,.65,1)", keyframes };
+  }
+  // dash: короткий замах назад и ускорение к цели (все разом, с лёгким разбросом).
+  return {
+    delay: Math.min(k * 16, 90), duration: MECH_FX_DASH_MS, easing: "linear",
+    keyframes: [
+      { transform: "translate(0px, 0px) scale(1)", opacity: 1, easing: "ease-out" },
+      { transform: `translate(${-dx * 0.06}px, ${-dy * 0.06 - 4}px) scale(1.12)`, opacity: 1, offset: 0.22, easing: "cubic-bezier(.7,0,1,.6)" },
+      { transform: `translate(${dx}px, ${dy}px) scale(${into ? 0.15 : 0.35})`, opacity: into ? 0 : 0.9 },
+    ],
+  };
+}
+
+// Ударная волна из точки (x, y) экрана - кольцо до радиуса radius.
+function mechFxShockwave(layer, x, y, radius) {
+  if (mechFxReducedMotion()) return;
+  mechFxInjectStyles();
+  layer = layer || mechFxLayer();
+  const ring = document.createElement("div");
+  ring.className = "mfx-shock";
+  ring.style.cssText += `left:${x - radius}px; top:${y - radius}px; width:${radius * 2}px; height:${radius * 2}px;`;
+  layer.appendChild(ring);
+  const anim = ring.animate([
+    { transform: "scale(.12)", opacity: 0.95 },
+    { transform: "scale(1)", opacity: 0 },
+  ], { duration: 650, easing: "cubic-bezier(.2,.7,.3,1)", fill: "forwards" });
+  anim.onfinish = () => ring.remove();
+}
+
+// Ингредиенты из ячеек улетают в цель (target - DOMRect результата или прогресс-бара).
+// origins: [{rect, index?, make(size) -> узел иконки}]; opts: {into, layer, links -
+// svg каналов (подсвечивается канал летящего), shockRadius}. Возвращает, через
+// сколько мс долетит последний: эффект результата страница играет по прилёту.
+function mechFxGather(origins, target, style, opts = {}) {
+  if (mechFxReducedMotion() || !origins.length) return 0;
+  mechFxInjectStyles();
+  style = MECH_FX_GATHERS[style] ? style : "dash";
+  const layer = opts.layer || mechFxLayer();
+  const tx = target.left + target.width / 2, ty = target.top + target.height / 2;
+  let arrive = 0;
+  origins.forEach((o, k) => {
+    const r = o.rect;
+    const fly = document.createElement("div");
+    fly.className = "mfx-fly";
+    fly.style.cssText += `left:${r.left}px; top:${r.top}px; width:${r.width}px; height:${r.height}px;`;
+    const icon = o.make ? o.make(Math.round(Math.min(r.width, r.height))) : null;
+    if (icon) fly.appendChild(icon);
+    layer.appendChild(fly);
+    const plan = mechFxGatherPlan(style, tx - (r.left + r.width / 2), ty - (r.top + r.height / 2), k, origins.length, !!opts.into);
+    arrive = Math.max(arrive, plan.delay + plan.duration);
+    if (opts.links && o.index != null) {
+      setTimeout(() => mechFxLightLink(opts.links, String(o.index), plan.duration + 150), plan.delay);
+    }
+    const anim = fly.animate(plan.keyframes, { duration: plan.duration, delay: plan.delay, easing: plan.easing, fill: "both" });
+    anim.onfinish = () => fly.remove();
+    anim.oncancel = () => fly.remove();
+  });
+  if (opts.links) setTimeout(() => mechFxLightLink(opts.links, "out", 500), Math.max(0, arrive - 250));
+  if (style === "vortex" && !opts.into) setTimeout(() => mechFxShockwave(layer, tx, ty, opts.shockRadius || 160), arrive);
+  return arrive;
 }

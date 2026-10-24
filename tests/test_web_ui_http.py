@@ -1632,8 +1632,9 @@ class WebUiHttpTests(unittest.TestCase):
         # Не оформлен - всё пусто, прогресс заливается слева направо (как стрелка).
         self.assertEqual(entry["appearance"], {
             "texture": None, "texture_dim": None, "progress_icon": None, "progress_fill": "right",
-            "motion": None, "particles": None,
+            "motion": None, "particles": None, "layout": None, "gather": None,
         })
+        self.assertFalse(entry["fixed"])
         icon = {"grid": ["A"], "palette": {"A": "#ffffff"}}
         web_ui.LOCATIONS["grid_loc"]["appearance"] = {
             "texture": icon, "progress_icon": icon, "progress_fill": "up",
@@ -1672,10 +1673,66 @@ class WebUiHttpTests(unittest.TestCase):
         finally:
             del web_ui.LOCATIONS["grid_loc"]["appearance"]
 
+    def test_free_layout_reaches_modal_and_sources(self):
+        # Свободная расстановка слотов - и в модалку механизма (crafting_view), и в
+        # карточку рецепта справочника: узор там рисуется в той же расстановке.
+        layout = {
+            "cells": [{"x": 60, "y": 60}, {"x": 140, "y": 60}, {"x": 60, "y": 140}, {"x": 140, "y": 140, "shape": "tank"}],
+            "output": {"x": 300, "y": 100}, "progress": "ring",
+        }
+        web_ui.LOCATIONS["grid_loc"]["appearance"] = {"layout": layout, "gather": "vortex"}
+        web_ui.LOCATIONS["grid_loc"]["crafting"]["fixed"] = True
+        try:
+            status, state = self._get("/api/state")
+            entry = next(c for c in state["crafting"] if c["location_id"] == "grid_loc")
+            self.assertEqual(entry["appearance"]["layout"], layout)
+            self.assertEqual(entry["appearance"]["gather"], "vortex")
+            self.assertTrue(entry["fixed"])
+            status, resp = self._post("/api/sources", {"resource_id": "grid_output"})
+            grid_src = next(s for s in resp["sources"] if s.get("action_id") == "grid_line")
+            self.assertEqual(grid_src["layout"], layout)
+        finally:
+            del web_ui.LOCATIONS["grid_loc"]["appearance"]
+            del web_ui.LOCATIONS["grid_loc"]["crafting"]["fixed"]
+
     def test_mechanism_fx_js_is_served(self):
         status, body = self._get_raw("/mechanism_fx.js")
         self.assertEqual(status, 200)
         self.assertIn(b"MECH_FX_MOTIONS", body)
+
+    def test_quest_fx_js_is_served(self):
+        # Граф квестбука - общий с редактором файл (tools/quest_fx.js).
+        status, body = self._get_raw("/quest_fx.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"QUEST_FX_STYLES", body)
+
+    def test_quests_view_conditions_and_node_look(self):
+        # Условие квеста - текст + числа для полосок (web_ui.py: _condition_progress);
+        # оформление узла и pos из редактора отдаются как есть, style по умолчанию - normal.
+        look = {"accent": "#e0524a", "style": "milestone", "ribbon": "Босс", "pos": {"x": 40, "y": 80}}
+        web_ui.QUESTS["test_quest"].update(look)
+        try:
+            status, state = self._get("/api/state")
+            quests = {q["id"]: q for q in state["quests"]}
+            q = quests["test_quest"]
+            self.assertEqual(q["conditions"], [{"text": "Построек всего", "current": 0, "target": 1}])
+            self.assertEqual({k: q[k] for k in look}, look)
+            self.assertEqual(quests["quest_scholar"]["style"], "normal")
+            self.assertEqual(quests["quest_scholar"]["conditions"][0]["target"], 2)
+            # «да/нет» - 0 или 1 из 1; «все технологии» - сколько изучено из скольких.
+            self.assertEqual(quests["quest_knows_tech1"]["conditions"][0]["target"], 1)
+            self.assertEqual(quests["quest_knows_tech1"]["conditions"][0]["current"], 0)
+            self.assertEqual(quests["quest_all_done"]["conditions"][0]["target"], len(web_ui.TECHS))
+            self.assertEqual(quests["quest_turn100"]["conditions"][0], {"text": "Дожить до хода 100", "current": 1, "target": 100})
+            # Убийство моба - «да/нет» с именем моба.
+            kill = {"type": "mob_killed", "mob": "test_mob"}
+            name = web_ui.MOBS["test_mob"]["name"]
+            self.assertEqual(web_ui._condition_progress(kill, web_ui.STATE), {"text": f"Убить «{name}»", "current": 0, "target": 1})
+            web_ui.STATE.mobs_killed.add("test_mob")
+            self.assertEqual(web_ui._condition_progress(kill, web_ui.STATE)["current"], 1)
+        finally:
+            for key in look:
+                web_ui.QUESTS["test_quest"].pop(key, None)
 
     def test_hunt_attack_qte_flag_from_request_body(self):
         # {"qte": true} в теле /api/action - бонус к урону combat.qte_damage_bonus.

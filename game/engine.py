@@ -3517,8 +3517,29 @@ def parse_grid_recipe_key(key: str) -> tuple[str, str]:
     return "manual_action", key
 
 
-def _shape_matches(pattern: dict, mirror: bool, normalized: tuple) -> bool:
-    shape = _pattern_shape(pattern)
+def _pattern_grid(pattern: dict) -> tuple[tuple[str | None, ...], ...]:
+    """Узор целиком, без обрезки краёв - для механизма с crafting.fixed (узор
+    привязан к ячейкам, см. location_fixed). Копия tools/content_validation.py:
+    pattern_grid (держать в паре)."""
+    key = pattern.get("key") or {}
+    grid = tuple(
+        tuple(None if ch == "." else key.get(ch) for ch in row)
+        for row in pattern.get("rows") or []
+    )
+    return grid if any(c is not None for row in grid for c in row) else ()
+
+
+def location_fixed(location_id) -> bool:
+    """crafting.fixed - узор привязан к ячейкам механизма: раскладка сравнивается
+    с узором целиком, без обрезки пустых краёв (рецепт в левой ячейке не ловится
+    в правой). Нужен, когда у ячеек свой смысл - свободная расстановка
+    appearance.layout, где одна ячейка, скажем, бак для жидкости."""
+    crafting = location_crafting(location_id)
+    return bool(crafting and crafting.get("fixed"))
+
+
+def _shape_matches(pattern: dict, mirror: bool, normalized: tuple, fixed: bool = False) -> bool:
+    shape = _pattern_grid(pattern) if fixed else _pattern_shape(pattern)
     if shape == normalized:
         return True
     return mirror and tuple(tuple(reversed(row)) for row in shape) == normalized
@@ -3578,7 +3599,8 @@ def match_grid_target(state: GameState, location_id: str, placed: list) -> tuple
     ОТКРЫТОГО рецепта этой локации (иначе игрок мог бы собрать рецепт технологии,
     которую ещё не исследовал). Матчит только рецепты ЭТОЙ локации - сетка
     соседнего механизма своих рецептов сюда не приносит. Учитывает pattern_mirror -
-    зеркальный по горизонтали узор тоже засчитывается.
+    зеркальный по горизонтали узор тоже засчитывается. У механизма с crafting.fixed
+    (location_fixed) узор не сдвигается: раскладка сравнивается с ним целиком.
 
     Сборщик (location_stacks): ячейка - стопка {"id", "amount"}, форма не важна,
     набор стопок обязан РОВНО совпасть с ценой рецепта из контента (у постройки -
@@ -3600,17 +3622,25 @@ def match_grid_target(state: GameState, location_id: str, placed: list) -> tuple
         return None
     if any(cell is not None and not isinstance(cell, str) for cell in placed):
         return None
-    normalized = _normalize_grid(placed, crafting["width"], crafting["height"])
-    if not normalized:
-        return None
+    width, height = crafting["width"], crafting["height"]
+    # crafting.fixed: раскладка целиком, без сдвига (location_fixed).
+    fixed = bool(crafting.get("fixed"))
+    if fixed:
+        normalized = tuple(tuple(placed[y * width + x] for x in range(width)) for y in range(height))
+        if all(cell is None for cell in placed):
+            return None
+    else:
+        normalized = _normalize_grid(placed, width, height)
+        if not normalized:
+            return None
     for action_id in grid_actions_at(location_id, state):
-        if _shape_matches(action_pattern(action_id), bool(MANUAL_ACTIONS[action_id].get("pattern_mirror")), normalized):
+        if _shape_matches(action_pattern(action_id), bool(MANUAL_ACTIONS[action_id].get("pattern_mirror")), normalized, fixed):
             return "manual_action", action_id
     for recipe_id in grid_energy_recipes_at(location_id, state):
-        if _shape_matches(energy_recipe_pattern(recipe_id), bool(ENERGY_RECIPES[recipe_id].get("pattern_mirror")), normalized):
+        if _shape_matches(energy_recipe_pattern(recipe_id), bool(ENERGY_RECIPES[recipe_id].get("pattern_mirror")), normalized, fixed):
             return "energy_recipe", recipe_id
     for building_id in grid_buildings_at(location_id, state):
-        if _shape_matches(building_pattern(building_id), bool(BUILDINGS[building_id].get("pattern_mirror")), normalized):
+        if _shape_matches(building_pattern(building_id), bool(BUILDINGS[building_id].get("pattern_mirror")), normalized, fixed):
             return "building", building_id
     return None
 
@@ -4910,6 +4940,7 @@ def attack_encounter(state: GameState, move_id: str | None = None, qte_hit: bool
     level_before = skill_level(state, COMBAT_SKILL_ID)
     xp_reward = mob.get("xp_reward", 0)
     add_skill_xp(state, COMBAT_SKILL_ID, xp_reward)
+    state.mobs_killed.add(encounter["mob_id"])  # условие квеста mob_killed
     state.active_encounter = None
     message = f"Убит: {mob['name']}."
     if got_soul:
@@ -10085,6 +10116,8 @@ def _condition_met(condition: dict, state: GameState) -> bool:
         return len(state.species_discovered) >= condition["amount"]
     if kind == "species_discovered":
         return condition["species"] in state.species_discovered
+    if kind == "mob_killed":
+        return condition["mob"] in state.mobs_killed
     if kind == "manual_action_performed_at_least":
         return state.action_performed_count.get(condition["action"], 0) >= condition["amount"]
     if kind == "building_upgrade_purchased":

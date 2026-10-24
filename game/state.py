@@ -222,6 +222,10 @@ class GameState:
     # недобитая цель просто теряется (уже потраченный на призыв босса предмет не
     # возвращается) - см. game/engine.py:search_mob_any/summon_boss/attack_encounter.
     active_encounter: dict | None = None
+    # id мобов/боссов (content.json["mobs"]), которых игрок хотя бы раз добил - для
+    # условия квеста mob_killed. Только факт "было/не было", число убийств не
+    # считается (прямое пожелание). Необратимо, как species_discovered.
+    mobs_killed: set[str] = field(default_factory=set)
     # Текущее исследование "в процессе" (techs.*.research_turns > 1, см.
     # game/engine.py:research/_process_research/tech_research_turns) - ГЛОБАЛЬНО
     # одно на всю игру, как state.active_encounter/active_mine_field (НЕ как manual_jobs, где
@@ -395,6 +399,7 @@ class GameState:
             "next_reactor_instance_id": self.next_reactor_instance_id,
             "skill_xp": self.skill_xp,
             "active_encounter": self.active_encounter,
+            "mobs_killed": sorted(self.mobs_killed),
             "active_research": self.active_research,
             "soul_slots": self.soul_slots,
             "completed_quests": self.completed_quests,
@@ -487,6 +492,7 @@ class GameState:
             next_reactor_instance_id=data.get("next_reactor_instance_id", 1),
             skill_xp=dict(data.get("skill_xp", {})),
             active_encounter=dict(data["active_encounter"]) if data.get("active_encounter") else None,
+            mobs_killed=set(data.get("mobs_killed", [])),
             active_research=dict(data["active_research"]) if data.get("active_research") else None,
             soul_slots={k: list(v) for k, v in data.get("soul_slots", {}).items()},
             completed_quests=dict(data.get("completed_quests", {})),

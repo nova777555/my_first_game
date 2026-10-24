@@ -81,6 +81,10 @@ MECHANISM_FX_PATH = Path(__file__).with_name("mechanism_fx.js")
 # Сцена схватки (модалка «Охота») - общий JS с превью «Бой»/«Сцена охоты» в редакторе,
 # см. докстринг tools/hunt_fx.js.
 HUNT_FX_PATH = Path(__file__).with_name("hunt_fx.js")
+# Граф квестбука (узлы, связи, фон эры) - общий JS с вкладкой «Квесты» → «Граф» в
+# редакторе, см. докстринг tools/quest_fx.js.
+QUEST_FX_PATH = Path(__file__).with_name("quest_fx.js")
+SHARED_JS = {"/mechanism_fx.js": MECHANISM_FX_PATH, "/hunt_fx.js": HUNT_FX_PATH, "/quest_fx.js": QUEST_FX_PATH}
 # Кастомные звуки ручных действий, загруженные через content_editor.py
 # (см. manual_actions.*.sound в content.json) - живёт рядом с web_ui.py/
 # content_editor.py в tools/, не под _SAVE_ROOT (это контент, а не прогресс игрока).
@@ -1789,55 +1793,69 @@ def repair_blocked_view(state: GameState, building_id: str) -> list[dict]:
     return result
 
 
-def _condition_progress_text(condition: dict, state: GameState) -> str:
-    """Человекочитаемая строка "что сделать" + текущий прогресс для ОДНОГО
-    условия квеста (game/engine.py: _condition_met) - держать типы в паре с
-    ним и с tools/content_validation.py: CONDITION_FIELDS."""
+def _condition_progress(condition: dict, state: GameState) -> dict:
+    """ОДНО условие квеста для панели квеста и полоски на узле графа:
+    {"text", "current", "target"}. Условие «да/нет» (исследовать технологию,
+    купить улучшение) - current 0/1 из target 1. Считается так же, как
+    game/engine.py: _condition_met - держать типы в паре с ним и с
+    tools/content_validation.py: CONDITION_FIELDS."""
     kind = condition["type"]
-    amount = condition.get("amount")
+    amount = condition.get("amount", 1)
+
+    def flag(text: str, done: bool) -> dict:
+        return {"text": text, "current": 1 if done else 0, "target": 1}
+
+    def upgrade_names() -> tuple[str, str]:
+        building = BUILDINGS.get(condition["building"], {})
+        upgrade = next((u for u in building.get("upgrades", []) if u["id"] == condition["upgrade"]), {})
+        return upgrade.get("name", condition["upgrade"]), building.get("name", condition["building"])
+
     if kind == "resource_at_least":
         name = RESOURCE_NAMES.get(condition["resource"], condition["resource"])
-        current = state.resources.get(condition["resource"], 0)
-        return f"{name}: {current}/{amount}"
+        return {"text": name, "current": state.resources.get(condition["resource"], 0), "target": amount}
     if kind == "building_count_at_least":
         name = BUILDINGS.get(condition["building"], {}).get("name", condition["building"])
-        current = state.buildings.get(condition["building"], 0)
-        return f"Построить «{name}»: {current}/{amount}"
+        return {"text": f"Построено: {name}", "current": state.buildings.get(condition["building"], 0), "target": amount}
     if kind == "total_buildings_at_least":
-        current = sum(state.buildings.values())
-        return f"Построек всего: {current}/{amount}"
+        return {"text": "Построек всего", "current": sum(state.buildings.values()), "target": amount}
     if kind == "tech_researched":
         name = TECHS.get(condition["tech"], {}).get("name", condition["tech"])
-        done = condition["tech"] in state.techs
-        return f"Исследовать «{name}»" + (" (готово)" if done else "")
+        return flag(f"Исследовать «{name}»", condition["tech"] in state.techs)
     if kind == "tech_count_at_least":
-        return f"Исследовано технологий: {len(state.techs)}/{amount}"
+        return {"text": "Исследовано технологий", "current": len(state.techs), "target": amount}
     if kind == "all_techs_researched":
-        done = engine.all_techs_researched(state)
-        return "Исследовать все технологии" + (" (готово)" if done else "")
+        return {"text": "Исследовать все технологии", "current": sum(1 for t in TECHS if t in state.techs), "target": len(TECHS)}
     if kind == "turn_at_least":
-        return f"Дожить до хода {amount} (сейчас {state.turn})"
+        return {"text": f"Дожить до хода {amount}", "current": state.turn, "target": amount}
     if kind == "tool_tier_at_least":
         name = TOOLS.get(condition["tool"], {}).get("name", condition["tool"])
-        current = engine.tool_tier(state, condition["tool"])
-        return f"Тир «{name}»: {current}/{amount}"
+        return {"text": f"Тир «{name}»", "current": engine.tool_tier(state, condition["tool"]), "target": amount}
     if kind == "species_discovered_at_least":
-        return f"Открыто видов существ: {len(state.species_discovered)}/{amount}"
+        return {"text": "Открыто видов существ", "current": len(state.species_discovered), "target": amount}
     if kind == "species_discovered":
         name = RESOURCE_NAMES.get(condition["species"], condition["species"])
-        done = condition["species"] in state.species_discovered
-        return f"Вывести/поймать «{name}»" + (" (готово)" if done else "")
+        return flag(f"Вывести или поймать «{name}»", condition["species"] in state.species_discovered)
+    if kind == "mob_killed":
+        name = MOBS.get(condition["mob"], {}).get("name", condition["mob"])
+        return flag(f"Убить «{name}»", condition["mob"] in state.mobs_killed)
     if kind == "manual_action_performed_at_least":
         name = MANUAL_ACTIONS.get(condition["action"], {}).get("name", condition["action"])
-        current = state.action_performed_count.get(condition["action"], 0)
-        return f"Выполнить «{name}»: {current}/{amount}"
+        return {"text": f"Выполнить «{name}»", "current": state.action_performed_count.get(condition["action"], 0), "target": amount}
     if kind == "building_upgrade_purchased":
-        building_name = BUILDINGS.get(condition["building"], {}).get("name", condition["building"])
-        upgrade_defs = {u["id"]: u for u in BUILDINGS.get(condition["building"], {}).get("upgrades", [])}
-        upgrade_name = upgrade_defs.get(condition["upgrade"], {}).get("name", condition["upgrade"])
+        upgrade_name, building_name = upgrade_names()
         done = engine.is_building_upgrade_purchased(state, condition["building"], condition["upgrade"])
-        return f"Купить улучшение «{upgrade_name}» для «{building_name}»" + (" (готово)" if done else "")
-    return kind
+        return flag(f"Купить улучшение «{upgrade_name}» для «{building_name}»", done)
+    if kind == "storage_tier_at_least":
+        name = RESOURCE_NAMES.get(condition["resource"], condition["resource"])
+        return {"text": f"Уровень склада «{name}»", "current": state.storage_tier.get(condition["resource"], 0), "target": amount}
+    if kind == "building_upgrade_level_at_least":
+        upgrade_name, building_name = upgrade_names()
+        current = engine.building_upgrade_purchase_count(state, condition["building"], condition["upgrade"])
+        return {"text": f"Улучшение «{upgrade_name}» для «{building_name}»", "current": current, "target": amount}
+    if kind == "building_upgrade_type_purchased_any":
+        done = engine.building_upgrade_type_purchased_anywhere(state, condition["upgrade_type"])
+        return flag(f"Купить улучшение «{condition['upgrade_type']}» у любой постройки", done)
+    return flag(kind, engine._condition_met(condition, state))
 
 
 def grid_action_scale(action_id: str, state: GameState) -> int:
@@ -2005,6 +2023,9 @@ def crafting_view(state: GameState) -> list[dict]:
             # crafting.batch (сейчас - верстак); остальным его позже дадут
             # улучшения. craft_grid_view режет times до 1 сам, не доверяя клиенту.
             "batch": bool(crafting.get("batch")),
+            # Узор привязан к ячейкам (без сдвига) - клиентская копия матчинга
+            # (web_ui.html: craftGridMatchRecipe) должна сравнивать так же.
+            "fixed": engine.location_fixed(lid),
             "bank": bank,
             "recipes": recipes,
             "job": job,
@@ -2024,7 +2045,9 @@ def mechanism_appearance_view(location_id: str) -> dict:
     """Оформление модалки механизма (locations.*.appearance): фон-текстура сцены,
     пиксельный прогресс и направление его заливки, варианты движения и частиц
     (id - tools/mechanism_fx.js). Пустые поля - как раньше: без фона, стрелка,
-    стандартные искры. Звук сюда не входит - его подставляет сервер в лог хода
+    стандартные искры. layout - свободная расстановка слотов (None - обычная сетка
+    -> стрелка -> результат), gather - как ингредиенты улетают в механизм (None -
+    рывком). Звук сюда не входит - его подставляет сервер в лог хода
     (mechanism_sound_url), как и звук рецепта."""
     look = (LOCATIONS.get(location_id) or {}).get("appearance") or {}
     return {
@@ -2034,7 +2057,20 @@ def mechanism_appearance_view(location_id: str) -> dict:
         "progress_fill": look.get("progress_fill") or "right",
         "motion": look.get("motion"),
         "particles": look.get("particles"),
+        "layout": mechanism_layout(location_id),
+        "gather": look.get("gather"),
     }
+
+
+def mechanism_layout(location_id) -> dict | None:
+    """Свободная расстановка слотов механизма (locations.*.appearance.layout, см.
+    tools/mechanism_fx.js: mechFxLayoutGeometry) - её же рисует карточка рецепта
+    справочника, чтобы узор выглядел так же, как в модалке. Только при крафт-сетке:
+    без неё расстановку просто не к чему применять."""
+    loc = LOCATIONS.get(location_id) or {}
+    if not loc.get("crafting"):
+        return None
+    return (loc.get("appearance") or {}).get("layout")
 
 
 def mechanism_sound_url(location_id) -> str | None:
@@ -2358,6 +2394,7 @@ def resource_sources(resource_id: str) -> list[dict]:
                 "location_name": LOCATIONS[engine.CONVERTER_LOCATION_ID]["name"],
                 "pattern": pattern,
                 "pattern_mirror": bool(recipe.get("pattern_mirror")),
+                "layout": mechanism_layout(engine.CONVERTER_LOCATION_ID),
             })
         sources.append(entry)
 
@@ -2477,6 +2514,7 @@ def _grid_source_place(location_id) -> dict:
         "stacks": engine.location_stacks(location_id),
         "grid_width": crafting.get("width"),
         "grid_height": crafting.get("height"),
+        "layout": mechanism_layout(location_id),
     }
 
 
@@ -2900,12 +2938,15 @@ def build_view(state: GameState) -> dict:
                 "name": q["name"],
                 "description": q["description"],
                 "era": q["era"],
+                # Оформление узла графа (tools/quest_fx.js: questFxNode) и его место
+                # (pos из редактора; без него - авторасстановка, questFxLayout).
                 "icon": q.get("icon"),
-                "bg": q.get("bg"),
-                "border": q.get("border"),
-                "tooltip_color": q.get("tooltip_color"),
+                "accent": q.get("accent"),
+                "style": q.get("style") or "normal",
+                "ribbon": q.get("ribbon"),
+                "pos": q.get("pos"),
                 "requires": q.get("requires", []),
-                "conditions": [_condition_progress_text(c, state) for c in q.get("conditions", [])],
+                "conditions": [_condition_progress(c, state) for c in q.get("conditions", [])],
                 # Тот же принцип status, что у tech_tree ниже (researched/available/
                 # locked) - только 4 состояния вместо 3, потому что у квеста есть
                 # ещё "награда не забрана" ПОСЛЕ выполнения (claimed/completed), а у
@@ -3577,8 +3618,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path in ("/mechanism_fx.js", "/hunt_fx.js"):
-            body = (MECHANISM_FX_PATH if self.path == "/mechanism_fx.js" else HUNT_FX_PATH).read_bytes()
+        elif self.path in SHARED_JS:
+            body = SHARED_JS[self.path].read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
